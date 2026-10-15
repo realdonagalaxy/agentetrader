@@ -53,3 +53,7 @@ Ingresso solo se, nella Kill Zone: (1) c'è uno shakeout di un estremo della str
 - Cosa conta come shakeout: quanto oltre l'estremo e entro quante barre deve rientrare?
 - Cosa conta come reazione di forza (minor SOS): ampiezza minima, volume?
 - Soglia di SOT: numero minimo di spinte (libro: 3) e rapporto di accorciamento.
+
+## DECISIONI (utente)
+- Estremi della struttura = **doppi massimi / doppi minimi** (equal highs/lows). Rilevatore: `src/range_detector.py`.
+- Tolleranza, timeframe e distanza tra i due pivot: da fissare (provvisori: 0.25*ATR14, H1, 4–48 barre).
