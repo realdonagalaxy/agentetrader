@@ -46,6 +46,9 @@ class SDPParams:
     macd_slow: int = 10
     macd_signal: int = 16
     div_lookback: int = 72       # barre M5 entro cui cercare lo swing precedente per la divergenza
+    clim_bars: int = 576         # barre M5 (2 giorni) in cui cercare il climax (SC/BC) prima dello shakeout
+    clim_tol_atr: float = 0.25   # lo shakeout deve essere uguale o oltre il climax (± x ATR struttura)
+    vol_bars: int = 5            # barre M5 (finali) su cui sommare il volume per l'esaurimento
     require_bias: bool = False    # i filtri di bias si applicano a posteriori (colonne bias_entry / bias_pre_leg2)
 
 
@@ -87,7 +90,10 @@ def generate_signals(m5: pd.DataFrame, p: SDPParams = SDPParams(), stats: dict |
         vsd = np.sqrt(np.maximum(cpv2 / cw - vwap ** 2, 0))
     vbars = pd.Series(1, index=m5.index).groupby(day).cumsum().to_numpy()
     close_s = m5["close"]
-    macd = (close_s.ewm(span=p.macd_fast, adjust=False).mean() - close_s.ewm(span=p.macd_slow, adjust=False).mean()).to_numpy()
+    macd_s = close_s.ewm(span=p.macd_fast, adjust=False).mean() - close_s.ewm(span=p.macd_slow, adjust=False).mean()
+    macd = macd_s.to_numpy()
+    hist = (macd_s - macd_s.ewm(span=p.macd_signal, adjust=False).mean()).to_numpy()   # istogramma MACD (3,10,16)
+    volN = pd.Series(w).rolling(p.vol_bars, min_periods=1).sum().to_numpy()            # volume delle ultime vol_bars barre
     obs = {True: _order_blocks(o15, h15, l15, c15, A15, p),
            False: _order_blocks(-o15, -l15, -h15, -c15, A15, p)}
     bias_cache: dict = {}
@@ -186,9 +192,21 @@ def generate_signals(m5: pd.DataFrame, p: SDPParams = SDPParams(), stats: dict |
                 m_ = macd if long else -macd
                 div = bool(q >= 0 and sw_idx - lowpiv[q] <= p.div_lookback and adv[lowpiv[q]] > sw_low
                            and m_[sw_idx] > m_[lowpiv[q]])
+                h_ = hist if long else -hist
+                div_hist_swing = bool(q >= 0 and sw_idx - lowpiv[q] <= p.div_lookback and adv[lowpiv[q]] > sw_low
+                                      and h_[sw_idx] > h_[lowpiv[q]])
+                # climax (SC per i long, BC per gli short): estremo più profondo nelle ultime clim_bars, escluse le ultime 12
+                c0, c1 = max(0, sw_idx - p.clim_bars), sw_idx - 12
+                div_hist_climax = div_climax_vol = False
+                if c1 > c0:
+                    c_idx = c0 + int(np.argmin(adv[c0:c1 + 1]))
+                    near = sw_low <= adv[c_idx] + p.clim_tol_atr * A15[i15]
+                    div_hist_climax = bool(near and h_[sw_idx] > h_[c_idx])
+                    div_climax_vol = bool(div_hist_climax and volN[sw_idx] < volN[c_idx])
                 out.append({"time": pd.Timestamp(t5[j]), "side": "buy" if long else "sell", "entry": sgn * cl[j],
                             "sweep_time": pd.Timestamp(t5[sw_idx]), "vwap_ext": float(vwap_ext) if np.isfinite(z) else np.nan,
                             "vwap_bars": int(vbars[sw_idx]), "macd_div": div,
+                            "div_hist_swing": div_hist_swing, "div_hist_climax": div_hist_climax, "div_climax_vol": div_climax_vol,
                             "risk": risk, "sl": sgn * extreme, "tp": sgn * (cl[j] + p.rr * risk),
                             "bias_entry": b_entry, "bias_pre_leg2": b_leg, "want": want,
                             "tp_end": sgn * B, "tp_origin": sgn * lvl, "level": d.level, "leg1_pips": length * 1e4, "risk_pips": risk * 1e4})
@@ -263,8 +281,10 @@ def report_confluence(sig: pd.DataFrame, m5: pd.DataFrame, label: str, min_vwap_
     sig["macro"] = [macro_at(t.to_pydatetime()) for t in sig.index]
     ok = sig.vwap_bars >= min_vwap_bars
     filters = {"baseline": pd.Series(True, index=sig.index),
-               "VWAP>1": ok & (sig.vwap_ext >= 1), "VWAP>2": ok & (sig.vwap_ext >= 2),
-               "MACD div": sig.macd_div, "VWAP>2+MACD": ok & (sig.vwap_ext >= 2) & sig.macd_div}
+               "VWAP>2": ok & (sig.vwap_ext >= 2),
+               "MACD linea": sig.macd_div, "Istogr. swing": sig.div_hist_swing,
+               "Istogr. climax": sig.div_hist_climax, "Climax+volume": sig.div_climax_vol,
+               "VWAP>2+Clim+vol": ok & (sig.vwap_ext >= 2) & sig.div_climax_vol}
     for scope, smask in (("tutte le ore", pd.Series(True, index=sig.index)), ("macro", sig.macro.notna())):
         for fname, fmask in filters.items():
             x0 = sig[smask & fmask]
@@ -273,13 +293,13 @@ def report_confluence(sig: pd.DataFrame, m5: pd.DataFrame, label: str, min_vwap_
                 if tname != "rr 2":
                     x = x[((x.side == "buy") & (x.tp > x.entry)) | ((x.side == "sell") & (x.tp < x.entry))]
                 if len(x) < 30:
-                    print(f"{label} | {scope:12s} | {fname:12s} | {tname:10s} | n={len(x)} (troppo pochi)", flush=True)
+                    print(f"{label} | {scope:12s} | {fname:15s} | {tname:10s} | n={len(x)} (troppo pochi)", flush=True)
                     continue
                 t = simulate_trades(m5, x, with_trend=False)
                 e = evaluate(t)
                 a_, i_, o_ = e["all"], e["in_sample"], e["out_of_sample"]
                 se = t.R.std() / np.sqrt(len(t))
-                print(f"{label} | {scope:12s} | {fname:12s} | {tname:10s} | n={a_['n']:5.0f} win={a_['win_rate']:.3f} "
+                print(f"{label} | {scope:12s} | {fname:15s} | {tname:10s} | n={a_['n']:5.0f} win={a_['win_rate']:.3f} "
                       f"pareggio={a_['breakeven_win_rate']:.3f} exp={a_['expectancy_R']:+.3f}R (±{se:.3f}) PF={a_['profit_factor']:.2f} "
                       f"| IS {i_['expectancy_R']:+.3f} OOS {o_['expectancy_R']:+.3f}", flush=True)
 
@@ -289,11 +309,11 @@ if __name__ == "__main__":
     tf = int(sys.argv[1]) if len(sys.argv) > 1 else 15
     m5 = load_ohlc("data/EURUSD_BID_M5.csv.gz")
     if len(sys.argv) > 2 and sys.argv[2] == "report":      # riusa i segnali già generati
-        sig = pd.read_pickle(f"data/sdp_signals_v1_M{tf}.pkl")
+        sig = pd.read_pickle(f"data/sdp_signals_v2_M{tf}.pkl")
     else:
         st: dict = {}
         sig = generate_signals(m5, SDPParams(struct_tf_min=tf), st)
-        sig.to_pickle(f"data/sdp_signals_v1_M{tf}.pkl")
+        sig.to_pickle(f"data/sdp_signals_v2_M{tf}.pkl")
         print(f"STRUTTURA M{tf} - Funnel:", st, flush=True)
     mode = sys.argv[3] if len(sys.argv) > 3 else "targets"
     {"macro": report_macro, "confluence": report_confluence, "targets": report}[mode](sig, m5, f"M{tf}")
