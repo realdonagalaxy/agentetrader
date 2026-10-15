@@ -61,3 +61,27 @@ Il simulatore ora scarta i setup con TP non valido. Costi ignorati. EURUSD BID 2
 
 Lettura: win rate sempre sotto il pareggio; peggiora al crescere del R:R minimo. OOS positivo solo in sottogruppi piccoli
 (n 40–230) con IS fortemente negativo: segno che cambia = rumore. Nessuna evidenza di vantaggio.
+
+## SDP v1 + macro orarie (ingresso in Londra 9:00–11:00 o New York 14:30–17:00, ora italiana) — 15 ott 2026
+Filtro applicato all'orario del CHoCH M5 (fuso Europe/Rome con ora legale). Segnali invariati, filtri a posteriori. Costi ignorati.
+Celle esaminate: 2 timeframe × 4 gruppi orari × 4 bersagli × 2 bias = 64 → alcune apparirebbero "significative" per caso.
+
+| Struttura | Gruppo | Bersaglio | n | win | pareggio | exp | IS | OOS |
+|---|---|---|---|---|---|---|---|---|
+| M15 | tutte le ore | rr 2 | 1375 | 33,5% | 33,3% | +0,006R | +0,017 | −0,019 |
+| M15 | macro | rr 2 | 488 | 34,6% | 33,3% | +0,039R | +0,091 | −0,082 |
+| M15 | macro | fine Leg 1 | 366 | 60,7% | 57,8% | +0,050R | +0,066 | +0,012 |
+| M15 | solo Londra | rr 2 | 243 | 32,5% | 33,3% | −0,025R | +0,041 | −0,178 |
+| M15 | solo New York | rr 2 | 245 | 36,7% | 33,3% | +0,102R | +0,158 | −0,027 |
+| M15 | solo New York | fine Leg 1 | 178 | 64,0% | 58,6% | +0,093R | +0,176 | −0,099 |
+| M5 | tutte le ore | rr 2 | 2786 | 33,0% | 33,3% | −0,009R | −0,043 | +0,069 |
+| M5 | macro | rr 2 | 892 | 34,3% | 33,3% | +0,029R | −0,010 | +0,119 |
+| M5 | solo Londra | rr 2 | 441 | 32,2% | 33,3% | −0,034R | −0,055 | +0,015 |
+| M5 | solo New York | rr 1 | 451 | 51,0% | 50,0% | +0,020R | −0,022 | +0,118 |
+| M5 | solo New York | rr 2 | 451 | 36,4% | 33,3% | +0,091R | +0,019 | +0,257 |
+| M5 | solo New York | fine Leg 1 | 306 | 62,4% | 58,1% | +0,074R | +0,036 | +0,163 |
+
+Con bias pre-Leg 2 (M15, macro): n 52–68, expectancy −0,10/−0,21R. Nessun filtro bias risulta utile.
+Lettura: New York è l'unico gruppo con segno positivo in entrambi i timeframe (+0,07/+0,10R), ma errore standard ~0,06R
+(t ≈ 1,4) e IS/OOS discordanti su M15: ipotesi da confermare su dati non ancora usati, NON risultato.
+Londra: nessun effetto. Prossimo passo proposto: ipotesi fissata a priori "macro New York" da verificare su altri strumenti.
