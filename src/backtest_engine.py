@@ -75,8 +75,8 @@ def simulate_trades(df: pd.DataFrame, signals: pd.DataFrame,
         i = df.index.get_loc(t)
         entry, sl, tp, side = cl[i], sig["sl"], sig["tp"], sig["side"].lower()
         risk = abs(entry - sl)
-        if risk == 0 or (side == "buy") != (sl < entry):
-            continue
+        if risk == 0 or (side == "buy") != (sl < entry) or (side == "buy") != (tp > entry):
+            continue   # SL o TP dal lato sbagliato dell'ingresso: setup non valido
         if side == "buy":
             hit_sl, hit_tp = lo[i + 1:] <= sl, hi[i + 1:] >= tp
         else:

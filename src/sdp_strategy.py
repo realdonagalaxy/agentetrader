@@ -188,6 +188,8 @@ def report(sig: pd.DataFrame, m5: pd.DataFrame, label: str) -> None:
             for min_rr in (0.0, 1.0, 2.0, 3.0):
                 x = sg.copy()
                 x["tp"] = x[target]
+                ok_side = ((x.side == "buy") & (x.tp > x.entry)) | ((x.side == "sell") & (x.tp < x.entry))
+                x = x[ok_side]
                 x = x[(x.tp - x.entry).abs() / x.risk >= min_rr]
                 if len(x) < 20:
                     print(f"{label} | {bname:14s} | {target:9s} | R:R>={min_rr:.0f}: n={len(x)} (troppo pochi)", flush=True)
@@ -204,8 +206,11 @@ if __name__ == "__main__":
     import sys
     tf = int(sys.argv[1]) if len(sys.argv) > 1 else 15
     m5 = load_ohlc("data/EURUSD_BID_M5.csv.gz")
-    st: dict = {}
-    sig = generate_signals(m5, SDPParams(struct_tf_min=tf), st)
-    sig.to_pickle(f"data/sdp_signals_v1_M{tf}.pkl")
-    print(f"STRUTTURA M{tf} - Funnel:", st, flush=True)
+    if len(sys.argv) > 2 and sys.argv[2] == "report":      # riusa i segnali già generati
+        sig = pd.read_pickle(f"data/sdp_signals_v1_M{tf}.pkl")
+    else:
+        st: dict = {}
+        sig = generate_signals(m5, SDPParams(struct_tf_min=tf), st)
+        sig.to_pickle(f"data/sdp_signals_v1_M{tf}.pkl")
+        print(f"STRUTTURA M{tf} - Funnel:", st, flush=True)
     report(sig, m5, f"M{tf}")
