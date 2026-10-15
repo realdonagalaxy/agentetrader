@@ -5,6 +5,7 @@ from pathlib import Path
 from openpyxl import Workbook, load_workbook
 
 JOURNAL_PATH = Path("journal/trading_journal.xlsx")
+ERROR_CATEGORIES = ("Esecuzione", "Setup", "Psicologia/Rischio")
 HEADERS = ["ID", "Aperto", "Chiuso", "Simbolo", "Lato", "Entry", "SL", "TP",
            "Exit", "R", "Esito", "Setup", "Errori", "Note"]
 
@@ -35,6 +36,9 @@ def add_trade(symbol: str, side: str, entry: float, sl: float, tp: float,
 
 def close_trade(trade_id: int, exit_price: float, errors: str = "",
                 path: Path = JOURNAL_PATH) -> float:
+    """`errors`: vuoto oppure una categoria in ERROR_CATEGORIES (opz. `Categoria: dettaglio`)."""
+    if errors and errors.split(":")[0].strip() not in ERROR_CATEGORIES:
+        raise ValueError(f"Categoria errore non valida: usa una tra {ERROR_CATEGORIES}")
     wb = load_workbook(path)
     ws = wb["Trades"]
     for row in ws.iter_rows(min_row=2):
