@@ -37,7 +37,8 @@ class SDPParams:
     kz_pad: float = 0.25         # tolleranza OB "un po' fuori" (frazione lunghezza Leg 1)
     min_leg_atr: float = 1.0     # Leg 1 minima (x ATR14 M15)
     ob_disp_atr: float = 1.0     # impulso minimo dopo la candela OB (x ATR14 M15, entro 3 candele)
-    ob_lookback: int = 960       # barre M15 (10 giorni) di vita massima di un OB
+    ob_lookback_min: int = 14400 # vita massima di un OB (10 giorni, in minuti)
+    struct_tf_min: int = 15      # timeframe della struttura (doppi, ATR, OB): 15 o 5
     rr: float = 3.0
     bias_h1_bars: int = 400
     require_bias: bool = False    # i filtri di bias si applicano a posteriori (colonne bias_entry / bias_pre_leg2)
@@ -52,7 +53,7 @@ def _order_blocks(O, H, L, C, A, p: SDPParams):
     pos = i[ok]
     mit = np.full(len(pos), n + 10**9, dtype=np.int64)
     for k, ix in enumerate(pos):
-        seg = L[ix + 4: ix + 4 + p.ob_lookback]
+        seg = L[ix + 4: ix + 4 + p.ob_lookback_min // p.struct_tf_min]
         hit = seg <= H[ix]
         if hit.any():
             mit[k] = ix + 4 + int(hit.argmax())
@@ -60,9 +61,11 @@ def _order_blocks(O, H, L, C, A, p: SDPParams):
 
 
 def generate_signals(m5: pd.DataFrame, p: SDPParams = SDPParams(), stats: dict | None = None) -> pd.DataFrame:
-    m15, h1 = resample(m5, "15min"), resample(m5, "1h")
+    tf = p.struct_tf_min
+    m15 = m5 if tf == 5 else resample(m5, f"{tf}min")   # "m15" = timeframe della struttura
+    h1 = resample(m5, "1h")
     A15 = atr(m15).to_numpy()
-    dbl = double_extremes(m15, p.n_swing, p.tol, max(2, p.min_sep_min // 15), p.max_sep_min // 15)
+    dbl = double_extremes(m15, p.n_swing, p.tol, max(2, p.min_sep_min // tf), p.max_sep_min // tf)
     t5, t15 = m5.index.values, m15.index.values
     H, L, C = m5["high"].to_numpy(), m5["low"].to_numpy(), m5["close"].to_numpy()
     o15, h15, l15, c15 = (m15[c].to_numpy() for c in ("open", "high", "low", "close"))
@@ -87,7 +90,7 @@ def generate_signals(m5: pd.DataFrame, p: SDPParams = SDPParams(), stats: dict |
         adv, fav, cl = (L, H, C) if long else (-H, -L, -C)   # adv: estremo avverso (più basso = più estremo)
         piv = ph if long else pl
         lvl = d.level if long else -d.level
-        avail = np.datetime64(d.confirmed) + np.timedelta64(15, "m")
+        avail = np.datetime64(d.confirmed) + np.timedelta64(tf, "m")
         start = int(np.searchsorted(t5, avail))
         end = min(start + p.max_wait_bars, len(t5) - 1)
         k0 = next((k for k in range(start, end) if adv[k] < lvl), None)
@@ -104,7 +107,7 @@ def generate_signals(m5: pd.DataFrame, p: SDPParams = SDPParams(), stats: dict |
         kz_hi, kz_lo = lvl - (p.fib_lo - 1) * length, lvl - (p.fib_hi - 1) * length
         pad = p.kz_pad * length
         o_pos, o_lo, o_hi, o_mit = obs[long]
-        form_limit = int(np.searchsorted(t15, t5[k0].astype("datetime64[m]") - np.timedelta64(15, "m"), "right")) - 1
+        form_limit = int(np.searchsorted(t15, t5[k0].astype("datetime64[m]") - np.timedelta64(tf, "m"), "right")) - 1
         sw_low, sw_idx = adv[k0], k0
         cand = None
         touch = None
@@ -117,8 +120,8 @@ def generate_signals(m5: pd.DataFrame, p: SDPParams = SDPParams(), stats: dict |
             if cand is None:
                 if adv[j] <= kz_hi + pad:      # il prezzo è arrivato nella Kill Zone (con tolleranza)
                     bump("Kill Zone raggiunta")
-                    tpos = int(np.searchsorted(t15, t5[j] - np.timedelta64(10, "m"), "right")) - 1
-                    lo_i = int(np.searchsorted(o_pos, tpos - p.ob_lookback))
+                    tpos = int(np.searchsorted(t15, t5[j] - np.timedelta64(tf - 5, "m"), "right")) - 1
+                    lo_i = int(np.searchsorted(o_pos, tpos - p.ob_lookback_min // tf))
                     hi_i = int(np.searchsorted(o_pos, form_limit, "right"))
                     sl_ = slice(lo_i, hi_i)
                     m = (o_mit[sl_] > tpos) & (o_hi[sl_] >= kz_lo - pad) & (o_lo[sl_] <= kz_hi + pad)
@@ -178,11 +181,13 @@ def run(m5: pd.DataFrame, p: SDPParams = SDPParams(), stats: dict | None = None)
 
 
 if __name__ == "__main__":
+    import sys
+    tf = int(sys.argv[1]) if len(sys.argv) > 1 else 15
     m5 = load_ohlc("data/EURUSD_BID_M5.csv.gz")
     st: dict = {}
-    sig = generate_signals(m5, SDPParams(), st)
-    sig.to_pickle("data/sdp_signals_v1.pkl")
-    print("Funnel:", st)
+    sig = generate_signals(m5, SDPParams(struct_tf_min=tf), st)
+    sig.to_pickle(f"data/sdp_signals_v1_M{tf}.pkl")
+    print(f"STRUTTURA M{tf} - Funnel:", st)
     variants = {"nessun filtro bias": sig,
                 "bias al CHoCH": sig[sig.bias_entry == sig.want],
                 "bias prima della Leg 2": sig[sig.bias_pre_leg2 == sig.want]}
