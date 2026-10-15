@@ -39,3 +39,25 @@ Funnel struttura M5: 102.706 doppi → 90.010 → 84.171 → 26.818 OB → 17.39
 
 Lettura: nessuna evidenza di vantaggio. Win rate ≈ win rate di pareggio ovunque; IS e OOS cambiano segno tra M15 e M5
 (errore standard dei sottogruppi 0,05–0,2R): rumore. Nessuna selezione a posteriori della variante migliore.
+
+## SDP v1 — bersaglio alla fine / origine della Leg 1 (15 ott 2026) — risultati CORRETTI
+Errore trovato e corretto: TP dal lato sbagliato dell'ingresso contati come vittorie istantanee (tp_origin: 82% dei casi, tp_end: 18%).
+Il simulatore ora scarta i setup con TP non valido. Costi ignorati. EURUSD BID 2003-05 → 2025-12.
+
+| Struttura | Bias | Bersaglio | R:R min | n | win | pareggio | exp | IS | OOS |
+|---|---|---|---|---|---|---|---|---|---|
+| M15 | nessuno | fine Leg 1 | 0 | 1119 | 53,5% | 55,4% | −0,033R | −0,051 | +0,010 |
+| M15 | nessuno | fine Leg 1 | 1 | 536 | 32,5% | 35,4% | −0,082R | −0,131 | +0,031 |
+| M15 | nessuno | fine Leg 1 | 2 | 231 | 21,6% | 25,4% | −0,149R | −0,255 | +0,096 |
+| M15 | nessuno | fine Leg 1 | 3 | 115 | 12,2% | 19,1% | −0,362R | −0,527 | +0,017 |
+| M15 | nessuno | origine Leg 1 | 0 | 244 | 70,9% | 75,9% | −0,066R | −0,071 | −0,056 |
+| M5 | nessuno | fine Leg 1 | 0 | 2031 | 52,7% | 54,7% | −0,037R | −0,082 | +0,065 |
+| M5 | nessuno | fine Leg 1 | 1 | 944 | 33,4% | 34,9% | −0,044R | −0,135 | +0,167 |
+| M5 | nessuno | fine Leg 1 | 2 | 440 | 21,4% | 24,9% | −0,143R | −0,238 | +0,077 |
+| M5 | nessuno | fine Leg 1 | 3 | 221 | 14,0% | 19,0% | −0,261R | −0,378 | +0,010 |
+| M5 | pre-Leg 2 | fine Leg 1 | 2 | 64 | 21,9% | 22,1% | −0,010R | −0,251 | +0,520 |
+| M5 | pre-Leg 2 | fine Leg 1 | 3 | 40 | 15,0% | 16,3% | −0,079R | −0,305 | +0,449 |
+| M5 | nessuno | origine Leg 1 | 0 | 436 | 68,1% | 73,5% | −0,074R | −0,118 | +0,028 |
+
+Lettura: win rate sempre sotto il pareggio; peggiora al crescere del R:R minimo. OOS positivo solo in sottogruppi piccoli
+(n 40–230) con IS fortemente negativo: segno che cambia = rumore. Nessuna evidenza di vantaggio.
