@@ -2,5 +2,6 @@ config.env
 __pycache__/
 *.pyc
 .venv/
-data/*.csv
+data/**/*.csv
 journal/~$*.xlsx
+data/raw/
