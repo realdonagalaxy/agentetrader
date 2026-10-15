@@ -56,12 +56,15 @@ def simulate_trades(df: pd.DataFrame, signals: pd.DataFrame,
                     sessions: tuple[str, ...] = tuple(SESSIONS_UTC), with_trend: bool = True) -> pd.DataFrame:
     """Simula trade con SL/TP fissi.
 
-    df: OHLC con indice datetime (UTC, barre H1 consigliate).
-    signals: indice = barra di segnale; colonne `side` ('buy'/'sell'), `sl`, `tp`.
+    df: OHLC con indice datetime (UTC).
+    signals: indice = barra di segnale; colonne `side` ('buy'/'sell'), `sl`, `tp` (+ eventuali colonne extra, riportate).
     Ingresso alla chiusura della barra di segnale; SL/TP valutati dalla barra successiva.
     Se SL e TP sono toccati nella stessa barra si assume SL (ipotesi prudente).
     Trade non risolti a fine dati vengono scartati. Solo segnali nelle `sessions` indicate.
+    with_trend=True calcola il trend H4/H1 per ogni trade (lento; richiede df H1).
     """
+    hi, lo, cl = df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy()
+    extra = [c for c in signals.columns if c not in ("side", "sl", "tp")]
     rows = []
     for t, sig in signals.sort_index().iterrows():
         if t not in df.index:
@@ -70,28 +73,24 @@ def simulate_trades(df: pd.DataFrame, signals: pd.DataFrame,
         if not any(x in label.split("+") for x in sessions):
             continue
         i = df.index.get_loc(t)
-        entry, sl, tp, side = df["close"].iloc[i], sig["sl"], sig["tp"], sig["side"].lower()
+        entry, sl, tp, side = cl[i], sig["sl"], sig["tp"], sig["side"].lower()
         risk = abs(entry - sl)
         if risk == 0 or (side == "buy") != (sl < entry):
             continue
-        r = None
-        for j in range(i + 1, len(df)):
-            hi, lo = df["high"].iloc[j], df["low"].iloc[j]
-            hit_sl = lo <= sl if side == "buy" else hi >= sl
-            hit_tp = hi >= tp if side == "buy" else lo <= tp
-            if hit_sl:
-                r = -1.0
-            elif hit_tp:
-                r = abs(tp - entry) / risk
-            if r is not None:
-                break
-        if r is None:
+        if side == "buy":
+            hit_sl, hit_tp = lo[i + 1:] <= sl, hi[i + 1:] >= tp
+        else:
+            hit_sl, hit_tp = hi[i + 1:] >= sl, lo[i + 1:] <= tp
+        isl = hit_sl.argmax() if hit_sl.any() else None
+        itp = hit_tp.argmax() if hit_tp.any() else None
+        if isl is None and itp is None:
             continue
+        r = -1.0 if (itp is None or (isl is not None and isl <= itp)) else abs(tp - entry) / risk
         row = {"time": t, "side": side, "entry": entry, "sl": sl, "tp": tp, "R": r,
                "planned_RR": abs(tp - entry) / risk, "session": label}
+        row.update({k: sig[k] for k in extra})
         if with_trend:
-            hist = df.iloc[: i + 1]
-            tr = multi_tf_trend(hist)
+            tr = multi_tf_trend(df.iloc[: i + 1])
             row.update(trend_h4=tr["H4"], trend_h1=tr["H1"], countertrend=is_countertrend(side, tr["bias"]))
         rows.append(row)
     return pd.DataFrame(rows)
