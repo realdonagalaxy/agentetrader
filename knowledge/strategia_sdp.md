@@ -33,11 +33,16 @@ XAUUSD 9:00–17:00 · BTC/ETH/SOL 14:00–18:00 e 00:00–02:00.
 ## 8. Wyckoff (indici/commodities/crypto)
 PS, AC, UT, UTAD, ST, SPRING: il CHoCH M1 può essere sbilanciato da deep mitigation (UT/ST, poi UTAD/SPRING).
 
-## AMBIGUITÀ APERTE (non implementare finché non chiarite)
-1. Kill Zone: 1.272–1.168 o 1.272–1.618?
-2. Fuso orario degli orari (9:00 / 14:30): ora italiana? (sembra CET/CEST)
-3. SL: distanza esatta (dietro OB / oltre struttura) e buffer?
-4. TP: fisso a 1:3 o su OB Leg 1 / banda VWAP? Se l'OB dà meno di 1:3 si salta il trade?
-5. Bias: Session Volume Profile non è ricostruibile da OHLC; si usa solo la struttura HH/HL H4+H1?
-6. Definizione operativa di accumulo, "spinta lenta", OB non mitigato, imbalance.
-7. Asset: il doc ha AUDUSD e crypto; l'utente ha indicato EURUSD, indici, oro, argento (argento non è nel doc).
+## DECISIONI (utente)
+- Kill Zone: **1.272 – 1.618** (scritto "1.1618": interpretato come 1.618 — da riconfermare).
+- Backtest: usare **tutti gli orari delle tre sessioni** (Asia, Londra, New York); le fasce macro (Londra 9–11, NY 14:30–17) servono solo per il **journaling**, da valutare dopo i dati del backtest.
+- Costi ignorati nel backtest; focus su rischio/rendimento.
+- Trend/bias: struttura HH/HL su H4 e H1.
+- Stop Loss: sul **massimo/minimo di H1** (interpretazione da confermare: estremo della candela H1 che contiene l'estremo della Leg 2, oltre di esso).
+
+## AMBIGUITÀ ANCORA APERTE
+1. TP: fisso 1:3, oppure OB della Leg 1 / banda VWAP? Se < 1:3 si salta il trade?
+2. SL: conferma dell'interpretazione sopra (quale candela H1, buffer sì/no).
+3. Definizioni operative: accumulo, spinta lenta, OB non mitigato, imbalance (FVG 3 candele?), CHoCH M1/M5 (finestra swing).
+4. Dati M1/M5/M15 (fonte) per i simboli.
+5. Asset: doc ha AUDUSD/crypto; utente EURUSD, indici, oro, argento.
