@@ -19,6 +19,7 @@ import pandas as pd
 
 from src.backtest_engine import evaluate, simulate_trades
 from src.data_loader import load_ohlc, resample
+from src.market_config import macro_at
 from src.market_structure import multi_tf_trend
 from src.range_detector import atr, double_extremes, pivots
 
@@ -202,6 +203,32 @@ def report(sig: pd.DataFrame, m5: pd.DataFrame, label: str) -> None:
                       f"PF={a_['profit_factor']:.2f} | IS {i_['expectancy_R']:+.3f} OOS {o_['expectancy_R']:+.3f}", flush=True)
 
 
+def report_macro(sig: pd.DataFrame, m5: pd.DataFrame, label: str) -> None:
+    """Confronto senza/con filtro macro (ingresso in Londra 9–11 o New York 14:30–17, ora italiana)."""
+    sig = sig.copy()
+    sig["macro"] = [macro_at(t.to_pydatetime()) for t in sig.index]
+    groups = {"tutte le ore": sig, "macro (Londra+NY)": sig[sig.macro.notna()],
+              "solo Londra": sig[sig.macro == "Londra"], "solo New York": sig[sig.macro == "New York"]}
+    for bname, bmask in (("nessun bias", None), ("bias pre-Leg 2", "bias_pre_leg2")):
+        for gname, g in groups.items():
+            x0 = g if bmask is None else g[g[bmask] == g.want]
+            for tname in ("rr 1", "rr 2", "rr 3", "fine Leg 1"):
+                x = x0.copy()
+                if tname.startswith("rr"):
+                    x = with_rr(x, float(tname.split()[1]))
+                else:
+                    x["tp"] = x["tp_end"]
+                    x = x[((x.side == "buy") & (x.tp > x.entry)) | ((x.side == "sell") & (x.tp < x.entry))]
+                if len(x) < 30:
+                    print(f"{label} | {bname:14s} | {gname:18s} | {tname:10s} | n={len(x)} (troppo pochi)", flush=True)
+                    continue
+                e = evaluate(simulate_trades(m5, x, with_trend=False))
+                a_, i_, o_ = e["all"], e["in_sample"], e["out_of_sample"]
+                print(f"{label} | {bname:14s} | {gname:18s} | {tname:10s} | n={a_['n']:5.0f} win={a_['win_rate']:.3f} "
+                      f"pareggio={a_['breakeven_win_rate']:.3f} exp={a_['expectancy_R']:+.3f}R PF={a_['profit_factor']:.2f} "
+                      f"| IS {i_['expectancy_R']:+.3f} OOS {o_['expectancy_R']:+.3f}", flush=True)
+
+
 if __name__ == "__main__":
     import sys
     tf = int(sys.argv[1]) if len(sys.argv) > 1 else 15
@@ -213,4 +240,4 @@ if __name__ == "__main__":
         sig = generate_signals(m5, SDPParams(struct_tf_min=tf), st)
         sig.to_pickle(f"data/sdp_signals_v1_M{tf}.pkl")
         print(f"STRUTTURA M{tf} - Funnel:", st, flush=True)
-    report(sig, m5, f"M{tf}")
+    report_macro(sig, m5, f"M{tf}") if (len(sys.argv) > 3 and sys.argv[3] == "macro") else report(sig, m5, f"M{tf}")

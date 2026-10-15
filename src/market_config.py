@@ -29,3 +29,22 @@ def sessions_at(ts: datetime) -> list[str]:
 
 def session_label(ts: datetime) -> str:
     return "+".join(sessions_at(ts)) or "Off-hours"
+
+
+# --- Macro di alta liquidità (Strategia SDP): orari in ora italiana, ora legale inclusa ---
+from zoneinfo import ZoneInfo  # noqa: E402
+
+MACRO_TZ = ZoneInfo("Europe/Rome")
+MACROS_LOCAL = {"Londra": ((9, 0), (11, 0)), "New York": ((14, 30), (17, 0))}  # (inizio, fine) h:m locali, fine esclusa
+
+
+def macro_at(ts: datetime) -> str | None:
+    """Nome della macro attiva all'istante `ts` (naive = UTC), oppure None."""
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    loc = ts.astimezone(MACRO_TZ)
+    m = loc.hour * 60 + loc.minute
+    for name, ((h0, m0), (h1, m1)) in MACROS_LOCAL.items():
+        if h0 * 60 + m0 <= m < h1 * 60 + m1:
+            return name
+    return None
