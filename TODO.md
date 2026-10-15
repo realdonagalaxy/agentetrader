@@ -1,6 +1,6 @@
 # TODO
 
-- [ ] **Costi realistici nel backtest** (`src/backtest_engine.py`): servono
+- [ ] **Costi realistici nel backtest** (RIMANDATO: per ora il backtest li ignora) (`src/backtest_engine.py`): servono
   1. spread tipico per simbolo
   2. commissione broker (per lotto / per milione)
   3. modello di slippage (pip fissi o in funzione della volatilità)
