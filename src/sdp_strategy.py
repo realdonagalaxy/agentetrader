@@ -42,6 +42,10 @@ class SDPParams:
     struct_tf_min: int = 15      # timeframe della struttura (doppi, ATR, OB): 15 o 5
     rr: float = 3.0
     bias_h1_bars: int = 400
+    macd_fast: int = 3           # MACD (3,10,16) come da documento
+    macd_slow: int = 10
+    macd_signal: int = 16
+    div_lookback: int = 72       # barre M5 entro cui cercare lo swing precedente per la divergenza
     require_bias: bool = False    # i filtri di bias si applicano a posteriori (colonne bias_entry / bias_pre_leg2)
 
 
@@ -71,6 +75,19 @@ def generate_signals(m5: pd.DataFrame, p: SDPParams = SDPParams(), stats: dict |
     H, L, C = m5["high"].to_numpy(), m5["low"].to_numpy(), m5["close"].to_numpy()
     o15, h15, l15, c15 = (m15[c].to_numpy() for c in ("open", "high", "low", "close"))
     ph, pl = (list(x) for x in pivots(m5, p.n_swing))
+    # VWAP giornaliero (reset 00:00 UTC) con deviazione standard ponderata sul volume
+    tp_ = ((m5["high"] + m5["low"] + m5["close"]) / 3).to_numpy()
+    w = m5["volume"].to_numpy() if "volume" in m5 else np.ones(len(m5))
+    day = m5.index.normalize()
+    cw = pd.Series(w, index=m5.index).groupby(day).cumsum().to_numpy()
+    cpv = pd.Series(w * tp_, index=m5.index).groupby(day).cumsum().to_numpy()
+    cpv2 = pd.Series(w * tp_ * tp_, index=m5.index).groupby(day).cumsum().to_numpy()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        vwap = cpv / cw
+        vsd = np.sqrt(np.maximum(cpv2 / cw - vwap ** 2, 0))
+    vbars = pd.Series(1, index=m5.index).groupby(day).cumsum().to_numpy()
+    close_s = m5["close"]
+    macd = (close_s.ewm(span=p.macd_fast, adjust=False).mean() - close_s.ewm(span=p.macd_slow, adjust=False).mean()).to_numpy()
     obs = {True: _order_blocks(o15, h15, l15, c15, A15, p),
            False: _order_blocks(-o15, -l15, -h15, -c15, A15, p)}
     bias_cache: dict = {}
@@ -160,7 +177,18 @@ def generate_signals(m5: pd.DataFrame, p: SDPParams = SDPParams(), stats: dict |
                     break
                 bump("segnale")
                 sgn = 1 if long else -1
+                # confluenze calcolate al minimo/massimo dello shakeout (sw_idx)
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    z = (sgn * adv[sw_idx] - vwap[sw_idx]) / vsd[sw_idx]
+                vwap_ext = -sgn * z if np.isfinite(z) else np.nan      # >= k: oltre la k-esima banda esterna
+                lowpiv = pl if long else ph
+                q = bisect_right(lowpiv, sw_idx - p.n_swing - 1) - 1
+                m_ = macd if long else -macd
+                div = bool(q >= 0 and sw_idx - lowpiv[q] <= p.div_lookback and adv[lowpiv[q]] > sw_low
+                           and m_[sw_idx] > m_[lowpiv[q]])
                 out.append({"time": pd.Timestamp(t5[j]), "side": "buy" if long else "sell", "entry": sgn * cl[j],
+                            "sweep_time": pd.Timestamp(t5[sw_idx]), "vwap_ext": float(vwap_ext) if np.isfinite(z) else np.nan,
+                            "vwap_bars": int(vbars[sw_idx]), "macd_div": div,
                             "risk": risk, "sl": sgn * extreme, "tp": sgn * (cl[j] + p.rr * risk),
                             "bias_entry": b_entry, "bias_pre_leg2": b_leg, "want": want,
                             "tp_end": sgn * B, "tp_origin": sgn * lvl, "level": d.level, "leg1_pips": length * 1e4, "risk_pips": risk * 1e4})
@@ -229,6 +257,33 @@ def report_macro(sig: pd.DataFrame, m5: pd.DataFrame, label: str) -> None:
                       f"| IS {i_['expectancy_R']:+.3f} OOS {o_['expectancy_R']:+.3f}", flush=True)
 
 
+def report_confluence(sig: pd.DataFrame, m5: pd.DataFrame, label: str, min_vwap_bars: int = 24) -> None:
+    """Pre-specificato: baseline vs VWAP (oltre banda k) vs MACD divergenza vs entrambi; tutte le ore / macro."""
+    sig = sig.copy()
+    sig["macro"] = [macro_at(t.to_pydatetime()) for t in sig.index]
+    ok = sig.vwap_bars >= min_vwap_bars
+    filters = {"baseline": pd.Series(True, index=sig.index),
+               "VWAP>1": ok & (sig.vwap_ext >= 1), "VWAP>2": ok & (sig.vwap_ext >= 2),
+               "MACD div": sig.macd_div, "VWAP>2+MACD": ok & (sig.vwap_ext >= 2) & sig.macd_div}
+    for scope, smask in (("tutte le ore", pd.Series(True, index=sig.index)), ("macro", sig.macro.notna())):
+        for fname, fmask in filters.items():
+            x0 = sig[smask & fmask]
+            for tname in ("rr 2", "fine Leg 1"):
+                x = with_rr(x0, 2.0) if tname == "rr 2" else x0.assign(tp=x0["tp_end"])
+                if tname != "rr 2":
+                    x = x[((x.side == "buy") & (x.tp > x.entry)) | ((x.side == "sell") & (x.tp < x.entry))]
+                if len(x) < 30:
+                    print(f"{label} | {scope:12s} | {fname:12s} | {tname:10s} | n={len(x)} (troppo pochi)", flush=True)
+                    continue
+                t = simulate_trades(m5, x, with_trend=False)
+                e = evaluate(t)
+                a_, i_, o_ = e["all"], e["in_sample"], e["out_of_sample"]
+                se = t.R.std() / np.sqrt(len(t))
+                print(f"{label} | {scope:12s} | {fname:12s} | {tname:10s} | n={a_['n']:5.0f} win={a_['win_rate']:.3f} "
+                      f"pareggio={a_['breakeven_win_rate']:.3f} exp={a_['expectancy_R']:+.3f}R (±{se:.3f}) PF={a_['profit_factor']:.2f} "
+                      f"| IS {i_['expectancy_R']:+.3f} OOS {o_['expectancy_R']:+.3f}", flush=True)
+
+
 if __name__ == "__main__":
     import sys
     tf = int(sys.argv[1]) if len(sys.argv) > 1 else 15
@@ -240,4 +295,5 @@ if __name__ == "__main__":
         sig = generate_signals(m5, SDPParams(struct_tf_min=tf), st)
         sig.to_pickle(f"data/sdp_signals_v1_M{tf}.pkl")
         print(f"STRUTTURA M{tf} - Funnel:", st, flush=True)
-    report_macro(sig, m5, f"M{tf}") if (len(sys.argv) > 3 and sys.argv[3] == "macro") else report(sig, m5, f"M{tf}")
+    mode = sys.argv[3] if len(sys.argv) > 3 else "targets"
+    {"macro": report_macro, "confluence": report_confluence, "targets": report}[mode](sig, m5, f"M{tf}")
