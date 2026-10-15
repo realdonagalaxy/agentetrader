@@ -162,7 +162,7 @@ def generate_signals(m5: pd.DataFrame, p: SDPParams = SDPParams(), stats: dict |
                 out.append({"time": pd.Timestamp(t5[j]), "side": "buy" if long else "sell", "entry": sgn * cl[j],
                             "risk": risk, "sl": sgn * extreme, "tp": sgn * (cl[j] + p.rr * risk),
                             "bias_entry": b_entry, "bias_pre_leg2": b_leg, "want": want,
-                            "level": d.level, "leg1_pips": length * 1e4, "risk_pips": risk * 1e4})
+                            "tp_end": sgn * B, "tp_origin": sgn * lvl, "level": d.level, "leg1_pips": length * 1e4, "risk_pips": risk * 1e4})
                 break
     return pd.DataFrame(out).set_index("time").sort_index() if out else pd.DataFrame()
 
@@ -180,6 +180,26 @@ def run(m5: pd.DataFrame, p: SDPParams = SDPParams(), stats: dict | None = None)
     return simulate_trades(m5, sig, with_trend=False) if len(sig) else pd.DataFrame()
 
 
+def report(sig: pd.DataFrame, m5: pd.DataFrame, label: str) -> None:
+    """TP al fine Leg 1 (tp_end) e all'origine Leg 1 (tp_origin), con filtro sul rapporto R:R minimo e sul bias."""
+    bias_variants = {"nessun bias": sig, "bias pre-Leg 2": sig[sig.bias_pre_leg2 == sig.want]}
+    for bname, sg in bias_variants.items():
+        for target in ("tp_end", "tp_origin"):
+            for min_rr in (0.0, 1.0, 2.0, 3.0):
+                x = sg.copy()
+                x["tp"] = x[target]
+                x = x[(x.tp - x.entry).abs() / x.risk >= min_rr]
+                if len(x) < 20:
+                    print(f"{label} | {bname:14s} | {target:9s} | R:R>={min_rr:.0f}: n={len(x)} (troppo pochi)", flush=True)
+                    continue
+                t = simulate_trades(m5, x, with_trend=False)
+                e = evaluate(t)
+                a_, i_, o_ = e["all"], e["in_sample"], e["out_of_sample"]
+                print(f"{label} | {bname:14s} | {target:9s} | R:R>={min_rr:.0f}: n={a_['n']:5.0f} win={a_['win_rate']:.3f} "
+                      f"pareggio={a_['breakeven_win_rate']:.3f} payoff={a_['payoff_ratio']:.2f} exp={a_['expectancy_R']:+.3f}R "
+                      f"PF={a_['profit_factor']:.2f} | IS {i_['expectancy_R']:+.3f} OOS {o_['expectancy_R']:+.3f}", flush=True)
+
+
 if __name__ == "__main__":
     import sys
     tf = int(sys.argv[1]) if len(sys.argv) > 1 else 15
@@ -187,16 +207,5 @@ if __name__ == "__main__":
     st: dict = {}
     sig = generate_signals(m5, SDPParams(struct_tf_min=tf), st)
     sig.to_pickle(f"data/sdp_signals_v1_M{tf}.pkl")
-    print(f"STRUTTURA M{tf} - Funnel:", st)
-    variants = {"nessun filtro bias": sig,
-                "bias al CHoCH": sig[sig.bias_entry == sig.want],
-                "bias prima della Leg 2": sig[sig.bias_pre_leg2 == sig.want]}
-    for name, sg in variants.items():
-        for rr in (1.0, 2.0, 3.0):
-            t = simulate_trades(m5, with_rr(sg, rr), with_trend=False)
-            if t.empty:
-                print(name, rr, "nessun trade"); continue
-            e = evaluate(t)
-            a_, i_, o_ = e["all"], e["in_sample"], e["out_of_sample"]
-            print(f"{name:24s} rr={rr:.0f} n={a_['n']:5.0f} win={a_['win_rate']:.3f} be={a_['breakeven_win_rate']:.3f} "
-                  f"exp={a_['expectancy_R']:+.3f}R PF={a_['profit_factor']:.2f} | IS {i_['expectancy_R']:+.3f} OOS {o_['expectancy_R']:+.3f}", flush=True)
+    print(f"STRUTTURA M{tf} - Funnel:", st, flush=True)
+    report(sig, m5, f"M{tf}")
