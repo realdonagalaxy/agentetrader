@@ -12,3 +12,4 @@
 - [x] Criterio di trend: struttura HH/HL su H4+H1 (`src/market_structure.py`). Da confermare: finestra swing (`SWING_N=2`).
 - [ ] **Strategia SDP**: chiarire le 7 ambiguità in `knowledge/strategia_sdp.md`, poi implementare il generatore di segnali e backtestare.
 - [ ] **Dati M1/M5/M15** per i simboli: la strategia richiede CHoCH M1/M5, il backtest H1 non basta.
+- [ ] **Wyckoff 2.0**: definire i parametri di shakeout/estremi/minor SOS/SOT (vedi `knowledge/wyckoff_2_0.md`) e integrarli nel generatore di segnali SDP.
