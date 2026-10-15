@@ -1,14 +1,15 @@
-"""SDP v0 — Struttura (doppio massimo/minimo M15) + shakeout (Spring/UTAD) + CHoCH M5, a favore del bias H4/H1.
+"""SDP v1 — doppio min/max M15 + Leg 1/Leg 2 + Kill Zone Fibonacci + Order Block non mitigato + CHoCH M5.
 
-NON è ancora la SDP completa: mancano Leg 1/Leg 2, Kill Zone Fibonacci 1.272–1.618, POI (OB/imbalance), VWAP,
-MACD, macro orarie. Tutti i parametri sono PROVVISORI (vedi SDPParams) e vanno validati fuori campione.
-
-Long (mirror per short):
- 1. bias H4+H1 = UP (struttura HH/HL), calcolato solo su barre H1 già chiuse;
- 2. doppio minimo M15 confermato (livello L);
- 3. SHAKEOUT: una barra M5 scende sotto L e una chiusura M5 rientra sopra L entro `reclaim_bars`;
- 4. CHoCH M5: chiusura sopra l'ultimo pivot high M5 formatosi prima del minimo dello shakeout -> ingresso a mercato;
- 5. SL sotto il minimo della candela H1 che contiene il minimo dello shakeout (fino a quel momento); TP = rr * rischio.
+Long (lo short è lo specchio: prezzi cambiati di segno):
+ 1. doppio minimo M15 (livello L) = estremo dell'accumulo; bias H4+H1 = UP;
+ 2. Leg 2: il prezzo M5 scende sotto L. In quel momento si riconosce la Leg 1 = spinta dal doppio minimo al massimo B
+    precedente alla rottura; lunghezza = B - L;
+ 3. Kill Zone = [L - 0.618*len, L - 0.272*len] (estensione 1.272–1.618 della Leg 1 da B);
+ 4. POI: Order Block rialzista (ultima candela M15 ribassista prima di un impulso) NON mitigato, formatosi prima della rottura
+    di L, la cui zona interseca la Kill Zone (± kz_pad*len: "a volte è un po' fuori");
+ 5. reazione: il prezzo tocca l'OB, poi CHoCH M5 (chiusura sopra l'ultimo pivot high M5 prima del minimo) -> ingresso a mercato;
+ 6. SL sotto il minimo della candela H1 che contiene il minimo di Leg 2; TP = rr * rischio.
+Tutti i parametri sono PROVVISORI (SDPParams). Mancano ancora VWAP, MACD, volumi tick, macro orarie.
 """
 from bisect import bisect_right
 from dataclasses import dataclass
@@ -19,44 +20,71 @@ import pandas as pd
 from src.backtest_engine import evaluate, simulate_trades
 from src.data_loader import load_ohlc, resample
 from src.market_structure import multi_tf_trend
-from src.range_detector import double_extremes, pivots
+from src.range_detector import atr, double_extremes, pivots
 
 
 @dataclass
 class SDPParams:
-    n_swing: int = 2             # pivot a n barre per lato
-    tol: float = 0.25            # tolleranza doppio massimo/minimo (frazione ATR14 M15)
-    min_sep_min: int = 30        # distanza minima tra i due picchi (minuti)
-    max_sep_min: int = 480       # distanza massima (8 ore = intraday)
-    max_wait_bars: int = 144     # barre M5 (12h) entro cui cercare lo shakeout dopo la conferma
-    reclaim_bars: int = 12       # barre M5 per rientrare nel livello dopo la rottura
-    choch_wait_bars: int = 24    # barre M5 per il CHoCH dopo il rientro
-    rr: float = 3.0              # TP = rr * rischio
-    bias_h1_bars: int = 400      # finestra H1 per il bias
+    n_swing: int = 2
+    tol: float = 0.25            # tolleranza doppio min/max (x ATR14 M15)
+    min_sep_min: int = 30
+    max_sep_min: int = 480       # 8 ore
+    max_wait_bars: int = 144     # barre M5 per vedere la rottura del livello dopo la conferma
+    leg2_bars: int = 144         # barre M5 massime di Leg 2 (da rottura a ingresso)
+    choch_wait_bars: int = 24    # barre M5 dal tocco OB per il CHoCH
+    fib_lo: float = 1.272        # Kill Zone: estensioni della Leg 1
+    fib_hi: float = 1.618
+    kz_pad: float = 0.25         # tolleranza OB "un po' fuori" (frazione lunghezza Leg 1)
+    min_leg_atr: float = 1.0     # Leg 1 minima (x ATR14 M15)
+    ob_disp_atr: float = 1.0     # impulso minimo dopo la candela OB (x ATR14 M15, entro 3 candele)
+    ob_lookback: int = 960       # barre M15 (10 giorni) di vita massima di un OB
+    rr: float = 3.0
+    bias_h1_bars: int = 400
     require_bias: bool = True
 
 
-def generate_signals(m5: pd.DataFrame, p: SDPParams = SDPParams()) -> pd.DataFrame:
-    m15, h1 = resample(m5, "15min"), resample(m5, "1h")
-    dbl = double_extremes(m15, p.n_swing, p.tol, max(2, p.min_sep_min // 15), p.max_sep_min // 15)
-    t5 = m5.index.values
-    H, L, C = m5["high"].to_numpy(), m5["low"].to_numpy(), m5["close"].to_numpy()
-    ph, pl = pivots(m5, p.n_swing)
-    ph, pl = list(ph), list(pl)
-    bias_cache: dict = {}
+def _order_blocks(O, H, L, C, A, p: SDPParams):
+    """OB 'rialzisti' (domanda): array (pos, lo, hi, mit_pos). Per gli short si passano prezzi specchiati."""
+    n = len(C)
+    i = np.arange(n - 4)
+    imp = np.maximum.reduce([H[i + 1], H[i + 2], H[i + 3]]) - H[i]
+    ok = (C[i] < O[i]) & (imp >= p.ob_disp_atr * A[i]) & ~np.isnan(A[i])
+    pos = i[ok]
+    mit = np.full(len(pos), n + 10**9, dtype=np.int64)
+    for k, ix in enumerate(pos):
+        seg = L[ix + 4: ix + 4 + p.ob_lookback]
+        hit = seg <= H[ix]
+        if hit.any():
+            mit[k] = ix + 4 + int(hit.argmax())
+    return pos, L[pos], H[pos], mit
 
-    def bias_at(ts: np.datetime64) -> str:
+
+def generate_signals(m5: pd.DataFrame, p: SDPParams = SDPParams(), stats: dict | None = None) -> pd.DataFrame:
+    m15, h1 = resample(m5, "15min"), resample(m5, "1h")
+    A15 = atr(m15).to_numpy()
+    dbl = double_extremes(m15, p.n_swing, p.tol, max(2, p.min_sep_min // 15), p.max_sep_min // 15)
+    t5, t15 = m5.index.values, m15.index.values
+    H, L, C = m5["high"].to_numpy(), m5["low"].to_numpy(), m5["close"].to_numpy()
+    o15, h15, l15, c15 = (m15[c].to_numpy() for c in ("open", "high", "low", "close"))
+    ph, pl = (list(x) for x in pivots(m5, p.n_swing))
+    obs = {True: _order_blocks(o15, h15, l15, c15, A15, p),
+           False: _order_blocks(-o15, -l15, -h15, -c15, A15, p)}
+    bias_cache: dict = {}
+    st = stats if stats is not None else {}
+    def bump(k): st[k] = st.get(k, 0) + 1
+
+    def bias_at(ts):
         hour = ts.astype("datetime64[h]")
         if hour not in bias_cache:
-            k = h1.index.values.searchsorted(hour)  # barre H1 con inizio < ora corrente = chiuse
+            k = h1.index.values.searchsorted(hour)
             bias_cache[hour] = multi_tf_trend(h1.iloc[max(0, k - p.bias_h1_bars):k])["bias"] if k > 50 else "MISTO"
         return bias_cache[hour]
 
     out, seen = [], set()
     for d in dbl.itertuples():
+        bump("doppi")
         long = d.kind == "bottom"
-        # serie "trasformate": per lo short si specchiano i prezzi (-prezzo) cosi' la logica e' unica
-        adv, fav, cl = (L, H, C) if long else (-H, -L, -C)  # adv: estremo avverso (basso=più estremo)
+        adv, fav, cl = (L, H, C) if long else (-H, -L, -C)   # adv: estremo avverso (più basso = più estremo)
         piv = ph if long else pl
         lvl = d.level if long else -d.level
         avail = np.datetime64(d.confirmed) + np.timedelta64(15, "m")
@@ -65,22 +93,54 @@ def generate_signals(m5: pd.DataFrame, p: SDPParams = SDPParams()) -> pd.DataFra
         k0 = next((k for k in range(start, end) if adv[k] < lvl), None)
         if k0 is None:
             continue
-        sw_low, sw_idx, reclaimed = adv[k0], k0, False
-        last = min(k0 + p.reclaim_bars + p.choch_wait_bars, len(t5) - 1)
+        bump("livello rotto (Leg 2)")
+        p2 = int(np.searchsorted(t5, np.datetime64(d.t2)))
+        B = fav[p2:k0 + 1].max()
+        length = B - lvl
+        i15 = min(int(np.searchsorted(t15, np.datetime64(d.confirmed))), len(A15) - 1)
+        if not (length >= p.min_leg_atr * A15[i15]):
+            continue
+        bump("Leg 1 valida")
+        kz_hi, kz_lo = lvl - (p.fib_lo - 1) * length, lvl - (p.fib_hi - 1) * length
+        pad = p.kz_pad * length
+        o_pos, o_lo, o_hi, o_mit = obs[long]
+        form_limit = int(np.searchsorted(t15, t5[k0].astype("datetime64[m]") - np.timedelta64(15, "m"), "right")) - 1
+        sw_low, sw_idx = adv[k0], k0
+        cand = None
+        touch = None
+        last = min(k0 + p.leg2_bars, len(t5) - 1)
         for j in range(k0, last + 1):
             if adv[j] < sw_low:
-                sw_low, sw_idx, reclaimed = adv[j], j, False
-            if not reclaimed and cl[j] > lvl:
-                reclaimed = True
-            if not reclaimed:
-                if j - k0 >= p.reclaim_bars:
-                    break
-                continue
-            m = bisect_right(piv, sw_idx - p.n_swing) - 1
-            if m < 0:
+                sw_low, sw_idx = adv[j], j
+            if sw_low < kz_lo - pad:           # Leg 2 oltre il 1.618: Kill Zone fallita
                 break
-            ref = fav[piv[m]]
-            if cl[j] > ref and cl[j] > lvl and j > sw_idx:
+            if cand is None:
+                if adv[j] <= kz_hi + pad:      # il prezzo è arrivato nella Kill Zone (con tolleranza)
+                    bump("Kill Zone raggiunta")
+                    tpos = int(np.searchsorted(t15, t5[j] - np.timedelta64(10, "m"), "right")) - 1
+                    lo_i = int(np.searchsorted(o_pos, tpos - p.ob_lookback))
+                    hi_i = int(np.searchsorted(o_pos, form_limit, "right"))
+                    sl_ = slice(lo_i, hi_i)
+                    m = (o_mit[sl_] > tpos) & (o_hi[sl_] >= kz_lo - pad) & (o_lo[sl_] <= kz_hi + pad)
+                    if not m.any():
+                        break
+                    bump("OB non mitigato in Kill Zone")
+                    cand = (o_lo[sl_][m], o_hi[sl_][m])
+                else:
+                    continue
+            if touch is None:
+                if adv[j] <= cand[1].max():    # tocca la zona di un OB candidato
+                    touch = j
+                    bump("OB toccato")
+                else:
+                    continue
+            if j - touch > p.choch_wait_bars:
+                break
+            mm = bisect_right(piv, sw_idx - p.n_swing) - 1
+            if mm < 0:
+                break
+            if cl[j] > fav[piv[mm]] and cl[j] > sw_low and j > sw_idx:
+                bump("CHoCH M5")
                 key = (t5[j], long)
                 if key in seen:
                     break
@@ -93,23 +153,29 @@ def generate_signals(m5: pd.DataFrame, p: SDPParams = SDPParams()) -> pd.DataFra
                 b = bias_at(t5[j])
                 if p.require_bias and b != ("UP" if long else "DOWN"):
                     break
+                bump("bias concorde -> segnale")
                 sgn = 1 if long else -1
                 out.append({"time": pd.Timestamp(t5[j]), "side": "buy" if long else "sell",
                             "sl": sgn * extreme, "tp": sgn * (cl[j] + p.rr * risk),
-                            "bias": b, "level": d.level, "risk_pips": risk * 1e4})
+                            "bias": b, "level": d.level, "leg1_pips": length * 1e4, "risk_pips": risk * 1e4})
                 break
     return pd.DataFrame(out).set_index("time").sort_index() if out else pd.DataFrame()
 
 
-def run(m5: pd.DataFrame, p: SDPParams = SDPParams()) -> pd.DataFrame:
-    sig = generate_signals(m5, p)
+def run(m5: pd.DataFrame, p: SDPParams = SDPParams(), stats: dict | None = None) -> pd.DataFrame:
+    sig = generate_signals(m5, p, stats)
     return simulate_trades(m5, sig, with_trend=False) if len(sig) else pd.DataFrame()
 
 
 if __name__ == "__main__":
     m5 = load_ohlc("data/EURUSD_BID_M5.csv.gz")
     for rr in (1.0, 2.0, 3.0):
-        t = run(m5, SDPParams(rr=rr))
+        st: dict = {}
+        t = run(m5, SDPParams(rr=rr), st)
+        if rr == 1.0:
+            print("Funnel:", st)
+        if t.empty:
+            print(f"rr={rr}: nessun trade"); continue
         e = evaluate(t)
         keys = ("n", "win_rate", "breakeven_win_rate", "expectancy_R", "profit_factor", "max_drawdown_R")
         for part in ("all", "in_sample", "out_of_sample"):
