@@ -85,3 +85,23 @@ Con bias pre-Leg 2 (M15, macro): n 52–68, expectancy −0,10/−0,21R. Nessun 
 Lettura: New York è l'unico gruppo con segno positivo in entrambi i timeframe (+0,07/+0,10R), ma errore standard ~0,06R
 (t ≈ 1,4) e IS/OOS discordanti su M15: ipotesi da confermare su dati non ancora usati, NON risultato.
 Londra: nessun effetto. Prossimo passo proposto: ipotesi fissata a priori "macro New York" da verificare su altri strumenti.
+
+## SDP-Wyckoff (climax = gobba più grande dell'istogramma MACD 3,10,16 nella Leg 2; test con gobba minore + volume minore) — 15 ott 2026
+EURUSD BID 2003-05 → 2025-12, costi ignorati. Per ogni struttura si prende il primo candidato CHoCH M5 che soddisfa la variante (causale).
+Variante macro = ingresso in Londra 9–11 o New York 14:30–17 (ora italiana). Target 1:2. SL = estremo candela H1.
+
+Controllo di attribuzione (struttura M15, tol 0,25 ATR, macro, 1:2):
+| Variante | n | expectancy (±errore) |
+|---|---|---|
+| PLACEBO: qualsiasi CHoCH dopo la rottura (senza Wyckoff) | 7142 | +0,041R (±0,017) |
+| solo Kill Zone | 3553 | +0,067R (±0,024) |
+| Wyckoff + volume (solo) | 2419 | +0,068R (±0,029) |
+| Kill Zone + Wyckoff + volume | 1075 | +0,102R (±0,044) |
+| Wyckoff senza volume | 3080 | +0,069R (±0,026) |
+
+Tutte le ore: expectancy ≈ 0 (es. Wy+volume solo: −0,002R ±0,016). Con tol 0,5 ATR: stessi ordini di grandezza (Wy+volume solo macro: +0,054R ±0,023).
+Anni positivi: 13/23 (Wy+volume solo). Rischio mediano ≈ 21 pips. Sensibilità ai costi (Wy+volume solo): 0,5 pip → +0,042R; 1,0 pip → +0,015R.
+Lettura: il vantaggio compare solo nelle macro di Londra/New York; la condizione Wyckoff NON aggiunge informazione rispetto al placebo
+(+0,068 vs +0,041, differenza ~1 errore standard). L'effetto è piccolo (t ≈ 2,3–2,4) e i costi lo erodono. Non è un vantaggio operativo.
+Ipotesi emersa, coerente con il documento SDP (Leg 2 che liquida il Box Asiatico all'apertura di Londra): inversioni dopo sweep
+di liquidità alle aperture di Londra/New York. Da testare in modo specifico (Box Asiatico) e su altri strumenti.
