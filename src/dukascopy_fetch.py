@@ -16,7 +16,7 @@ import pandas as pd
 import requests
 
 URL = "https://datafeed.dukascopy.com/datafeed/{sym}/{y}/{m:02d}/{d:02d}/{side}_candles_min_1.bi5"
-SCALES = {"JPY": 1e3, "XAU": 1e3, "XAG": 1e3}  # default 1e5 (indici/altri simboli: da verificare per simbolo)
+SCALES = {"JPY": 1e3, "XAU": 1e3, "XAG": 1e3, "IDX": 1e3}  # default 1e5 (forex); indici: simboli *IDX* (da verificare)
 REC = struct.Struct(">IIIIIf")
 
 

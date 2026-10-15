@@ -105,3 +105,16 @@ Lettura: il vantaggio compare solo nelle macro di Londra/New York; la condizione
 (+0,068 vs +0,041, differenza ~1 errore standard). L'effetto è piccolo (t ≈ 2,3–2,4) e i costi lo erodono. Non è un vantaggio operativo.
 Ipotesi emersa, coerente con il documento SDP (Leg 2 che liquida il Box Asiatico all'apertura di Londra): inversioni dopo sweep
 di liquidità alle aperture di Londra/New York. Da testare in modo specifico (Box Asiatico) e su altri strumenti.
+
+Controllo di attribuzione, struttura M5 (tol 0,25 ATR, macro, 1:2):
+| Variante | n | expectancy (±errore) | anni positivi |
+|---|---|---|---|
+| PLACEBO: qualsiasi CHoCH (macro) | 15171 | +0,049R (±0,012) | — |
+| solo Kill Zone | 6948 | +0,067R (±0,017) | — |
+| Wyckoff + volume (solo) | 4422 | +0,096R (±0,022) | 14/23 |
+| Kill Zone + Wyckoff + volume (no OB) | 1565 | +0,114R (±0,037) | 17/23 |
+| Wyckoff senza volume | 5610 | +0,086R (±0,019) | — |
+IS/OOS (Wy+volume solo): +0,070 / +0,157. Con costo 1,0 pip/trade (rischio mediano ≈ 21 pips): +0,044R (solo) e +0,059R (no OB).
+Lettura: la maggior parte dell'effetto (+0,05R) è presente anche nel placebo (macro + CHoCH dopo sweep); la condizione Wyckoff
+aggiunge circa +0,05R (≈ 2 errori standard, borderline). Effetto piccolo, stabile in IS/OOS, ma da validare su dati non usati
+(altri strumenti) e con costi reali prima di qualsiasi uso operativo.
