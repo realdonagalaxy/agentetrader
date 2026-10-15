@@ -5,11 +5,13 @@ from pathlib import Path
 from openpyxl import Workbook, load_workbook
 
 from src.market_config import session_label
+from src.market_structure import is_countertrend
 
 JOURNAL_PATH = Path("journal/trading_journal.xlsx")
 ERROR_CATEGORIES = ("Esecuzione", "Setup", "Psicologia/Rischio")
 HEADERS = ["ID", "Aperto", "Chiuso", "Simbolo", "Lato", "Entry", "SL", "TP",
-           "Exit", "R", "Esito", "Setup", "Errori", "Note", "Sessione", "MAE"]
+           "Exit", "R", "Esito", "Setup", "Errori", "Note", "Sessione", "MAE",
+           "Trend H4", "Trend H1", "Controtendenza"]
 
 
 def init_journal(path: Path = JOURNAL_PATH) -> None:
@@ -25,14 +27,18 @@ def init_journal(path: Path = JOURNAL_PATH) -> None:
 
 
 def add_trade(symbol: str, side: str, entry: float, sl: float, tp: float,
-              setup: str = "", note: str = "", path: Path = JOURNAL_PATH) -> int:
+              setup: str = "", note: str = "", trend: dict | None = None,
+              path: Path = JOURNAL_PATH) -> int:
+    """trend: output di market_structure.multi_tf_trend() al momento dell'ingresso."""
     init_journal(path)
     wb = load_workbook(path)
     ws = wb["Trades"]
     trade_id = ws.max_row  # header = riga 1
     ws.append([trade_id, datetime.now().isoformat(timespec="seconds"), None,
                symbol, side, entry, sl, tp, None, None, "OPEN", setup, "", note,
-               session_label(datetime.utcnow()), None])
+               session_label(datetime.utcnow()), None,
+               trend and trend["H4"], trend and trend["H1"],
+               (is_countertrend(side, trend["bias"]) if trend else None)])
     wb.save(path)
     return trade_id
 

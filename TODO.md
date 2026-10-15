@@ -9,4 +9,4 @@
 - [ ] **Storico dati**: aggiungere `data/historical_ticks.csv` (export cTrader).
 - [ ] **Confermare orari sessioni** (`src/market_config.py`, ora provvisori UTC: Asia 0-8, Londra 7-16, New York 12-21) e gestione ora legale.
 - [ ] **Confermare simboli cTrader** del tuo broker (NASDAQ/SP500/DOW/ORO/ARGENTO) e se oltre a EURUSD servono altre coppie USD.
-- [ ] **Criterio di trend** (controtendenza sì/no) per classificare il contesto dei trade.
+- [x] Criterio di trend: struttura HH/HL su H4+H1 (`src/market_structure.py`). Da confermare: finestra swing (`SWING_N=2`).
