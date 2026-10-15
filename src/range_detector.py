@@ -28,24 +28,35 @@ def pivots(df: pd.DataFrame, n: int = 2) -> tuple[np.ndarray, np.ndarray]:
 
 
 def double_extremes(df: pd.DataFrame, n: int = 2, tol: float = 0.25, min_sep: int = 4, max_sep: int = 48) -> pd.DataFrame:
-    """Restituisce una riga per ogni doppio massimo/minimo: kind, level, t1, t2, confirmed."""
+    """Una riga per ogni doppio massimo/minimo: kind, level, t1, t2, confirmed.
+
+    Per ogni pivot j si cerca il pivot precedente più vicino i (a distanza min_sep..max_sep barre) con livello entro
+    la tolleranza e senza nessuna barra intermedia oltre il livello (+ tolleranza): equal highs/lows anche con
+    pivot minori in mezzo.
+    """
     a = atr(df).to_numpy()
     hi, lo = df["high"].to_numpy(), df["low"].to_numpy()
     ph, pl = pivots(df, n)
     rows = []
     for kind, piv, arr in (("top", ph, hi), ("bottom", pl, lo)):
-        for k in range(1, len(piv)):
-            i, j = piv[k - 1], piv[k]
-            if not (min_sep <= j - i <= max_sep) or np.isnan(a[j]):
+        sign = 1 if kind == "top" else -1
+        for k, j in enumerate(piv):
+            if np.isnan(a[j]):
                 continue
             tolerance = tol * a[j]
-            if abs(arr[i] - arr[j]) > tolerance:
-                continue
-            between = arr[i + 1:j]
-            if len(between) and ((between.max() > max(arr[i], arr[j]) + tolerance) if kind == "top"
-                                 else (between.min() < min(arr[i], arr[j]) - tolerance)):
-                continue
-            level = max(arr[i], arr[j]) if kind == "top" else min(arr[i], arr[j])
-            rows.append({"kind": kind, "level": level, "t1": df.index[i], "t2": df.index[j],
-                         "confirmed": df.index[min(j + n, len(df) - 1)]})
+            for m in range(k - 1, -1, -1):
+                i = piv[m]
+                if j - i > max_sep:
+                    break
+                if j - i < min_sep:
+                    continue
+                level = max(arr[i], arr[j]) if kind == "top" else min(arr[i], arr[j])
+                if abs(arr[i] - arr[j]) > tolerance:
+                    continue
+                between = arr[i + 1:j]
+                if len(between) and (sign * (between.max() if kind == "top" else between.min()) > sign * level + tolerance):
+                    continue
+                rows.append({"kind": kind, "level": level, "t1": df.index[i], "t2": df.index[j],
+                             "confirmed": df.index[min(j + n, len(df) - 1)]})
+                break
     return pd.DataFrame(rows)
