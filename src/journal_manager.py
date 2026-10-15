@@ -4,10 +4,12 @@ from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
 
+from src.market_config import session_label
+
 JOURNAL_PATH = Path("journal/trading_journal.xlsx")
 ERROR_CATEGORIES = ("Esecuzione", "Setup", "Psicologia/Rischio")
 HEADERS = ["ID", "Aperto", "Chiuso", "Simbolo", "Lato", "Entry", "SL", "TP",
-           "Exit", "R", "Esito", "Setup", "Errori", "Note"]
+           "Exit", "R", "Esito", "Setup", "Errori", "Note", "Sessione", "MAE"]
 
 
 def init_journal(path: Path = JOURNAL_PATH) -> None:
@@ -29,13 +31,14 @@ def add_trade(symbol: str, side: str, entry: float, sl: float, tp: float,
     ws = wb["Trades"]
     trade_id = ws.max_row  # header = riga 1
     ws.append([trade_id, datetime.now().isoformat(timespec="seconds"), None,
-               symbol, side, entry, sl, tp, None, None, "OPEN", setup, "", note])
+               symbol, side, entry, sl, tp, None, None, "OPEN", setup, "", note,
+               session_label(datetime.utcnow()), None])
     wb.save(path)
     return trade_id
 
 
 def close_trade(trade_id: int, exit_price: float, errors: str = "",
-                path: Path = JOURNAL_PATH) -> float:
+                mae: float | None = None, path: Path = JOURNAL_PATH) -> float:
     """`errors`: vuoto oppure una categoria in ERROR_CATEGORIES (opz. `Categoria: dettaglio`)."""
     if errors and errors.split(":")[0].strip() not in ERROR_CATEGORIES:
         raise ValueError(f"Categoria errore non valida: usa una tra {ERROR_CATEGORIES}")
@@ -51,6 +54,7 @@ def close_trade(trade_id: int, exit_price: float, errors: str = "",
             row[8].value, row[9].value = exit_price, round(r, 2)
             row[10].value = "WIN" if r > 0 else "LOSS" if r < 0 else "BE"
             row[12].value = errors
+            row[15].value = mae  # peggior escursione avversa (in prezzo)
             wb.save(path)
             update_metrics(path)
             return r
