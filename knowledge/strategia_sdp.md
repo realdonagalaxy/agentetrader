@@ -40,9 +40,19 @@ PS, AC, UT, UTAD, ST, SPRING: il CHoCH M1 può essere sbilanciato da deep mitiga
 - Trend/bias: struttura HH/HL su H4 e H1.
 - Stop Loss: sul **massimo/minimo di H1** (interpretazione da confermare: estremo della candela H1 che contiene l'estremo della Leg 2, oltre di esso).
 
+## DECISIONI AGGIORNATE (utente, 15 ott 2026)
+- Struttura (range): doppi massimi/minimi, tolleranza 0,25 × ATR, picchi a 30 min–8 h; rilevati su M15 oppure M5.
+- Leg 1 misurata dai minimi uguali (induzione rialzista) o dai massimi uguali (induzione ribassista); riconosciuta quando la Leg 2 rompe il livello opposto.
+- Kill Zone: estensione 1.272–1.618 della Leg 1. POI: candela istituzionale (Order Block) non mitigata a sinistra, anche un po' fuori zona.
+- Ingresso: CHoCH M5 (M1 se disponibili i dati). SL sull'estremo della candela H1 dello shakeout. Bersaglio: fine Leg 1 (o origine, "spring" della Leg 1); R:R minimo 1:3 nel documento.
+- Bias: HH/HL su H4 e H1. Nei test non migliora i risultati.
+- Macro (ora italiana, ora legale inclusa): Londra 9:00–11:00, New York 14:30–17:00; applicate all'orario del CHoCH. Per il backtest iniziale tutte le sessioni; le macro si valutano dopo.
+- VWAP: ancorato all'apertura Asia (00:00 UTC) per tutta la giornata; ingresso oltre la **banda esterna 2σ** (confronto con 1σ).
+- MACD (3, 10, 16): divergenza rialzista/ribassista tra shakeout e swing precedente (linea MACD, M5).
+- Costi (spread, commissioni, slippage): ignorati per ora, da inserire quando serviranno.
+
 ## AMBIGUITÀ ANCORA APERTE
-1. TP: fisso 1:3, oppure OB della Leg 1 / banda VWAP? Se < 1:3 si salta il trade?
-2. SL: conferma dell'interpretazione sopra (quale candela H1, buffer sì/no).
-3. Definizioni operative: accumulo, spinta lenta, OB non mitigato, imbalance (FVG 3 candele?), CHoCH M1/M5 (finestra swing).
-4. Dati M1/M5/M15 (fonte) per i simboli.
-5. Asset: doc ha AUDUSD/crypto; utente EURUSD, indici, oro, argento.
+1. TP definitivo: fine Leg 1 / origine Leg 1 / banda opposta del VWAP; gestione BE + parziale 50% a 1:3.
+2. Il documento cita anche Box Asiatico, volumi tick, Session Volume Profile: non ancora implementati.
+3. CHoCH M1: servono i dati M1 (disponibili sul Mac in data/raw, non ancora caricati qui).
+4. Asset: finora solo EURUSD; oro, argento, indici e GBPUSD da scaricare per la verifica su dati nuovi.
