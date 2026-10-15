@@ -40,7 +40,7 @@ class SDPParams:
     ob_lookback: int = 960       # barre M15 (10 giorni) di vita massima di un OB
     rr: float = 3.0
     bias_h1_bars: int = 400
-    require_bias: bool = True
+    require_bias: bool = False    # i filtri di bias si applicano a posteriori (colonne bias_entry / bias_pre_leg2)
 
 
 def _order_blocks(O, H, L, C, A, p: SDPParams):
@@ -150,16 +150,26 @@ def generate_signals(m5: pd.DataFrame, p: SDPParams = SDPParams(), stats: dict |
                 risk = cl[j] - extreme
                 if risk <= 0:
                     break
-                b = bias_at(t5[j])
-                if p.require_bias and b != ("UP" if long else "DOWN"):
+                b_entry, b_leg = bias_at(t5[j]), bias_at(t5[k0])   # al CHoCH e prima della Leg 2
+                want = "UP" if long else "DOWN"
+                if p.require_bias and b_leg != want:
                     break
-                bump("bias concorde -> segnale")
+                bump("segnale")
                 sgn = 1 if long else -1
-                out.append({"time": pd.Timestamp(t5[j]), "side": "buy" if long else "sell",
-                            "sl": sgn * extreme, "tp": sgn * (cl[j] + p.rr * risk),
-                            "bias": b, "level": d.level, "leg1_pips": length * 1e4, "risk_pips": risk * 1e4})
+                out.append({"time": pd.Timestamp(t5[j]), "side": "buy" if long else "sell", "entry": sgn * cl[j],
+                            "risk": risk, "sl": sgn * extreme, "tp": sgn * (cl[j] + p.rr * risk),
+                            "bias_entry": b_entry, "bias_pre_leg2": b_leg, "want": want,
+                            "level": d.level, "leg1_pips": length * 1e4, "risk_pips": risk * 1e4})
                 break
     return pd.DataFrame(out).set_index("time").sort_index() if out else pd.DataFrame()
+
+
+def with_rr(sig: pd.DataFrame, rr: float) -> pd.DataFrame:
+    """Ricalcola il TP a rr multipli del rischio (entry e rischio sono già nel segnale)."""
+    out = sig.copy()
+    sgn = np.where(out["side"] == "buy", 1.0, -1.0)
+    out["tp"] = out["entry"] + sgn * rr * out["risk"]
+    return out
 
 
 def run(m5: pd.DataFrame, p: SDPParams = SDPParams(), stats: dict | None = None) -> pd.DataFrame:
@@ -169,15 +179,19 @@ def run(m5: pd.DataFrame, p: SDPParams = SDPParams(), stats: dict | None = None)
 
 if __name__ == "__main__":
     m5 = load_ohlc("data/EURUSD_BID_M5.csv.gz")
-    for rr in (1.0, 2.0, 3.0):
-        st: dict = {}
-        t = run(m5, SDPParams(rr=rr), st)
-        if rr == 1.0:
-            print("Funnel:", st)
-        if t.empty:
-            print(f"rr={rr}: nessun trade"); continue
-        e = evaluate(t)
-        keys = ("n", "win_rate", "breakeven_win_rate", "expectancy_R", "profit_factor", "max_drawdown_R")
-        for part in ("all", "in_sample", "out_of_sample"):
-            print(f"rr={rr} {part:13s}", {k: round(float(e[part][k]), 3) for k in keys})
-        print("  oos_warning:", e.get("oos_warning"))
+    st: dict = {}
+    sig = generate_signals(m5, SDPParams(), st)
+    sig.to_pickle("data/sdp_signals_v1.pkl")
+    print("Funnel:", st)
+    variants = {"nessun filtro bias": sig,
+                "bias al CHoCH": sig[sig.bias_entry == sig.want],
+                "bias prima della Leg 2": sig[sig.bias_pre_leg2 == sig.want]}
+    for name, sg in variants.items():
+        for rr in (1.0, 2.0, 3.0):
+            t = simulate_trades(m5, with_rr(sg, rr), with_trend=False)
+            if t.empty:
+                print(name, rr, "nessun trade"); continue
+            e = evaluate(t)
+            a_, i_, o_ = e["all"], e["in_sample"], e["out_of_sample"]
+            print(f"{name:24s} rr={rr:.0f} n={a_['n']:5.0f} win={a_['win_rate']:.3f} be={a_['breakeven_win_rate']:.3f} "
+                  f"exp={a_['expectancy_R']:+.3f}R PF={a_['profit_factor']:.2f} | IS {i_['expectancy_R']:+.3f} OOS {o_['expectancy_R']:+.3f}", flush=True)
