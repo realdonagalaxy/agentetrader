@@ -16,6 +16,36 @@ BG0, FG0, GRID0 = "#131722", "#d1d4dc", "#2a2e39"
 UP, DOWN = "#26a69a", "#ef5350"
 
 
+def volume_profile(m5: pd.DataFrame, t0, t1, nbins: int = 48, va: float = 0.70):
+    """Profilo dei volumi (tick) a range fisso [t0, t1]: (centri, volumi, passo, POC, VAL, VAH). Ogni barra M5 distribuisce il volume sul suo range high-low."""
+    seg = m5.loc[t0:t1]
+    if len(seg) < 3:
+        return None
+    lo, hi = float(seg["low"].min()), float(seg["high"].max())
+    if hi <= lo:
+        return None
+    edges = np.linspace(lo, hi, nbins + 1)
+    vol = np.zeros(nbins)
+    for l_, h_, v_ in zip(seg["low"].to_numpy(), seg["high"].to_numpy(), seg["volume"].to_numpy()):
+        a, b = np.searchsorted(edges, l_, "right") - 1, np.searchsorted(edges, h_, "left")
+        a, b = max(a, 0), min(max(b, a + 1), nbins)
+        vol[a:b] += v_ / (b - a)
+    centers = (edges[:-1] + edges[1:]) / 2
+    poc = int(vol.argmax())
+    lo_i = hi_i = poc
+    acc, tot = vol[poc], vol.sum()
+    while acc < va * tot and (lo_i > 0 or hi_i < nbins - 1):           # area di valore: si allarga dal POC verso il lato con più volume
+        up = vol[hi_i + 1] if hi_i < nbins - 1 else -1
+        dn = vol[lo_i - 1] if lo_i > 0 else -1
+        if up >= dn:
+            hi_i += 1
+            acc += vol[hi_i]
+        else:
+            lo_i -= 1
+            acc += vol[lo_i]
+    return centers, vol, edges[1] - edges[0], float(centers[poc]), float(edges[lo_i]), float(edges[hi_i + 1])
+
+
 def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float] | None = None, bars: int = 360,
                  macd_par: tuple[int, int, int] = (3, 10, 16)) -> bytes:
     gold = rec.get("kind") in ("UT", "UTAD", "watch")
@@ -133,6 +163,21 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     ymin, ymax = ((min(ymin, lo_lat), max(ymax, hi_lat)) if show_lat else (ymin, ymax)) if gold else (min(ymin, kz_lo), max(ymax, kz_hi, hi_lat))
     pad = (ymax - ymin) * (0.2 if gold else 0.06)
     ax.set_ylim(ymin - pad, ymax + pad)
+    if gold and rec.get("profile", True):        # Fixed Range Volume Profile: dalla lateralizzazione al segnale (max 5 giorni)
+        t_p1 = pd.Timestamp(rec["choch_time"]) if pd.notna(rec.get("choch_time")) else t_end
+        t_p0 = max(pd.Timestamp(rec["lat_t1"]), t_p1 - pd.Timedelta(days=5))
+        vp = volume_profile(m5, t_p0, t_p1)
+        if vp:
+            cen, vol, step, poc, val, vah = vp
+            wmax = 0.26 * (right + 1)
+            vis = (cen >= ymin - pad) & (cen <= ymax + pad)
+            inva = (cen >= val) & (cen <= vah)
+            ax.barh(cen[vis], vol[vis] / vol.max() * wmax, height=step * 0.92, left=-0.5,
+                    color=np.where(inva[vis], "#5c6bc0", "#8e99d6"), alpha=0.55, linewidth=0, zorder=1)
+            for yv, nm in ((poc, "POC"), (val, "VAL"), (vah, "VAH")):
+                if ymin - pad <= yv <= ymax + pad:
+                    ax.hlines(yv, -0.5, right, colors="#5c6bc0", linestyles="--" if nm == "POC" else ":", linewidth=0.8, zorder=1)
+                    ax.text(-0.5 + wmax + 1, yv, f" {nm} {yv:.{d}f}", color=FG, fontsize=7, va="bottom")
     if tags:                                                       # riquadri dei prezzi: colore della linea, testo nero normale; distanziati se vicini
         gap = 0.045 * (ymax - ymin + 2 * pad)
         ys = []
