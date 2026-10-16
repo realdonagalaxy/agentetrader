@@ -32,7 +32,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     t_end = full.index[-1]
     if gold:                                  # solo la parte dello schema: dal poco prima dell'SC (e della lateralizzazione, se vicina) al segnale
         five = pd.Timedelta(minutes=5)
-        t_bc = pd.Timestamp(rec["bc_time"]) - 40 * five
+        t_bc = pd.Timestamp(rec["bc_time"]) - 25 * five
         t_lat = pd.Timestamp(rec["lat_t1"]) - 15 * five
         t_start = min(t_bc, t_lat) if (t_end - t_lat) / five <= 150 else t_bc
     else:
@@ -44,7 +44,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     d = decimals(sym)
     buy = rec["side"] == "buy"
 
-    fig, (ax, axm) = plt.subplots(2, 1, figsize=(11, 6.6), gridspec_kw={"height_ratios": [4, 1], "hspace": 0.04}, sharex=True)
+    fig, (ax, axm) = plt.subplots(2, 1, figsize=(11, 7), gridspec_kw={"height_ratios": [4, 1], "hspace": 0.04}, sharex=True)
     fig.patch.set_facecolor(BG)
     for a in (ax, axm):
         a.set_facecolor(BG)
@@ -118,17 +118,27 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
                 tags.append((y, name, colr))
             else:
                 ax.text(right, y, f" {name} {y:.{d}f}", color=colr, fontsize=8, va="center")
+            if gold and name.startswith("TP"):
+                continue                                                   # i TP lontani non allargano la vista (vedi sotto)
             ymin, ymax = min(ymin, y), max(ymax, y)
+    if gold and tags:                                                      # zoom: i TP entrano nella vista solo se vicini (entro metà del range dello schema)
+        reach = 0.5 * (ymax - ymin)
+        for y, name, colr in tags:
+            if name.startswith("TP") and ymin - reach <= y <= ymax + reach:
+                ymin, ymax = min(ymin, y), max(ymax, y)
     ymin, ymax = ((min(ymin, lo_lat), max(ymax, hi_lat)) if show_lat else (ymin, ymax)) if gold else (min(ymin, kz_lo), max(ymax, kz_hi, hi_lat))
     pad = (ymax - ymin) * (0.2 if gold else 0.06)
     ax.set_ylim(ymin - pad, ymax + pad)
     if tags:                                                       # riquadri dei prezzi: colore della linea, testo nero normale; distanziati se vicini
         gap = 0.045 * (ymax - ymin + 2 * pad)
         ys = []
+        lo_v, hi_v = ymin - pad, ymax + pad
         for y, name, colr in sorted(tags):
-            ty = y if not ys or y - ys[-1] >= gap else ys[-1] + gap
+            out_hi, out_lo = y > hi_v - gap / 2, y < lo_v + gap / 2
+            y_vis = min(max(y, lo_v + gap / 2), hi_v - gap / 2)             # fuori vista: il riquadro resta al bordo con una freccia
+            ty = y_vis if not ys or y_vis - ys[-1] >= gap else ys[-1] + gap
             ys.append(ty)
-            ax.text(right, ty, f" {name} {y:.{d}f} ", color="#000000", fontsize=8, va="center", fontweight="normal",
+            ax.text(right, ty, f" {name} {y:.{d}f} " + ("▲ " if out_hi else ("▼ " if out_lo else "")), color="#000000", fontsize=8, va="center", fontweight="normal",
                     bbox=dict(boxstyle="square,pad=0.25", facecolor=colr, edgecolor="none"))
     ax.set_xlim(-1, right + int(n * 0.12))
     ax.yaxis.tick_right()
@@ -165,6 +175,6 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     axm.set_xticks(x[::step])
     axm.set_xticklabels([f"{t:%d/%m %H:%M}" for t in df.index[::step]], rotation=0, fontsize=7)
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=110, facecolor=BG, bbox_inches="tight")
+    fig.savefig(buf, format="png", dpi=130, facecolor=BG, bbox_inches="tight")
     plt.close(fig)
     return buf.getvalue()
