@@ -34,6 +34,7 @@ class V3Params(WyParams):
     abort_ext: float = 1.0        # estremo oltre (estensione 2,0) = zona fallita
     min_rr: float = 3.0
     max_cands: int = 3
+    leg1_ret: float = 0.25        # la prima induzione finisce al primo ritracciamento >= questa frazione dell'impulso
 
 
 def generate_v3(m5: pd.DataFrame, p: V3Params = V3Params(), stats: dict | None = None) -> pd.DataFrame:
@@ -78,8 +79,22 @@ def generate_v3(m5: pd.DataFrame, p: V3Params = V3Params(), stats: dict | None =
             continue
         seen_k0.add((k0, long))
         p2 = int(np.searchsorted(t5, np.datetime64(d.t2)))
-        b_idx = p2 + int(np.argmax(fav[p2:k0 + 1]))
-        B = fav[b_idx]
+        p1 = int(np.searchsorted(t5, np.datetime64(d.t1)))
+        H0 = fav[p1:p2 + 1].max()                      # massimo della lateralizzazione
+        runmax, b_idx = -np.inf, None
+        for k in range(p2 + 1, k0 + 1):
+            if b_idx is None:
+                if fav[k] > H0:                        # uscita dalla lateralizzazione = inizio della prima induzione
+                    runmax, b_idx = fav[k], k
+                continue
+            if fav[k] > runmax:
+                runmax, b_idx = fav[k], k
+            elif adv[k] < runmax - p.leg1_ret * (runmax - lvl):   # primo ritracciamento: fine della Leg 1
+                break
+        if b_idx is None:
+            bump("senza uscita dalla lateralizzazione")
+            continue
+        B = runmax
         length = B - lvl
         i_s = min(int(np.searchsorted(ts, np.datetime64(d.confirmed))), len(A) - 1)
         if not (length >= p.min_leg_atr * A[i_s]):
@@ -104,17 +119,23 @@ def generate_v3(m5: pd.DataFrame, p: V3Params = V3Params(), stats: dict | None =
                             int(np.searchsorted(o_pos, form_limit, "right")))
                 m = (o_mit[sl_] > tpos) & (o_hi[sl_] >= kz_lo - pad) & (o_lo[sl_] <= kz_hi + pad)
                 cand_hi = o_hi[sl_][m].max() if m.any() else -np.inf
-            if j <= sw_idx or j - sw_idx > p.choch_wait_bars or sw_idx in used:
+            if j <= sw_idx:
                 continue
-            mm = bisect_right(piv, sw_idx - p.n_swing) - 1
-            if mm < 0 or not (cl[j] > fav[piv[mm]] and cl[j] > sw_low):
+            q = bisect_right(advp, j - p.n_swing) - 1           # ultimo test (swing avverso) confermato
+            if q < 0 or advp[q] < sw_idx:
                 continue
-            used.add(sw_idx)
-            bump("CHoCH")
+            pt = advp[q]
+            if pt in used or j - pt > p.choch_wait_bars:
+                continue
+            mm = bisect_right(piv, pt - 1) - 1                  # ultimo pivot di riferimento prima del test
+            if mm < 0:
+                continue
             ref = fav[piv[mm]]
-            q = bisect_right(advp, j - p.n_swing) - 1
-            pstart = advp[q] if (q >= 0 and advp[q] >= k0) else sw_idx
-            sl_adv = adv[pstart:j + 1].min()
+            if not (cl[j] > ref and cl[j] > adv[pt]):
+                continue
+            used.add(pt)
+            bump("CHoCH")
+            sl_adv = adv[pt:j + 1].min()                        # SL oltre l'ultimo test
             f = next((k for k in range(j + 1, min(j + 1 + p.retest_bars, len(t5))) if adv[k] <= ref), None)
             if f is None:
                 bump("senza ritorno")
