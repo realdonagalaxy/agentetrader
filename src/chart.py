@@ -46,7 +46,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     for a in (ax, axm):
         a.set_facecolor(BG)
         a.tick_params(colors=FG, labelsize=8)
-        a.grid(color=GRID, linewidth=0.5)
+        a.grid(False) if gold else a.grid(color=GRID, linewidth=0.5)
         for sp in a.spines.values():
             sp.set_color(GRID)
     x = np.arange(n)
