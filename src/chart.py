@@ -64,7 +64,10 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     # lateralizzazione
     lo_lat, hi_lat = sorted((float(rec["level"]), float(rec["lat_hi"])))
     x1, x2 = pos(rec["lat_t1"]), pos(rec["lat_t2"])
-    ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, color="#9c27b0", alpha=0.25, lw=0))
+    if gold:                                   # solo rette: lati alto e basso della lateralizzazione
+        ax.hlines([lo_lat, hi_lat], x1, max(x2, x1 + 1), colors=LAT, linewidth=1.2)
+    else:
+        ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, color="#9c27b0", alpha=0.25, lw=0))
     ax.text(x1, hi_lat, " lateralizzazione", color=LAT, fontsize=8, va="bottom")
     ax.hlines(float(rec["level"]), x1, right, colors=LAT, linestyles=":", linewidth=0.9)
     gold_marks = []
@@ -100,8 +103,9 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
         ts = tps or [float(rec["tp"])]
         ts = ts if not gold else [float(rec["tp1"]), float(rec["tp"])]
         xs = pos(rec["choch_time"])
-        ax.add_patch(Rectangle((xs, min(entry, sl)), right - xs, abs(entry - sl), color=DOWN, alpha=0.22, lw=0))
-        ax.add_patch(Rectangle((xs, min(entry, ts[-1])), right - xs, abs(ts[-1] - entry), color=UP, alpha=0.15, lw=0))
+        if not gold:
+            ax.add_patch(Rectangle((xs, min(entry, sl)), right - xs, abs(entry - sl), color=DOWN, alpha=0.22, lw=0))
+            ax.add_patch(Rectangle((xs, min(entry, ts[-1])), right - xs, abs(ts[-1] - entry), color=UP, alpha=0.15, lw=0))
         for y, name, colr in [(entry, "Entry", "#ffeb3b"), (sl, "SL", DOWN)] + [(t, f"TP{i + 1}" if len(ts) > 1 else "TP", UP) for i, t in enumerate(ts)]:
             ax.hlines(y, xs, right, colors=colr, linewidth=1.1)
             ax.text(right, y, f" {name} {y:.{d}f}", color=("#0b6b3a" if (gold and colr == UP) else ("#b8860b" if (gold and name == "Entry") else colr)), fontsize=8, va="center", fontweight="bold" if gold else "normal")
