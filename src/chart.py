@@ -21,13 +21,16 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     gold = rec.get("kind") in ("UT", "UTAD", "watch")
     if gold:
         macd_par = (8, 21, 5)
-        tf, bars = 5, max(bars, 700)         # la sequenza BC/UT/UTAD e il MACD (8,21,5) sono calcolati su M5: grafico M5 coerente
+        tf, bars = 5, max(bars, 900)         # la sequenza BC/UT/UTAD e il MACD (8,21,5) sono calcolati su M5: grafico M5 coerente
     full = m5 if tf == 5 else resample(m5, f"{tf}min")
     cl = full["close"]
     macd = cl.ewm(span=macd_par[0], adjust=False).mean() - cl.ewm(span=macd_par[1], adjust=False).mean()
     hist_full = macd - macd.ewm(span=macd_par[2], adjust=False).mean()
     t_end = full.index[-1]
-    t_start = min(pd.Timestamp(rec["lat_t1"]) - pd.Timedelta(hours=12), t_end - pd.Timedelta(days=3))
+    if gold:                                  # solo lo schema: dalla lateralizzazione (con un po' di margine) fino al segnale
+        t_start = pd.Timestamp(rec["lat_t1"]) - pd.Timedelta(minutes=5 * 30)
+    else:
+        t_start = min(pd.Timestamp(rec["lat_t1"]) - pd.Timedelta(hours=12), t_end - pd.Timedelta(days=3))
     df = full.loc[t_start:].iloc[-bars:]
     hist = hist_full.reindex(df.index)
     n = len(df)
@@ -45,9 +48,14 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
             sp.set_color(GRID)
     x = np.arange(n)
     o, h, l, c = (df[k].to_numpy() for k in ("open", "high", "low", "close"))
-    col = np.where(c >= o, UP, DOWN)
-    ax.vlines(x, l, h, colors=col, linewidth=0.8)
-    ax.bar(x, np.abs(c - o), bottom=np.minimum(o, c), color=col, width=0.7)
+    if gold:        # Buy: corpo vuoto con bordo verde · Sell: corpo bianco con bordo verde
+        ax.vlines(x, l, h, colors=UP, linewidth=0.9)
+        ax.bar(x, np.maximum(np.abs(c - o), 1e-9), bottom=np.minimum(o, c), width=0.7, linewidth=0.9, edgecolor=UP,
+               color=np.where(c >= o, BG, "#ffffff"))
+    else:
+        col = np.where(c >= o, UP, DOWN)
+        ax.vlines(x, l, h, colors=col, linewidth=0.8)
+        ax.bar(x, np.abs(c - o), bottom=np.minimum(o, c), color=col, width=0.7)
     right = n - 1 + max(8, int(n * 0.14))
 
     # lateralizzazione
@@ -96,13 +104,13 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
             ax.text(right, y, f" {name} {y:.{d}f}", color=colr, fontsize=8, va="center")
             ymin, ymax = min(ymin, y), max(ymax, y)
     ymin, ymax = (min(ymin, lo_lat), max(ymax, hi_lat)) if gold else (min(ymin, kz_lo), max(ymax, kz_hi, hi_lat))
-    pad = (ymax - ymin) * 0.06
+    pad = (ymax - ymin) * (0.14 if gold else 0.06)
     ax.set_ylim(ymin - pad, ymax + pad)
     ax.set_xlim(-1, right + int(n * 0.12))
     ax.yaxis.tick_right()
     ax.set_title(f"{sym} · M{tf} · {'BUY' if buy else 'SELL'}{' · ' + rec['kind'] if gold else ''} · {pd.Timestamp(t_end):%d/%m/%Y %H:%M} UTC", color=FG, fontsize=11, loc="left")
     # MACD
-    tick = gold and rec.get("mode") == "tick"
+    tick = False                                            # grafico sempre con MACD (i volumi tick sono rimossi dalla grafica)
     hv = df["volume"].to_numpy(dtype=float) if tick else hist.to_numpy()
     axm.bar(x, hv, color="#ffffff" if tick else np.where(hv >= 0, UP, DOWN), width=1.0 if tick else 0.7, linewidth=0)
     for xi, name, colr in (gold_marks if tick else []):           # tick: pallino sulla barra col volume massimo attorno al punto
