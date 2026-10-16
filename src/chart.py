@@ -12,13 +12,16 @@ from matplotlib.patches import Rectangle  # noqa: E402
 from src.data_loader import resample  # noqa: E402
 from src.live_analysis import decimals  # noqa: E402
 
-BG, FG, GRID = "#131722", "#d1d4dc", "#2a2e39"
+BG0, FG0, GRID0 = "#131722", "#d1d4dc", "#2a2e39"
 UP, DOWN = "#26a69a", "#ef5350"
 
 
 def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float] | None = None, bars: int = 360,
                  macd_par: tuple[int, int, int] = (3, 10, 16)) -> bytes:
     gold = rec.get("kind") in ("UT", "UTAD", "watch")
+    # tema: oro = stile TradingView dell'utente (sfondo grigio, candele nere); altri strumenti = tema scuro
+    BG, FG, GRID = ("#9e9e9e", "#161616", "#858585") if gold else (BG0, FG0, GRID0)
+    LAT, DOT_EDGE = ("#4a148c", "#222222") if gold else ("#ce93d8", "#131722")
     if gold:
         macd_par = (8, 21, 5)
         tf, bars = 5, max(bars, 900)         # la sequenza BC/UT/UTAD e il MACD (8,21,5) sono calcolati su M5: grafico M5 coerente
@@ -49,9 +52,9 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     x = np.arange(n)
     o, h, l, c = (df[k].to_numpy() for k in ("open", "high", "low", "close"))
     if gold:        # Buy: corpo vuoto con bordo verde · Sell: corpo bianco con bordo verde
-        ax.vlines(x, l, h, colors=UP, linewidth=0.9)
-        ax.bar(x, np.maximum(np.abs(c - o), 1e-9), bottom=np.minimum(o, c), width=0.7, linewidth=0.9, edgecolor=UP,
-               color=np.where(c >= o, BG, "#ffffff"))
+        ax.vlines(x, l, h, colors="#111111", linewidth=0.9)
+        ax.bar(x, np.maximum(np.abs(c - o), 1e-9), bottom=np.minimum(o, c), width=0.7, linewidth=0.9, edgecolor="#111111",
+               color=np.where(c >= o, BG, "#111111"))
     else:
         col = np.where(c >= o, UP, DOWN)
         ax.vlines(x, l, h, colors=col, linewidth=0.8)
@@ -62,13 +65,13 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     lo_lat, hi_lat = sorted((float(rec["level"]), float(rec["lat_hi"])))
     x1, x2 = pos(rec["lat_t1"]), pos(rec["lat_t2"])
     ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, color="#9c27b0", alpha=0.25, lw=0))
-    ax.text(x1, hi_lat, " lateralizzazione", color="#ce93d8", fontsize=8, va="bottom")
-    ax.hlines(float(rec["level"]), x1, right, colors="#ce93d8", linestyles=":", linewidth=0.9)
+    ax.text(x1, hi_lat, " lateralizzazione", color=LAT, fontsize=8, va="bottom")
+    ax.hlines(float(rec["level"]), x1, right, colors=LAT, linestyles=":", linewidth=0.9)
     gold_marks = []
     # Leg 1 e Kill Zone
     xb = pos(rec["b_time"])
-    ax.plot([x2, xb], [float(rec["level"]), float(rec["b_price"])], color="#9e9e9e", linestyle="--", linewidth=1)
-    ax.text(xb, float(rec["b_price"]), " fine Leg 1", color="#bdbdbd", fontsize=8, va="bottom" if buy else "top")
+    ax.plot([x2, xb], [float(rec["level"]), float(rec["b_price"])], color="#444444" if gold else "#9e9e9e", linestyle="--", linewidth=1)
+    ax.text(xb, float(rec["b_price"]), " fine Leg 1", color=FG if gold else "#bdbdbd", fontsize=8, va="bottom" if buy else "top")
     kz_lo, kz_hi = sorted((float(rec["kz_lo"]), float(rec["kz_hi"])))
     if not gold:
         ax.add_patch(Rectangle((xb, kz_lo), right - xb, kz_hi - kz_lo, color="#42a5f5", alpha=0.22, lw=0))
@@ -82,8 +85,8 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
             marks.append(("utad", "Spring" if buy else "UTAD", GRN))
         for i_m, (k, name, colr) in enumerate(marks):
             xi, yv = pos(rec[f"{k}_time"]), float(rec[f"{k}_price"])
-            ax.plot([xi], [yv], "o", color=colr, markersize=10, zorder=5, markeredgecolor="#131722")
-            ax.annotate(name, (xi, yv), xytext=(0, (-1 if buy else 1) * (14 + 13 * (i_m % 2))), textcoords="offset points", color=colr, fontsize=9,
+            ax.plot([xi], [yv], "o", color=colr, markersize=10, zorder=5, markeredgecolor=DOT_EDGE)
+            ax.annotate(name, (xi, yv), xytext=(0, (-1 if buy else 1) * (14 + 13 * (i_m % 2))), textcoords="offset points", color=FG if gold else colr, fontsize=9,
                         fontweight="bold", ha="center", va="top" if buy else "bottom")
             gold_marks.append((xi, name, colr))
     else:
@@ -101,7 +104,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
         ax.add_patch(Rectangle((xs, min(entry, ts[-1])), right - xs, abs(ts[-1] - entry), color=UP, alpha=0.15, lw=0))
         for y, name, colr in [(entry, "Entry", "#ffeb3b"), (sl, "SL", DOWN)] + [(t, f"TP{i + 1}" if len(ts) > 1 else "TP", UP) for i, t in enumerate(ts)]:
             ax.hlines(y, xs, right, colors=colr, linewidth=1.1)
-            ax.text(right, y, f" {name} {y:.{d}f}", color=colr, fontsize=8, va="center")
+            ax.text(right, y, f" {name} {y:.{d}f}", color=("#0b6b3a" if (gold and colr == UP) else ("#b8860b" if (gold and name == "Entry") else colr)), fontsize=8, va="center", fontweight="bold" if gold else "normal")
             ymin, ymax = min(ymin, y), max(ymax, y)
     ymin, ymax = (min(ymin, lo_lat), max(ymax, hi_lat)) if gold else (min(ymin, kz_lo), max(ymax, kz_hi, hi_lat))
     pad = (ymax - ymin) * (0.14 if gold else 0.06)
@@ -112,11 +115,14 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     # MACD
     tick = False                                            # grafico sempre con MACD (i volumi tick sono rimossi dalla grafica)
     hv = df["volume"].to_numpy(dtype=float) if tick else hist.to_numpy()
-    axm.bar(x, hv, color="#ffffff" if tick else ("#2196f3" if gold else np.where(hv >= 0, UP, DOWN)), width=1.0 if (tick or gold) else 0.7, linewidth=0)
+    if gold:                                                   # stile TradingView: bastoncini sottili blu-viola
+        axm.vlines(x, 0, np.nan_to_num(hv), colors="#3f4fd1", linewidth=1.1)
+    else:
+        axm.bar(x, hv, color="#ffffff" if tick else np.where(hv >= 0, UP, DOWN), width=1.0 if tick else 0.7, linewidth=0)
     for xi, name, colr in (gold_marks if tick else []):           # tick: pallino sulla barra col volume massimo attorno al punto
         a0, a1 = max(xi - 6, 0), min(xi + 7, n)
         pk = a0 + int(np.nanargmax(hv[a0:a1]))
-        axm.plot([pk], [hv[pk]], "o", color=colr, markersize=8, zorder=5, markeredgecolor="#131722")
+        axm.plot([pk], [hv[pk]], "o", color=colr, markersize=8, zorder=5, markeredgecolor=DOT_EDGE)
     for xi, name, colr in ([] if tick else gold_marks):                       # pallino sulla gobba del MACD (picco della gobba che contiene la barra)
         if np.isnan(hv[xi]):
             continue
@@ -127,8 +133,11 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
         while hi_i < n - 1 and not np.isnan(hv[hi_i + 1]) and (hv[hi_i + 1] >= 0) == sg:
             hi_i += 1
         pk = lo_i + int(np.nanargmax(np.abs(hv[lo_i:hi_i + 1])))
-        axm.plot([pk], [hv[pk]], "o", color=colr, markersize=8, zorder=5, markeredgecolor="#131722")
+        axm.plot([pk], [hv[pk]], "o", color=colr, markersize=8, zorder=5, markeredgecolor=DOT_EDGE)
     axm.axhline(0, color=GRID, linewidth=0.8)
+    if np.isfinite(hv).any():
+        lo_, hi_ = float(np.nanmin(hv)), float(np.nanmax(hv))
+        axm.set_ylim(min(lo_, 0) - 0.12 * (hi_ - lo_), max(hi_, 0) + 0.08 * (hi_ - lo_))
     axm.text(0.005, 0.85, "Volumi tick" if tick else f"MACD {macd_par}", transform=axm.transAxes, color=FG, fontsize=8)
     axm.yaxis.tick_right()
     step = max(n // 8, 1)

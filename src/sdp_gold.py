@@ -132,6 +132,107 @@ def generate_gold(m5: pd.DataFrame, p: GoldParams = GoldParams(), stats: dict | 
                 return j, sw_idx, float(adv[sw_idx:j + 1].min()), mt(s, min(j, e)), pt
             return None
 
+        if p.mode == "macd":
+            # Sequenza (etichette = swing/pivot successivi, "tutto spostato a sinistra" come da utente):
+            #  SC = candela del picco dell'istogramma (gobba più profonda della Leg 2); ST = primo swing low sotto il minimo della candela SC;
+            #  Spring = primo swing low sotto l'ST; ulteriori test dello Spring non sono etichettati.
+            #  Ingressi: CHoCH M5 dopo l'ST (prima dello Spring) -> mercato, SL sotto il minimo più basso fino al CHoCH;
+            #            CHoCH M5 dopo lo Spring (inclusi i suoi test) -> stop pendente, SL sotto il minimo più basso fino al CHoCH.
+            dep = -h_
+            c_idx, c_dep, stage, st_lab, sp_lab, sw_low, sw_idx, ut, done = None, 0.0, 0, None, None, np.inf, None, None, False
+
+            def first_pivot_below(after, level, j):
+                x = bisect_right(advp, after)
+                while x < len(advp) and advp[x] <= j - p.n_swing:
+                    if adv[advp[x]] < level:
+                        return advp[x]
+                    x += 1
+                return None
+
+            for j in range(k0, last + 1):
+                if adv[j] < lvl and dep[j] > c_dep:
+                    c_idx, c_dep, stage, st_lab, sp_lab, sw_low, sw_idx, ut = j, dep[j], 0, None, None, np.inf, None, None
+                    continue
+                if c_idx is None:
+                    continue
+                if st_lab is None:
+                    st_lab = first_pivot_below(c_idx, adv[c_idx], j)
+                if st_lab is not None and sp_lab is None:
+                    sp_lab = first_pivot_below(st_lab, adv[st_lab], j)
+                if sp_lab is not None and stage != 1:                      # Spring formato: si passa alla fase 1
+                    stage, sw_low, sw_idx = 1, adv[sp_lab], sp_lab
+                ref_low = adv[c_idx] if stage == 0 else (adv[st_lab] if st_lab is not None else adv[c_idx])
+                if stage == 0 and adv[j] < ref_low and adv[j] < sw_low:
+                    sw_low, sw_idx = adv[j], j
+                elif stage == 1 and adv[j] < sw_low:
+                    sw_low, sw_idx = adv[j], j
+                if stage == 2 or sw_idx is None or j <= sw_idx or (stage == 0 and st_lab is None):
+                    continue
+                if sw_low < lvl - p.abort_ext * length:
+                    break
+                q = bisect_right(advp, j - p.n_swing) - 1
+                if q < 0 or advp[q] < sw_idx:
+                    continue
+                pt = advp[q]
+                if pt in used or j - pt > p.choch_wait_bars:
+                    continue
+                mm = bisect_right(piv, pt - 1) - 1
+                if mm < 0:
+                    continue
+                ref = fav[piv[mm]]
+                if not (cl[j] > ref and cl[j] > adv[pt]):
+                    continue
+                used.add(pt)
+                swl = float(adv[sw_idx:j + 1].min())
+                tb = (pd.Timestamp(t5[c_idx]), sgn * float(adv[c_idx]))
+                if stage == 0:
+                    risk = cl[j] - swl
+                    rr = (B - cl[j]) / risk if risk > 0 else 0
+                    if rr >= p.tp1_r:
+                        bump("UT")
+                        out.append({**base, "time": pd.Timestamp(t5[j]), "kind": "UT", "state": "filled", "start": pd.Timestamp(t5[min(j + 1, N - 1)]),
+                                    "entry": sgn * cl[j], "sl": sgn * swl, "tp1": sgn * (cl[j] + p.tp1_r * risk), "tp": sgn * B, "rr": rr,
+                                    "choch_time": pd.Timestamp(t5[j]), "bc_time": tb[0], "bc_price": tb[1],
+                                    "ut_time": pd.Timestamp(t5[st_lab]), "ut_price": sgn * float(adv[st_lab])})
+                    else:
+                        bump("UT con R:R sotto 2,5")
+                    ut = (st_lab, float(adv[st_lab]), j)
+                    stage, sw_low, sw_idx, sp_lab = 2, np.inf, None, None   # dopo il CHoCH dell'ST si attende lo Spring
+                    continue
+                stop = fav[j]
+                risk = stop - swl
+                rr = (B - stop) / risk if risk > 0 else 0
+                if rr < p.tp1_r:
+                    bump("UTAD con R:R sotto 2,5")
+                    continue                                     # un ulteriore test dello Spring può dare un nuovo CHoCH
+                f, state = None, "filled"
+                for k in range(j + 1, min(j + 1 + p.retest_bars, N)):
+                    if adv[k] <= swl:
+                        break
+                    if fav[k] >= stop:
+                        f = k
+                        break
+                if f is None:
+                    if live and j + p.retest_bars >= N - 1 and (j == N - 1 or adv[j + 1:].min() > swl):
+                        f, state = j, "waiting_fill"
+                    else:
+                        bump("UTAD non riempito")
+                        continue
+                bump("UTAD")
+                out.append({**base, "time": pd.Timestamp(t5[j]), "kind": "UTAD", "state": state, "start": pd.Timestamp(t5[f]),
+                            "entry": sgn * stop, "sl": sgn * swl, "tp1": sgn * (stop + p.tp1_r * risk), "tp": sgn * B, "rr": rr,
+                            "choch_time": pd.Timestamp(t5[j]), "bc_time": tb[0], "bc_price": tb[1],
+                            "ut_time": pd.Timestamp(t5[st_lab]), "ut_price": sgn * float(adv[st_lab]),
+                            "utad_time": pd.Timestamp(t5[sp_lab]), "utad_price": sgn * float(adv[sp_lab])})
+                done = True
+                break
+            if live and c_idx is not None and last == N - 1 and not done:
+                w = {**base, "time": pd.Timestamp(t5[last]), "kind": "watch", "state": "watching",
+                     "bc_time": pd.Timestamp(t5[c_idx]), "bc_price": sgn * float(adv[c_idx])}
+                if st_lab is not None:
+                    w.update({"ut_time": pd.Timestamp(t5[st_lab]), "ut_price": sgn * float(adv[st_lab])})
+                out.append(w)
+            continue
         clim, stage, ut = None, 0, None            # clim = (s, e, low, volume)
         def bc(c):
             """Candela del climax: con il MACD è la barra del picco della gobba (in linea col pallino sull'istogramma);
