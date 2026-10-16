@@ -59,35 +59,47 @@ def _tick(b):
     return "✅" if bool(b) else "❌"
 
 
+def take_profits(entry: float, sl: float, tp_end: float, buy: bool) -> list[float]:
+    """TP1 = +3R (qui la tua gestione: chiudi il 50% e porta lo SL a pareggio), TP3 = fine Leg 1, TP2 = a metà tra i due."""
+    risk = abs(entry - sl)
+    sgn = 1 if buy else -1
+    tp1 = entry + sgn * 3 * risk
+    if abs(tp_end - entry) <= 3.2 * risk:                     # fine Leg 1 praticamente a 3R: un solo obiettivo
+        return [tp_end]
+    return [tp1, (tp1 + tp_end) / 2, tp_end]
+
+
 def format_alert(sym: str, a: dict, r: dict) -> str:
     d, pip = decimals(sym), pip_size(sym)
     buy = r["side"] == "buy"
+    side = "BUY" if buy else "SELL"
     t_loc = pd.Timestamp(a["time"]).tz_localize("UTC").astimezone(MACRO_TZ)
-    head = f"{html.escape(sym)} — {'BUY' if buy else 'SELL'}"
     ctx = f"🕒 {t_loc:%d/%m %H:%M} (Roma) · macro: {a['macro'] or 'fuori macro'} · Bias H4 {a['bias']['H4']} / H1 {a['bias']['H1']}"
     kz = f"{_px(min(r['kz_lo'], r['kz_hi']), d)} – {_px(max(r['kz_lo'], r['kz_hi']), d)}"
-    struct = (f"<b>Struttura</b>: {'minimi' if buy else 'massimi'} uguali a {_px(r['level'], d)} · Leg 1 fino a {_px(r['b_price'], d)} "
-              f"({float(r['leg1_len']) / pip:.0f} pip) · <b>Kill Zone</b> 1.272–1.618: {kz} · estremo {_px(r['sw_price'], d)}")
+    struct = (f"Struttura: {'minimi' if buy else 'massimi'} uguali a {_px(r['level'], d)} · Leg 1 fino a {_px(r['b_price'], d)} "
+              f"({float(r['leg1_len']) / pip:.0f} pip) · Kill Zone 1.272–1.618: {kz} · estremo {_px(r['sw_price'], d)}")
     if r["state"] == "watching":
-        return "\n".join([f"👀 <b>{head} in formazione</b> (M{a['tf']})", ctx, struct,
-                          f"OB non mitigato toccato: {_tick(r.get('ob_touch'))}",
-                          "Da attendere: CHoCH M5 e ritorno sul livello rotto (ordine limite).", "", DISCLAIMER])
-    risk = abs(float(r["entry"]) - float(r["sl"]))
+        return "\n".join([f"<b>{side} {html.escape(sym)}</b> — in formazione", "",
+                          f"Il prezzo è nella Kill Zone ({kz}). Attendere CHoCH M5 e ritorno sul livello rotto: allora arriva l'ordine con entry, SL e TP.",
+                          ctx, struct, f"OB non mitigato toccato: {_tick(r.get('ob_touch'))} (M{a['tf']})", "", DISCLAIMER])
+    entry, sl, tp_end = float(r["entry"]), float(r["sl"]), float(r["tp"])
+    risk = abs(entry - sl)
+    tps = take_profits(entry, sl, tp_end, buy)
     deadline = (pd.Timestamp(r["choch_time"]) + pd.Timedelta(minutes=5 * V3Params().retest_bars)).tz_localize("UTC").astimezone(MACRO_TZ)
-    status = "già riempito" if r["state"] == "filled" else "in attesa del ritorno"
-    return "\n".join([
-        f"🔔 <b>{head} — ordine limite</b> (M{a['tf']}, {status})", ctx, struct,
-        f"<b>Conferme</b>: OB {_tick(r.get('ob_touch'))} · Wyckoff gobba minore {_tick(r.get('wy_div'))} / volume minore {_tick(r.get('wy_vol'))}"
-        f" · VWAP {float(r['vwap_ext']):.1f}σ" if pd.notna(r.get("vwap_ext")) else f"<b>Conferme</b>: OB {_tick(r.get('ob_touch'))}",
-        "",
-        "<b>Piano</b>",
-        f"Entry limite {_px(r['entry'], d)} (ritorno sul livello rotto, valido fino alle {deadline:%H:%M} Roma)",
-        f"SL {_px(r['sl'], d)}  (rischio {risk / pip:.0f} pip)",
-        f"TP fine Leg 1 {_px(r['tp'], d)}  ·  R:R {float(r['rr']):.1f}",
-        "Gestione (tua regola): a +3R chiudi il 50% e porta lo SL a pareggio."]
-        + ([f"⚠️ Rischio piccolo ({risk / pip:.0f} pip, meno di 0,3 ATR M15): spread e slippage possono pesare molto sul R:R."]
-           if risk < 0.3 * a.get("atr15", 0) else [])
-        + ["", DISCLAIMER])
+    status = "già riempito" if r["state"] == "filled" else f"in attesa del ritorno, valido fino alle {deadline:%H:%M} (Roma)"
+    conf = f"OB {_tick(r.get('ob_touch'))} · Wyckoff gobba minore {_tick(r.get('wy_div'))} / volume minore {_tick(r.get('wy_vol'))}"
+    if pd.notna(r.get("vwap_ext")):
+        conf += f" · VWAP {float(r['vwap_ext']):.1f}σ"
+    lines = [f"<b>{side} {html.escape(sym)}</b>", "", f"➡️ Entry: {_px(entry, d)}", "", f"❌ SL: {_px(sl, d)}"]
+    lines += [f"✅ TP{i + 1}: {_px(t, d)}" for i, t in enumerate(tps)]
+    lines += ["", f"Ordine limite {status}.",
+              f"Rischio {risk / pip:.0f} pip · R:R verso fine Leg 1: {float(r['rr']):.1f}. "
+              + ("A TP1 (+3R) chiudi il 50% e porta lo SL a pareggio; TP finale = fine Leg 1." if len(tps) > 1
+                 else "Obiettivo = fine Leg 1 (circa +3R)."),
+              ctx, struct, f"Conferme: {conf} (M{a['tf']})"]
+    if risk < 0.3 * a.get("atr15", 0):
+        lines.append(f"⚠️ Rischio piccolo ({risk / pip:.0f} pip, meno di 0,3 ATR M15): spread e slippage possono pesare molto sul R:R.")
+    return "\n".join(lines + ["", DISCLAIMER])
 
 
 def run_once(sym: str, m5: pd.DataFrame, tf: int, journal=aj.PATH, bot=None) -> list[str]:
