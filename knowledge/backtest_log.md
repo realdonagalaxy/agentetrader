@@ -201,3 +201,10 @@ Il segno è opposto a quello di oro/EURUSD per le macro: nessun effetto orario c
 ## Sintesi v3 — caso base ("tutti i setup", tutte le ore, gestione BE+50% a 3R)
 EURUSD M15 −0,044R (±0,029) · XAUUSD M15 +0,001R (±0,031) · XAUUSD M5 −0,050R (±0,026) · NASDAQ M15 −0,011R (±0,044) · NASDAQ M5 +0,041R (±0,040).
 Media ≈ −0,01R: compatibile con zero. Nessun vantaggio meccanico dimostrato (costi ancora ignorati).
+
+## FRVP H1 + CHoCH M5 (17 ott 2026) — EURUSD 2003-2025, R:R min 2,0, TP = fine gamba, costi ignorati
+Regole in `src/frvp_h1.py` (gamba H1 LH→LL / HL→HH, profilo tick a range fisso, tocco POC/VAH/VAL ±0,25 ATR M15, CHoCH M5, SL oltre l'estremo del ritracciamento).
+- Profilo (primo tra POC/VAH/VAL): n=1548, win 21,4% (pareggio 23,5%), −0,088R ±0,048, IS −0,100 / OOS −0,062.
+- Solo POC −0,009R ±0,070 · solo VAH −0,186R ±0,074 · solo VAL −0,068R ±0,079.
+- Controllo "50% della gamba" (senza volumi) −0,118R ±0,055 · Placebo +0,011R ±0,015.
+- Su 2018-2019 (n=119) usciva +0,39R ±0,23: rumore, scomparso sull'intero periodo. Nessun vantaggio dimostrato.
