@@ -162,3 +162,16 @@ Funnel: 41.640 doppi → 18.010 Leg 1 valida → 29.413 CHoCH → 9.567 trade (1
 | macro | BE+50% a 3R | KZ + OB + Wy+vol | 127 | +0,292R (±0,186) | +0,300 | +0,275 |
 Lettura: su EURUSD con le regole v3 non c'è vantaggio (tutte le ore negativo, macro ≈ 0). La variante più selettiva (KZ+OB+Wy+vol, macro) è positiva ma con
 127 trade e ±0,19R (≈1,6 errori standard); sull'oro la stessa variante dà +0,055R: non coerente. Nessuna evidenza robusta su due strumenti.
+
+## SDP v3 — XAUUSD struttura M5 (16 ott 2026, eseguito dall'utente; regole v3, costi ignorati, mancano 2007 e 2021)
+Funnel: 114.340 doppi → 34.014 Leg 1 valida → 46.983 CHoCH → 10.830 trade (31.625 scartati per R:R < 1:3, 2.144 senza ritorno).
+| Scopo | Uscita | Variante | n | exp (±err) | IS | OOS |
+|---|---|---|---|---|---|---|
+| tutte le ore | TP unico | tutti i setup | 5034 | −0,080R (±0,033) | −0,132 | +0,041 |
+| tutte le ore | BE+50% a 3R | tutti i setup | 5034 | −0,050R (±0,026) | −0,096 | +0,059 |
+| tutte le ore | BE+50% a 3R | KZ + Wyckoff+volume | 2646 | −0,020R (±0,037) | −0,058 | +0,069 |
+| macro | TP unico | tutti i setup | 1063 | −0,048R (±0,064) | −0,039 | −0,070 |
+| macro | BE+50% a 3R | tutti i setup | 1063 | +0,028R (±0,055) | +0,024 | +0,037 |
+| macro | BE+50% a 3R | KZ + OB + Wy+vol | 198 | +0,066R (±0,132) | +0,071 | +0,055 |
+Lettura: su M5 l'oro è negativo su tutte le ore (−0,05/−0,08R, ≈2–2,4 errori standard) e nelle macro ≈ 0 (+0,03R ±0,055). Il +0,105R visto su M15 (macro, BE+50%) non si ripete su M5.
+Nessun filtro (Kill Zone, OB, Wyckoff) migliora in modo coerente. Nessuna evidenza di vantaggio sull'oro.
