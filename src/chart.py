@@ -57,7 +57,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     if gold:        # Buy: corpo vuoto con bordo verde · Sell: corpo bianco con bordo verde
         ax.vlines(x, l, h, colors="#111111", linewidth=0.9)
         ax.bar(x, np.maximum(np.abs(c - o), 1e-9), bottom=np.minimum(o, c), width=0.7, linewidth=0.9, edgecolor="#111111",
-               color=np.where(c >= o, "#b2b5be", "#111111"))
+               color=np.where(c >= o, "#ffffff", "#111111"))
     else:
         col = np.where(c >= o, UP, DOWN)
         ax.vlines(x, l, h, colors=col, linewidth=0.8)
