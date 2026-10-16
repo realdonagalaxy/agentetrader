@@ -162,7 +162,7 @@ def generate_v3(m5: pd.DataFrame, p: V3Params = V3Params(), stats: dict | None =
                 z = (sgn * adv[sw_idx] - vwap[sw_idx]) / vsd[sw_idx]
             out.append({"time": pd.Timestamp(t5[f]), "sid": sid, "side": "buy" if long else "sell", "entry": sgn * ref,
                         "sl": sgn * sl_adv, "tp": sgn * B, "rr": rr, "choch_time": pd.Timestamp(t5[j]), "state": state,
-                        "b_price": sgn * B, "leg1_len": length,
+                        "b_price": sgn * B, "leg1_len": length, "lat_t1": pd.Timestamp(t5[p1]), "lat_t2": pd.Timestamp(t5[p2]), "lat_hi": sgn * H0, "b_time": pd.Timestamp(t5[b_idx]), "sw_time": pd.Timestamp(t5[sw_idx]),
                         "level": d.level, "kz_lo": sgn * kz_lo, "kz_hi": sgn * kz_hi, "sw_price": sgn * sw_low,
                         "in_kz": bool(sw_low <= kz_hi + pad and sw_low >= lvl - p.abort_ext * length),
                         "ob_touch": bool(cand_hi is not None and np.isfinite(cand_hi) and sw_low <= cand_hi),
@@ -177,12 +177,12 @@ def generate_v3(m5: pd.DataFrame, p: V3Params = V3Params(), stats: dict | None =
                 sgn = 1 if long else -1
                 out.append({"time": pd.Timestamp(t5[last]), "sid": sid, "side": "buy" if long else "sell", "state": "watching",
                             "level": d.level, "kz_lo": sgn * kz_lo, "kz_hi": sgn * kz_hi, "sw_price": sgn * sw_low,
-                            "b_price": sgn * B, "leg1_len": length, "in_kz": True,
+                            "b_price": sgn * B, "leg1_len": length, "lat_t1": pd.Timestamp(t5[p1]), "lat_t2": pd.Timestamp(t5[p2]), "lat_hi": sgn * H0, "b_time": pd.Timestamp(t5[b_idx]), "sw_time": pd.Timestamp(t5[sw_idx]), "in_kz": True,
                             "ob_touch": bool(cand_hi is not None and np.isfinite(cand_hi) and sw_low <= cand_hi)})
     return pd.DataFrame(out).set_index("time").sort_index() if out else pd.DataFrame()
 
 
-def simulate_v3(m5: pd.DataFrame, sig: pd.DataFrame, managed: bool = False) -> pd.DataFrame:
+def simulate_v3(m5: pd.DataFrame, sig: pd.DataFrame, managed: bool = False, partial_r: float = 3.0, frac: float = 0.5) -> pd.DataFrame:
     """Ordine limite riempito alla barra del segnale (valutata per intero, ipotesi prudente: SL prima del TP).
     managed: a +3R chiude il 50% e porta lo SL a pareggio; il resto va al TP o a pareggio."""
     Hh, Ll = m5["high"].to_numpy(), m5["low"].to_numpy()
@@ -196,9 +196,9 @@ def simulate_v3(m5: pd.DataFrame, sig: pd.DataFrame, managed: bool = False) -> p
         hi, lo = Hh[f:], Ll[f:]
         first = lambda m: int(m.argmax()) if m.any() else 10**9
         if buy:
-            isl, itp, i3 = first(lo <= sl), first(hi >= tp), first(hi >= e + 3 * risk)
+            isl, itp, i3 = first(lo <= sl), first(hi >= tp), first(hi >= e + partial_r * risk)
         else:
-            isl, itp, i3 = first(hi >= sl), first(lo <= tp), first(lo <= e - 3 * risk)
+            isl, itp, i3 = first(hi >= sl), first(lo <= tp), first(lo <= e - partial_r * risk)
         if not managed:
             if isl == itp == 10**9:
                 continue
@@ -210,10 +210,10 @@ def simulate_v3(m5: pd.DataFrame, sig: pd.DataFrame, managed: bool = False) -> p
                     ibe, itp2 = first(rest_lo <= e), first(rest_hi >= tp)
                 else:
                     ibe, itp2 = first(rest_hi >= e), first(rest_lo <= tp)
-                if rr <= 3 + 1e-9 or itp2 < ibe:
-                    R = 1.5 + 0.5 * rr
+                if rr <= partial_r + 1e-9 or itp2 < ibe:
+                    R = frac * partial_r + (1 - frac) * rr
                 elif ibe < 10**9:
-                    R = 1.5
+                    R = frac * partial_r
                 else:
                     continue
             elif isl < 10**9:

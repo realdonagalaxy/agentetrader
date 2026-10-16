@@ -1,0 +1,92 @@
+"""Screenshot del setup (candele + zone + livelli + istogramma MACD) da allegare ai messaggi Telegram."""
+import io
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+from matplotlib.patches import Rectangle  # noqa: E402
+
+from src.data_loader import resample  # noqa: E402
+from src.live_analysis import decimals  # noqa: E402
+
+BG, FG, GRID = "#131722", "#d1d4dc", "#2a2e39"
+UP, DOWN = "#26a69a", "#ef5350"
+
+
+def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float] | None = None, bars: int = 360) -> bytes:
+    full = m5 if tf == 5 else resample(m5, f"{tf}min")
+    cl = full["close"]
+    macd = cl.ewm(span=3, adjust=False).mean() - cl.ewm(span=10, adjust=False).mean()
+    hist_full = macd - macd.ewm(span=16, adjust=False).mean()
+    t_end = full.index[-1]
+    t_start = min(pd.Timestamp(rec["lat_t1"]) - pd.Timedelta(hours=12), t_end - pd.Timedelta(days=3))
+    df = full.loc[t_start:].iloc[-bars:]
+    hist = hist_full.reindex(df.index)
+    n = len(df)
+    pos = lambda t: int(np.clip(df.index.searchsorted(pd.Timestamp(t)), 0, n - 1))
+    d = decimals(sym)
+    buy = rec["side"] == "buy"
+
+    fig, (ax, axm) = plt.subplots(2, 1, figsize=(11, 6.6), gridspec_kw={"height_ratios": [4, 1], "hspace": 0.04}, sharex=True)
+    fig.patch.set_facecolor(BG)
+    for a in (ax, axm):
+        a.set_facecolor(BG)
+        a.tick_params(colors=FG, labelsize=8)
+        a.grid(color=GRID, linewidth=0.5)
+        for sp in a.spines.values():
+            sp.set_color(GRID)
+    x = np.arange(n)
+    o, h, l, c = (df[k].to_numpy() for k in ("open", "high", "low", "close"))
+    col = np.where(c >= o, UP, DOWN)
+    ax.vlines(x, l, h, colors=col, linewidth=0.8)
+    ax.bar(x, np.abs(c - o), bottom=np.minimum(o, c), color=col, width=0.7)
+    right = n - 1 + max(8, int(n * 0.14))
+
+    # lateralizzazione
+    lo_lat, hi_lat = sorted((float(rec["level"]), float(rec["lat_hi"])))
+    x1, x2 = pos(rec["lat_t1"]), pos(rec["lat_t2"])
+    ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, color="#9c27b0", alpha=0.25, lw=0))
+    ax.text(x1, hi_lat, " lateralizzazione", color="#ce93d8", fontsize=8, va="bottom")
+    ax.hlines(float(rec["level"]), x1, right, colors="#ce93d8", linestyles=":", linewidth=0.9)
+    # Leg 1 e Kill Zone
+    xb = pos(rec["b_time"])
+    ax.plot([x2, xb], [float(rec["level"]), float(rec["b_price"])], color="#9e9e9e", linestyle="--", linewidth=1)
+    ax.text(xb, float(rec["b_price"]), " fine Leg 1", color="#bdbdbd", fontsize=8, va="bottom" if buy else "top")
+    kz_lo, kz_hi = sorted((float(rec["kz_lo"]), float(rec["kz_hi"])))
+    ax.add_patch(Rectangle((xb, kz_lo), right - xb, kz_hi - kz_lo, color="#42a5f5", alpha=0.22, lw=0))
+    ax.text(xb + 1, kz_hi, " Kill Zone", color="#90caf9", fontsize=8, va="bottom")
+    ax.plot([pos(rec["sw_time"])], [float(rec["sw_price"])], "o", color="#ffeb3b", markersize=5)
+    # piano
+    ymin, ymax = float(df["low"].min()), float(df["high"].max())
+    if pd.notna(rec.get("entry")):
+        entry, sl = float(rec["entry"]), float(rec["sl"])
+        ts = tps or [float(rec["tp"])]
+        xs = pos(rec["choch_time"])
+        ax.add_patch(Rectangle((xs, min(entry, sl)), right - xs, abs(entry - sl), color=DOWN, alpha=0.22, lw=0))
+        ax.add_patch(Rectangle((xs, min(entry, ts[-1])), right - xs, abs(ts[-1] - entry), color=UP, alpha=0.15, lw=0))
+        for y, name, colr in [(entry, "Entry", "#42a5f5"), (sl, "SL", DOWN)] + [(t, f"TP{i + 1}" if len(ts) > 1 else "TP", UP) for i, t in enumerate(ts)]:
+            ax.hlines(y, xs, right, colors=colr, linewidth=1.1)
+            ax.text(right, y, f" {name} {y:.{d}f}", color=colr, fontsize=8, va="center")
+            ymin, ymax = min(ymin, y), max(ymax, y)
+    ymin, ymax = min(ymin, kz_lo), max(ymax, kz_hi, hi_lat)
+    pad = (ymax - ymin) * 0.06
+    ax.set_ylim(ymin - pad, ymax + pad)
+    ax.set_xlim(-1, right + int(n * 0.12))
+    ax.yaxis.tick_right()
+    ax.set_title(f"{sym} · M{tf} · {'BUY' if buy else 'SELL'} · {pd.Timestamp(t_end):%d/%m/%Y %H:%M} UTC", color=FG, fontsize=11, loc="left")
+    # MACD
+    hv = hist.to_numpy()
+    axm.bar(x, hv, color=np.where(hv >= 0, UP, DOWN), width=0.7)
+    axm.axhline(0, color=GRID, linewidth=0.8)
+    axm.text(0.005, 0.85, "MACD (3,10,16)", transform=axm.transAxes, color=FG, fontsize=8)
+    axm.yaxis.tick_right()
+    step = max(n // 8, 1)
+    axm.set_xticks(x[::step])
+    axm.set_xticklabels([f"{t:%d/%m %H:%M}" for t in df.index[::step]], rotation=0, fontsize=7)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=110, facecolor=BG, bbox_inches="tight")
+    plt.close(fig)
+    return buf.getvalue()

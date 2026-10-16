@@ -1,7 +1,7 @@
 """Journal degli avvisi dell'assistente (foglio "Avvisi" di journal/trading_journal.xlsx).
 
 Ogni avviso inviato (setup in formazione o ordine limite) viene registrato; l'esito si calcola in automatico dai prezzi successivi
-con le stesse regole del backtest v3 (riempimento al ritorno, SL, TP a fine Leg 1, gestione BE+50% a 3R).
+con le stesse regole del backtest v3 (riempimento al ritorno, SL, TP a fine Leg 1; gestione dell'utente: 60% a +2R, resto a pareggio).
 La colonna "Decisione utente" resta vuota: la compili tu (Preso / Saltato) per confrontare le tue scelte con quelle del codice.
 """
 from pathlib import Path
@@ -15,7 +15,7 @@ from src.sdp_v3 import V3Params, simulate_v3
 PATH = Path("journal/trading_journal.xlsx")
 SHEET = "Avvisi"
 HEAD = ["ID", "Creato (UTC)", "Simbolo", "Lato", "Stato", "Livello", "KZ basso", "KZ alto", "Entry limite", "SL", "TP", "R:R",
-        "Chiave", "Telegram", "Decisione utente", "Riempito (UTC)", "Esito", "R (TP unico)", "R (BE+50%)", "Chiuso (UTC)", "Note"]
+        "Chiave", "Telegram", "Decisione utente", "Riempito (UTC)", "Esito", "R (TP unico)", "R (gestione utente)", "Chiuso (UTC)", "Note"]
 COL = {h: i for i, h in enumerate(HEAD)}
 
 
@@ -82,7 +82,7 @@ def resolve(m5: pd.DataFrame, row: dict, p: V3Params = V3Params()) -> dict | Non
     fill = touch.idxmax()
     sig = pd.DataFrame([{"side": row["Lato"], "entry": entry, "sl": float(row["SL"]), "tp": float(row["TP"]), "rr": float(row["R:R"])}],
                        index=pd.DatetimeIndex([fill]))
-    plain, managed = simulate_v3(m5, sig, False), simulate_v3(m5, sig, True)
+    plain, managed = simulate_v3(m5, sig, False), simulate_v3(m5, sig, True, partial_r=2.0, frac=0.6)
     out = {"Riempito (UTC)": pd.Timestamp(fill).isoformat()}
     if plain.empty and managed.empty:
         out["Esito"] = "aperto"
@@ -90,7 +90,7 @@ def resolve(m5: pd.DataFrame, row: dict, p: V3Params = V3Params()) -> dict | Non
     rp = float(plain.R.iloc[0]) if len(plain) else None
     rm = float(managed.R.iloc[0]) if len(managed) else None
     out.update({"Esito": ("TP" if (rp or 0) > 0 else "SL") if rp is not None else "aperto",
-                "R (TP unico)": rp, "R (BE+50%)": rm})
+                "R (TP unico)": rp, "R (gestione utente)": rm})
     return out
 
 

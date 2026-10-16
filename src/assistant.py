@@ -15,6 +15,7 @@ import html
 import pandas as pd
 
 from src import alert_journal as aj
+from src.chart import render_chart
 from src.data_loader import load_ohlc, resample
 from src.live_analysis import decimals, pip_size
 from src.market_config import MACRO_TZ, macro_at
@@ -60,11 +61,10 @@ def _tick(b):
 
 
 def take_profits(entry: float, sl: float, tp_end: float, buy: bool) -> list[float]:
-    """TP1 = +3R (qui la tua gestione: chiudi il 50% e porta lo SL a pareggio), TP3 = fine Leg 1, TP2 = a metà tra i due."""
+    """TP1 = +2R (qui chiudi il 60% del profitto), TP3 = fine Leg 1, TP2 = a metà tra i due."""
     risk = abs(entry - sl)
-    sgn = 1 if buy else -1
-    tp1 = entry + sgn * 3 * risk
-    if abs(tp_end - entry) <= 3.2 * risk:                     # fine Leg 1 praticamente a 3R: un solo obiettivo
+    tp1 = entry + (1 if buy else -1) * 2 * risk
+    if abs(tp_end - entry) <= 2.2 * risk:                     # fine Leg 1 praticamente a 2R: un solo obiettivo
         return [tp_end]
     return [tp1, (tp1 + tp_end) / 2, tp_end]
 
@@ -94,15 +94,22 @@ def format_alert(sym: str, a: dict, r: dict) -> str:
     lines += [f"✅ TP{i + 1}: {_px(t, d)}" for i, t in enumerate(tps)]
     lines += ["", f"Ordine limite {status}.",
               f"Rischio {risk / pip:.0f} pip · R:R verso fine Leg 1: {float(r['rr']):.1f}. "
-              + ("A TP1 (+3R) chiudi il 50% e porta lo SL a pareggio; TP finale = fine Leg 1." if len(tps) > 1
-                 else "Obiettivo = fine Leg 1 (circa +3R)."),
+              + ("A TP1 (+2R) chiudi il 60% del profitto; TP finale = fine Leg 1." if len(tps) > 1
+                 else "Obiettivo = fine Leg 1."),
               ctx, struct, f"Conferme: {conf} (M{a['tf']})"]
     if risk < 0.3 * a.get("atr15", 0):
         lines.append(f"⚠️ Rischio piccolo ({risk / pip:.0f} pip, meno di 0,3 ATR M15): spread e slippage possono pesare molto sul R:R.")
     return "\n".join(lines + ["", DISCLAIMER])
 
 
-def run_once(sym: str, m5: pd.DataFrame, tf: int, journal=aj.PATH, bot=None) -> list[str]:
+def split_message(msg: str) -> tuple[str, str]:
+    """(didascalia per la foto, descrizione da mandare sotto): il blocco Entry/SL/TP resta con la foto."""
+    parts = msg.split("\n\n")
+    n = 3 if "➡️" in msg else 2
+    return "\n\n".join(parts[:n]), "\n\n".join(parts[n:])
+
+
+def run_once(sym: str, m5: pd.DataFrame, tf: int, journal=aj.PATH, bot=None, chart: bool = True, chart_dir=None) -> list[str]:
     a = analyze(m5, tf)
     sent = []
     for r in a["rows"]:
@@ -112,10 +119,29 @@ def run_once(sym: str, m5: pd.DataFrame, tf: int, journal=aj.PATH, bot=None) -> 
         aid, new = aj.upsert(sym, {**r, "entry": r["entry"] or float("nan"), "sl": r["sl"] or float("nan"),
                                    "tp": r["tp"] or float("nan"), "rr": r["rr"] or float("nan")}, journal)
         if new:
-            msg = format_alert(sym, a, {k: (v if v is not None else float("nan")) for k, v in r.items()})
+            rec = {k: (v if v is not None else float("nan")) for k, v in r.items()}
+            msg = format_alert(sym, a, rec)
             sent.append(msg)
+            png = None
+            if chart:
+                try:
+                    tps = take_profits(float(rec["entry"]), float(rec["sl"]), float(rec["tp"]), rec["side"] == "buy") \
+                        if pd.notna(rec["entry"]) else None
+                    png = render_chart(sym, m5, tf, rec, tps)
+                except Exception as e:                      # lo screenshot non deve mai bloccare l'avviso
+                    print(f"(screenshot non disponibile: {e})")
+            if chart_dir and png:
+                from pathlib import Path
+                Path(chart_dir).mkdir(parents=True, exist_ok=True)
+                (Path(chart_dir) / f"{sym}_{aid}_{pd.Timestamp(a['time']):%Y%m%d_%H%M}.png").write_bytes(png)
             if bot:
-                bot.send(msg)
+                if png:
+                    caption, rest = split_message(msg)
+                    bot.send_photo(png, caption)
+                    if rest:
+                        bot.send(rest)
+                else:
+                    bot.send(msg)
                 aj.mark_sent(aid, journal)
     aj.update_outcomes(sym, m5, journal)
     return sent
@@ -130,6 +156,8 @@ if __name__ == "__main__":
     ap.add_argument("--step", type=int, default=60)
     ap.add_argument("--journal", default=str(aj.PATH))
     ap.add_argument("--send", action="store_true")
+    ap.add_argument("--no-chart", action="store_true")
+    ap.add_argument("--chart-dir", help="salva qui gli screenshot (utile per provare senza Telegram)")
     a = ap.parse_args()
     full = load_ohlc(f"data/{a.symbol}_BID_M5.csv.gz")
     bot = None
@@ -142,7 +170,7 @@ if __name__ == "__main__":
         t, end = pd.Timestamp(a.replay[0]), pd.Timestamp(a.replay[1])
         n = 0
         while t <= end:
-            msgs = run_once(a.symbol, full.loc[:t], a.tf, jp, bot)
+            msgs = run_once(a.symbol, full.loc[:t], a.tf, jp, bot, not a.no_chart, a.chart_dir)
             for m in msgs:
                 n += 1
                 print(f"\n[{t}]\n{m}")
@@ -153,5 +181,5 @@ if __name__ == "__main__":
         print(df[["ID", "Creato (UTC)", "Lato", "Stato", "Entry limite", "SL", "TP", "R:R", "Esito", "R (TP unico)", "R (BE+50%)"]].to_string(index=False))
     else:
         m5 = full.loc[:pd.Timestamp(a.until)] if a.until else full
-        for m in run_once(a.symbol, m5, a.tf, jp, bot):
+        for m in run_once(a.symbol, m5, a.tf, jp, bot, not a.no_chart, a.chart_dir):
             print("\n" + m)
