@@ -108,7 +108,11 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
             ax.add_patch(Rectangle((xs, min(entry, ts[-1])), right - xs, abs(ts[-1] - entry), color=UP, alpha=0.15, lw=0))
         for y, name, colr in [(entry, "Entry", "#ffeb3b"), (sl, "SL", DOWN)] + [(t, f"TP{i + 1}" if len(ts) > 1 else "TP", UP) for i, t in enumerate(ts)]:
             ax.hlines(y, 0 if gold else xs, right, colors=colr, linewidth=1.1)       # oro: linea su tutta la larghezza del grafico
-            ax.text(right, y, f" {name} {y:.{d}f}", color=("#0b6b3a" if (gold and colr == UP) else ("#b8860b" if (gold and name == "Entry") else colr)), fontsize=8, va="center", fontweight="bold" if gold else "normal")
+            if gold:                                                       # etichetta a riquadro col colore della linea, testo nero
+                ax.text(right, y, f" {name} {y:.{d}f} ", color="#000000", fontsize=8, va="center", fontweight="bold",
+                        bbox=dict(boxstyle="square,pad=0.25", facecolor=colr, edgecolor="none"))
+            else:
+                ax.text(right, y, f" {name} {y:.{d}f}", color=colr, fontsize=8, va="center")
             ymin, ymax = min(ymin, y), max(ymax, y)
     ymin, ymax = (min(ymin, lo_lat), max(ymax, hi_lat)) if gold else (min(ymin, kz_lo), max(ymax, kz_hi, hi_lat))
     pad = (ymax - ymin) * (0.14 if gold else 0.06)
