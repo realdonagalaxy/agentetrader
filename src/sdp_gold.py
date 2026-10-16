@@ -34,6 +34,8 @@ class GoldParams(V3Params):
     macd_signal: int = 5
     tp1_r: float = 2.5
     frac: float = 0.6             # quota chiusa a TP1
+    mode: str = "macd"            # "macd" = gobbe dell'istogramma; "tick" = swing con volumi tick (niente MACD)
+    tick_win: int = 6             # modalità tick: volume sommato su ±tick_win barre attorno al minimo/massimo di swing
 
 
 def generate_gold(m5: pd.DataFrame, p: GoldParams = GoldParams(), stats: dict | None = None, live: bool = False) -> pd.DataFrame:
@@ -93,10 +95,12 @@ def generate_gold(m5: pd.DataFrame, p: GoldParams = GoldParams(), stats: dict | 
         over = next((k for k in range(k0, last + 1) if cl[k] > B), None)    # Leg 2 annullata se il prezzo torna oltre B
         if over is not None:
             last = over - 1
-        base = {"sid": sid, "side": "buy" if long else "sell", "level": d.level, "b_price": sgn * B, "leg1_len": length,
+        base = {"sid": sid, "mode": p.mode, "side": "buy" if long else "sell", "level": d.level, "b_price": sgn * B, "leg1_len": length,
                 "lat_t1": pd.Timestamp(t5[p1]), "lat_t2": pd.Timestamp(t5[p2]), "lat_hi": sgn * H0, "b_time": pd.Timestamp(t5[b_idx]),
                 "kz_lo": sgn * (lvl - (p.fib_hi - 1) * length), "kz_hi": sgn * (lvl - (p.fib_lo - 1) * length)}
         lobes = [(max(s, k0), e) for s, e in _lobes(h_[k0:last + 1], k0) if e >= k0]
+        if p.mode == "tick":                       # "gobba" = swing avverso (pivot) con la sua finestra di volume tick
+            lobes = [(max(q - p.tick_win, k0), min(q + p.tick_win, last)) for q in advp if k0 <= q <= last - p.n_swing]
         lobes = [(s, e) for s, e in lobes if adv[s:e + 1].min() < lvl]
         used: set[int] = set()
 
@@ -292,15 +296,16 @@ if __name__ == "__main__":
     sym = sys.argv[1] if len(sys.argv) > 1 else "XAUUSD"
     tf = int(sys.argv[2]) if len(sys.argv) > 2 else 5
     mode = sys.argv[3] if len(sys.argv) > 3 else "full"            # full | test
+    vmode = sys.argv[4] if len(sys.argv) > 4 else "macd"           # macd | tick
     m5 = load_ohlc(f"data/{sym}_BID_M5.csv.gz")
     if mode == "test":
         m5 = m5.loc["2018":"2019"]
     st: dict = {}
-    sig = generate_gold(m5, GoldParams(struct_tf_min=tf), st)
+    sig = generate_gold(m5, GoldParams(struct_tf_min=tf, mode=vmode), st)
     print(f"{sym} struttura M{tf} - Funnel:", st, flush=True)
     print(f"dati: {m5.index[0]} → {m5.index[-1]} · segnali: {len(sig)}")
     if len(sig):
-        sig.to_pickle(f"data/gold_signals_{sym}_M{tf}.pkl")
+        sig.to_pickle(f"data/gold_signals_{sym}_M{tf}_{vmode}.pkl")
         report(simulate_gold(m5, sig), f"{sym} M{tf}")
         fs = filters(sig)
         res = simulate_gold(m5, fs)

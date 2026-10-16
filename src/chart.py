@@ -102,9 +102,14 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     ax.yaxis.tick_right()
     ax.set_title(f"{sym} · M{tf} · {'BUY' if buy else 'SELL'}{' · ' + rec['kind'] if gold else ''} · {pd.Timestamp(t_end):%d/%m/%Y %H:%M} UTC", color=FG, fontsize=11, loc="left")
     # MACD
-    hv = hist.to_numpy()
-    axm.bar(x, hv, color=np.where(hv >= 0, UP, DOWN), width=0.7)
-    for xi, name, colr in gold_marks:                       # pallino sulla gobba del MACD (picco della gobba che contiene la barra)
+    tick = gold and rec.get("mode") == "tick"
+    hv = df["volume"].to_numpy(dtype=float) if tick else hist.to_numpy()
+    axm.bar(x, hv, color=np.where(c >= o, UP, DOWN) if tick else np.where(hv >= 0, UP, DOWN), width=0.7)
+    for xi, name, colr in (gold_marks if tick else []):           # tick: pallino sulla barra col volume massimo attorno al punto
+        a0, a1 = max(xi - 6, 0), min(xi + 7, n)
+        pk = a0 + int(np.nanargmax(hv[a0:a1]))
+        axm.plot([pk], [hv[pk]], "o", color=colr, markersize=8, zorder=5, markeredgecolor="#131722")
+    for xi, name, colr in ([] if tick else gold_marks):                       # pallino sulla gobba del MACD (picco della gobba che contiene la barra)
         if np.isnan(hv[xi]):
             continue
         sg = hv[xi] >= 0
@@ -116,7 +121,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
         pk = lo_i + int(np.nanargmax(np.abs(hv[lo_i:hi_i + 1])))
         axm.plot([pk], [hv[pk]], "o", color=colr, markersize=8, zorder=5, markeredgecolor="#131722")
     axm.axhline(0, color=GRID, linewidth=0.8)
-    axm.text(0.005, 0.85, f"MACD {macd_par}", transform=axm.transAxes, color=FG, fontsize=8)
+    axm.text(0.005, 0.85, "Volumi tick" if tick else f"MACD {macd_par}", transform=axm.transAxes, color=FG, fontsize=8)
     axm.yaxis.tick_right()
     step = max(n // 8, 1)
     axm.set_xticks(x[::step])
