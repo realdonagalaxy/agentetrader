@@ -132,3 +132,20 @@ Wy+volume (solo): anni positivi 11/21; prima metà +0,085R, seconda metà −0,0
 Con 1,0 pip di costo: −0,023R (solo) / +0,004R (KZ+Wy+vol). Spread reale dell'oro tipicamente > 1 pip in questa unità (da confermare col broker).
 Lettura: l'effetto macro visto su EURUSD (placebo +0,049R) NON si ripete sull'oro (placebo −0,011R); il vantaggio di Wy+volume (+0,016R) è dentro l'errore e
 instabile nel tempo (+0,085 → −0,054). Nessuna evidenza di vantaggio sull'oro.
+
+## SDP v3 (regole calibrate sui trade dell'utente) — XAUUSD struttura M15, 2003-05 → 2025-12 (eseguito dall'utente sul Mac, 16 ott 2026)
+Regole v3: Leg 1 = prima induzione fuori dalla lateralizzazione (primo ritracciamento ≥ 25%); finestre in giorni; sforamento Kill Zone fino a estensione 2,0;
+CHoCH M5 sullo swing dopo l'ultimo test; ingresso sul ritorno al livello rotto; SL oltre l'ultimo test; TP = fine Leg 1; R:R ≥ 1:3. Costi ignorati. Dati senza 2007 e 2021.
+Funnel: 43.803 doppi → 18.181 con Leg 1 valida → 30.100 CHoCH → 8.500 trade (18.647 scartati per R:R < 1:3, 1.513 senza ritorno).
+Risultati (primo candidato per struttura):
+| Scopo | Uscita | Variante | n | win | expectancy (±err) | IS | OOS |
+|---|---|---|---|---|---|---|---|
+| tutte le ore | TP unico | tutti i setup | 3921 | 17,0% | −0,020R (±0,040) | −0,058 | +0,069 |
+| tutte le ore | BE+50% a 3R | tutti i setup | 3921 | 25,4% | +0,001R (±0,031) | −0,028 | +0,067 |
+| tutte le ore | BE+50% a 3R | KZ + Wyckoff+volume | 2084 | 26,1% | +0,029R (±0,044) | +0,019 | +0,052 |
+| macro | TP unico | tutti i setup | 859 | 19,7% | +0,052R (±0,075) | −0,036 | +0,256 |
+| macro | BE+50% a 3R | tutti i setup | 859 | 28,5% | +0,105R (±0,063) | +0,030 | +0,278 |
+| macro | BE+50% a 3R | Kill Zone | 837 | 28,6% | +0,101R (±0,064) | +0,048 | +0,224 |
+| macro | BE+50% a 3R | KZ + OB + Wy+vol | 129 | 26,4% | +0,055R (±0,166) | +0,011 | +0,159 |
+Lettura: nessuna variante si distingue dallo zero oltre ~1,7 errori standard; Kill Zone, OB e Wyckoff non migliorano rispetto ai setup di base (la parte che conta è
+geometria + ritorno + R:R ≥ 3). L'unico segno coerente (IS e OOS positivi) è macro + gestione BE/50%: +0,10R, da verificare su altri strumenti e con i costi.
