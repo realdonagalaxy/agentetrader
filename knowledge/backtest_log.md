@@ -186,3 +186,18 @@ Funnel: 15.927 doppi → 7.359 Leg 1 valida → 10.898 CHoCH → 4.468 trade (4.
 | tutte le ore | BE+50% a 3R | KZ+OB+Wy+vol | 357 | +0,076R (±0,107) | +0,041 | +0,156 |
 Lettura: tutto ≈ 0 entro l'errore; le macro Londra+NY (non specifiche per l'indice) sono negative fuori campione. Nessuna evidenza di vantaggio.
 Da fare: separare "solo New York 14:30–17:00" (finestra indicata nel documento per gli indici USA) con `python -m src.sdp_v3 USATECHIDXUSD 15 report`.
+
+## SDP v3 — USATECHIDXUSD (Nasdaq 100) struttura M5, 2011-09 → 2025-12 (eseguito dall'utente, 16 ott 2026)
+Funnel: 38.033 doppi → 12.841 Leg 1 valida → 15.870 CHoCH → 5.764 trade (7.709 scartati per R:R < 1:3).
+| Scopo | Uscita | Variante | n | exp (±err) | IS | OOS |
+|---|---|---|---|---|---|---|
+| tutte le ore | TP unico | tutti i setup | 2590 | +0,052R (±0,056) | +0,044 | +0,069 |
+| tutte le ore | BE+50% a 3R | tutti i setup | 2590 | +0,041R (±0,040) | +0,047 | +0,027 |
+| tutte le ore | BE+50% a 3R | KZ + OB | 960 | +0,081R (±0,072) | +0,071 | +0,106 |
+| macro | BE+50% a 3R | tutti i setup | 829 | −0,014R (±0,065) | +0,019 | −0,092 |
+Lettura: su M5 il Nasdaq è leggermente positivo su tutte le ore (+0,04/+0,05R, ≈1 errore standard, IS e OOS concordi), le macro Londra+NY sono ≈ 0 o negative.
+Il segno è opposto a quello di oro/EURUSD per le macro: nessun effetto orario coerente tra strumenti.
+
+## Sintesi v3 — caso base ("tutti i setup", tutte le ore, gestione BE+50% a 3R)
+EURUSD M15 −0,044R (±0,029) · XAUUSD M15 +0,001R (±0,031) · XAUUSD M5 −0,050R (±0,026) · NASDAQ M15 −0,011R (±0,044) · NASDAQ M5 +0,041R (±0,040).
+Media ≈ −0,01R: compatibile con zero. Nessun vantaggio meccanico dimostrato (costi ancora ignorati).
