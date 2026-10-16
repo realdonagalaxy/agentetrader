@@ -112,7 +112,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     # MACD
     tick = False                                            # grafico sempre con MACD (i volumi tick sono rimossi dalla grafica)
     hv = df["volume"].to_numpy(dtype=float) if tick else hist.to_numpy()
-    axm.bar(x, hv, color="#ffffff" if tick else np.where(hv >= 0, UP, DOWN), width=1.0 if tick else 0.7, linewidth=0)
+    axm.bar(x, hv, color="#ffffff" if tick else ("#2196f3" if gold else np.where(hv >= 0, UP, DOWN)), width=1.0 if (tick or gold) else 0.7, linewidth=0)
     for xi, name, colr in (gold_marks if tick else []):           # tick: pallino sulla barra col volume massimo attorno al punto
         a0, a1 = max(xi - 6, 0), min(xi + 7, n)
         pk = a0 + int(np.nanargmax(hv[a0:a1]))
