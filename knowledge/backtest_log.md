@@ -175,3 +175,14 @@ Funnel: 114.340 doppi → 34.014 Leg 1 valida → 46.983 CHoCH → 10.830 trade 
 | macro | BE+50% a 3R | KZ + OB + Wy+vol | 198 | +0,066R (±0,132) | +0,071 | +0,055 |
 Lettura: su M5 l'oro è negativo su tutte le ore (−0,05/−0,08R, ≈2–2,4 errori standard) e nelle macro ≈ 0 (+0,03R ±0,055). Il +0,105R visto su M15 (macro, BE+50%) non si ripete su M5.
 Nessun filtro (Kill Zone, OB, Wyckoff) migliora in modo coerente. Nessuna evidenza di vantaggio sull'oro.
+
+## SDP v3 — USATECHIDXUSD (Nasdaq 100) struttura M15, 2011-09 → 2025-12 (eseguito dall'utente, 16 ott 2026)
+Funnel: 15.927 doppi → 7.359 Leg 1 valida → 10.898 CHoCH → 4.468 trade (4.883 scartati per R:R < 1:3).
+| Scopo | Uscita | Variante | n | exp (±err) | IS | OOS |
+|---|---|---|---|---|---|---|
+| tutte le ore | TP unico | tutti i setup | 1951 | +0,007R (±0,061) | +0,031 | −0,049 |
+| tutte le ore | BE+50% a 3R | tutti i setup | 1951 | −0,011R (±0,044) | +0,013 | −0,066 |
+| macro | BE+50% a 3R | tutti i setup | 649 | −0,041R (±0,073) | +0,047 | −0,245 |
+| tutte le ore | BE+50% a 3R | KZ+OB+Wy+vol | 357 | +0,076R (±0,107) | +0,041 | +0,156 |
+Lettura: tutto ≈ 0 entro l'errore; le macro Londra+NY (non specifiche per l'indice) sono negative fuori campione. Nessuna evidenza di vantaggio.
+Da fare: separare "solo New York 14:30–17:00" (finestra indicata nel documento per gli indici USA) con `python -m src.sdp_v3 USATECHIDXUSD 15 report`.

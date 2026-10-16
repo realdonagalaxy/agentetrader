@@ -229,6 +229,8 @@ def report(sig: pd.DataFrame, m5: pd.DataFrame, label: str, crypto: bool = False
     scopes = {"tutte le ore": pd.Series(True, index=sig.index)}
     if not crypto:
         scopes["macro Londra+NY"] = sig.macro.notna()
+        scopes["solo Londra 9-11"] = sig.macro == "Londra"
+        scopes["solo New York 14:30-17"] = sig.macro == "New York"
     for sname, smask in scopes.items():
         for mode in (False, True):
             print(f"\n--- {label} | {sname} | {'gestione BE+50% a 3R' if mode else 'TP unico a fine Leg 1'} ---", flush=True)
