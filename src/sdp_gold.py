@@ -34,7 +34,7 @@ class GoldParams(V3Params):
     macd_signal: int = 5
     tp1_r: float = 2.5
     frac: float = 0.6             # quota chiusa a TP1
-    mode: str = "macd"            # "macd" = gobbe dell'istogramma; "tick" = swing con volumi tick (niente MACD)
+    mode: str = "macd"            # "macd" = gobbe dell'istogramma (la più grande = climax); "tick" = swing con volumi tick (niente MACD)
     tick_win: int = 6             # modalità tick: volume sommato su ±tick_win barre attorno al minimo/massimo di swing
 
 
@@ -104,6 +104,10 @@ def generate_gold(m5: pd.DataFrame, p: GoldParams = GoldParams(), stats: dict | 
         lobes = [(s, e) for s, e in lobes if adv[s:e + 1].min() < lvl]
         used: set[int] = set()
 
+        def mt(s, e):
+            """Dimensione della gobba: profondità del picco dell'istogramma (macd) oppure somma dei volumi tick (tick)."""
+            return float(W[s:e + 1].sum()) if p.mode == "tick" else float(-h_[s:e + 1].min())
+
         def scan(s, e, ref_low, vol_ref):
             """Primo CHoCH M5 dopo un estremo oltre ref_low nella gobba (s,e). Restituisce (j, sw_idx, sw_low, vol) o None."""
             sw_low, sw_idx = np.inf, None
@@ -125,13 +129,13 @@ def generate_gold(m5: pd.DataFrame, p: GoldParams = GoldParams(), stats: dict | 
                 if not (cl[j] > ref and cl[j] > adv[pt]):
                     continue
                 used.add(pt)
-                return j, sw_idx, float(adv[sw_idx:j + 1].min()), float(W[s:min(j, e) + 1].sum()), pt
+                return j, sw_idx, float(adv[sw_idx:j + 1].min()), mt(s, min(j, e)), pt
             return None
 
         clim, stage, ut = None, 0, None            # clim = (s, e, low, volume)
         bc = lambda c: (pd.Timestamp(t5[c[0] + int(np.argmin(adv[c[0]:c[1] + 1]))]), sgn * c[2])
         for s, e in lobes:
-            lowT, volT = float(adv[s:e + 1].min()), float(W[s:e + 1].sum())
+            lowT, volT = float(adv[s:e + 1].min()), mt(s, e)
             if lowT < lvl - p.abort_ext * length:
                 break
             if clim is None:
