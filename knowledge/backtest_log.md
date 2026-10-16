@@ -149,3 +149,16 @@ Risultati (primo candidato per struttura):
 | macro | BE+50% a 3R | KZ + OB + Wy+vol | 129 | 26,4% | +0,055R (±0,166) | +0,011 | +0,159 |
 Lettura: nessuna variante si distingue dallo zero oltre ~1,7 errori standard; Kill Zone, OB e Wyckoff non migliorano rispetto ai setup di base (la parte che conta è
 geometria + ritorno + R:R ≥ 3). L'unico segno coerente (IS e OOS positivi) è macro + gestione BE/50%: +0,10R, da verificare su altri strumenti e con i costi.
+
+## SDP v3 — EURUSD struttura M15 (16 ott 2026, regole v3, costi ignorati)
+Funnel: 41.640 doppi → 18.010 Leg 1 valida → 29.413 CHoCH → 9.567 trade (16.348 scartati per R:R < 1:3).
+| Scopo | Uscita | Variante | n | exp (±err) | IS | OOS |
+|---|---|---|---|---|---|---|
+| tutte le ore | TP unico | tutti i setup | 4367 | −0,028R (±0,040) | −0,040 | −0,001 |
+| tutte le ore | BE+50% a 3R | tutti i setup | 4368 | −0,044R (±0,029) | −0,046 | −0,040 |
+| macro | TP unico | tutti i setup | 922 | +0,011R (±0,072) | +0,010 | +0,012 |
+| macro | BE+50% a 3R | tutti i setup | 922 | +0,017R (±0,061) | +0,016 | +0,019 |
+| macro | BE+50% a 3R | KZ + Wyckoff+volume | 437 | +0,063R (±0,092) | +0,152 | −0,142 |
+| macro | BE+50% a 3R | KZ + OB + Wy+vol | 127 | +0,292R (±0,186) | +0,300 | +0,275 |
+Lettura: su EURUSD con le regole v3 non c'è vantaggio (tutte le ore negativo, macro ≈ 0). La variante più selettiva (KZ+OB+Wy+vol, macro) è positiva ma con
+127 trade e ±0,19R (≈1,6 errori standard); sull'oro la stessa variante dà +0,055R: non coerente. Nessuna evidenza robusta su due strumenti.
