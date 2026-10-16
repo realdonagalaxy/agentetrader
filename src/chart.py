@@ -30,8 +30,11 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     macd = cl.ewm(span=macd_par[0], adjust=False).mean() - cl.ewm(span=macd_par[1], adjust=False).mean()
     hist_full = macd - macd.ewm(span=macd_par[2], adjust=False).mean()
     t_end = full.index[-1]
-    if gold:                                  # solo lo schema: dalla lateralizzazione (con un po' di margine) fino al segnale
-        t_start = pd.Timestamp(rec["lat_t1"]) - pd.Timedelta(minutes=5 * 30)
+    if gold:                                  # solo la parte dello schema: dal poco prima dell'SC (e della lateralizzazione, se vicina) al segnale
+        five = pd.Timedelta(minutes=5)
+        t_bc = pd.Timestamp(rec["bc_time"]) - 40 * five
+        t_lat = pd.Timestamp(rec["lat_t1"]) - 15 * five
+        t_start = min(t_bc, t_lat) if (t_end - t_lat) / five <= 150 else t_bc
     else:
         t_start = min(pd.Timestamp(rec["lat_t1"]) - pd.Timedelta(hours=12), t_end - pd.Timedelta(days=3))
     df = full.loc[t_start:].iloc[-bars:]
@@ -62,19 +65,21 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     right = n - 1 + max(8, int(n * 0.14))
 
     # lateralizzazione
-    lo_lat, hi_lat = sorted((float(rec["level"]), float(rec["lat_hi"])))
-    x1, x2 = pos(rec["lat_t1"]), pos(rec["lat_t2"])
-    if gold:                                   # solo rette: contorno del riquadro della lateralizzazione, senza riempimento
-        ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, fill=False, edgecolor=LAT, linewidth=1.2))
-    else:
-        ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, color="#9c27b0", alpha=0.25, lw=0))
-    ax.text(x1, hi_lat, " lateralizzazione", color=LAT, fontsize=8, va="bottom")
-    ax.hlines(float(rec["level"]), x1, right, colors=LAT, linestyles=":", linewidth=0.9)
+    show_lat = (not gold) or pd.Timestamp(rec["lat_t1"]) >= df.index[0]
     gold_marks = []
-    # Leg 1 e Kill Zone
-    xb = pos(rec["b_time"])
-    ax.plot([x2, xb], [float(rec["level"]), float(rec["b_price"])], color="#444444" if gold else "#9e9e9e", linestyle="--", linewidth=1)
-    ax.text(xb, float(rec["b_price"]), " fine Leg 1", color=FG if gold else "#bdbdbd", fontsize=8, va="bottom" if buy else "top")
+    if show_lat:
+        lo_lat, hi_lat = sorted((float(rec["level"]), float(rec["lat_hi"])))
+        x1, x2 = pos(rec["lat_t1"]), pos(rec["lat_t2"])
+        if gold:                                   # solo rette: contorno del riquadro della lateralizzazione, senza riempimento
+            ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, fill=False, edgecolor=LAT, linewidth=1.2))
+        else:
+            ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, color="#9c27b0", alpha=0.25, lw=0))
+        ax.text(x1, hi_lat, " lateralizzazione", color=LAT, fontsize=8, va="bottom")
+        ax.hlines(float(rec["level"]), x1, right, colors=LAT, linestyles=":", linewidth=0.9)
+        # Leg 1 e Kill Zone
+        xb = pos(rec["b_time"])
+        ax.plot([x2, xb], [float(rec["level"]), float(rec["b_price"])], color="#444444" if gold else "#9e9e9e", linestyle="--", linewidth=1)
+        ax.text(xb, float(rec["b_price"]), " fine Leg 1", color=FG if gold else "#bdbdbd", fontsize=8, va="bottom" if buy else "top")
     kz_lo, kz_hi = sorted((float(rec["kz_lo"]), float(rec["kz_hi"])))
     if not gold:
         ax.add_patch(Rectangle((xb, kz_lo), right - xb, kz_hi - kz_lo, color="#42a5f5", alpha=0.22, lw=0))
@@ -95,6 +100,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     else:
         ax.plot([pos(rec["sw_time"])], [float(rec["sw_price"])], "o", color="#ffeb3b", markersize=5)
     # piano
+    tags = []
     ymin, ymax = float(df["low"].min()), float(df["high"].max())
     if gold:
         ymin, ymax = min(ymin, float(rec["bc_price"])), max(ymax, float(rec["bc_price"]))
@@ -108,15 +114,22 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
             ax.add_patch(Rectangle((xs, min(entry, ts[-1])), right - xs, abs(ts[-1] - entry), color=UP, alpha=0.15, lw=0))
         for y, name, colr in [(entry, "Entry", "#ffeb3b"), (sl, "SL", DOWN)] + [(t, f"TP{i + 1}" if len(ts) > 1 else "TP", UP) for i, t in enumerate(ts)]:
             ax.hlines(y, 0 if gold else xs, right, colors=colr, linewidth=1.1)       # oro: linea su tutta la larghezza del grafico
-            if gold:                                                       # etichetta a riquadro col colore della linea, testo nero
-                ax.text(right, y, f" {name} {y:.{d}f} ", color="#000000", fontsize=8, va="center", fontweight="normal",
-                        bbox=dict(boxstyle="square,pad=0.25", facecolor=colr, edgecolor="none"))
+            if gold:                                                       # etichetta a riquadro (disegnata dopo, senza sovrapposizioni)
+                tags.append((y, name, colr))
             else:
                 ax.text(right, y, f" {name} {y:.{d}f}", color=colr, fontsize=8, va="center")
             ymin, ymax = min(ymin, y), max(ymax, y)
-    ymin, ymax = (min(ymin, lo_lat), max(ymax, hi_lat)) if gold else (min(ymin, kz_lo), max(ymax, kz_hi, hi_lat))
-    pad = (ymax - ymin) * (0.14 if gold else 0.06)
+    ymin, ymax = ((min(ymin, lo_lat), max(ymax, hi_lat)) if show_lat else (ymin, ymax)) if gold else (min(ymin, kz_lo), max(ymax, kz_hi, hi_lat))
+    pad = (ymax - ymin) * (0.2 if gold else 0.06)
     ax.set_ylim(ymin - pad, ymax + pad)
+    if tags:                                                       # riquadri dei prezzi: colore della linea, testo nero normale; distanziati se vicini
+        gap = 0.045 * (ymax - ymin + 2 * pad)
+        ys = []
+        for y, name, colr in sorted(tags):
+            ty = y if not ys or y - ys[-1] >= gap else ys[-1] + gap
+            ys.append(ty)
+            ax.text(right, ty, f" {name} {y:.{d}f} ", color="#000000", fontsize=8, va="center", fontweight="normal",
+                    bbox=dict(boxstyle="square,pad=0.25", facecolor=colr, edgecolor="none"))
     ax.set_xlim(-1, right + int(n * 0.12))
     ax.yaxis.tick_right()
     ax.set_title(f"{sym} · M{tf} · {'BUY' if buy else 'SELL'}{' · ' + rec['kind'] if gold else ''} · {pd.Timestamp(t_end):%d/%m/%Y %H:%M} UTC", color=FG, fontsize=11, loc="left")
