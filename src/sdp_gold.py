@@ -226,11 +226,13 @@ def generate_gold(m5: pd.DataFrame, p: GoldParams = GoldParams(), stats: dict | 
                             "utad_time": pd.Timestamp(t5[sp_lab]), "utad_price": sgn * float(adv[sp_lab])})
                 done = True
                 break
-            if live and c_idx is not None and last == N - 1 and not done:
+            if live and c_idx is not None and last == N - 1 and last - c_idx >= 2 and not done:     # climax confermato: almeno 2 barre dopo il picco
                 w = {**base, "time": pd.Timestamp(t5[last]), "kind": "watch", "state": "watching",
                      "bc_time": pd.Timestamp(t5[c_idx]), "bc_price": sgn * float(adv[c_idx])}
                 if st_lab is not None:
                     w.update({"ut_time": pd.Timestamp(t5[st_lab]), "ut_price": sgn * float(adv[st_lab])})
+                if sp_lab is not None:
+                    w.update({"utad_time": pd.Timestamp(t5[sp_lab]), "utad_price": sgn * float(adv[sp_lab])})
                 out.append(w)
             continue
         clim, stage, ut = None, 0, None            # clim = (s, e, low, volume)
@@ -314,7 +316,7 @@ def generate_gold(m5: pd.DataFrame, p: GoldParams = GoldParams(), stats: dict | 
     if not out:
         return pd.DataFrame()
     df = pd.DataFrame(out).sort_values("time", kind="stable")
-    return df.drop_duplicates(["time", "kind", "side"]).set_index("time")    # strutture sovrapposte con lo stesso segnale
+    return df.drop_duplicates(["time", "kind", "side", "level"]).set_index("time")    # strutture sovrapposte con lo stesso segnale
 
 
 def simulate_gold(m5: pd.DataFrame, sig: pd.DataFrame, p: GoldParams = GoldParams()) -> pd.DataFrame:

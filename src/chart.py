@@ -167,7 +167,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
             lo_i -= 1
         while hi_i < n - 1 and not np.isnan(hv[hi_i + 1]) and (hv[hi_i + 1] >= 0) == sg:
             hi_i += 1
-        pk = lo_i + int(np.nanargmax(np.abs(hv[lo_i:hi_i + 1])))
+        pk = xi if name in ("SC", "BC") else lo_i + int(np.nanargmax(np.abs(hv[lo_i:hi_i + 1])))      # climax: esattamente la barra del segnale
         axm.plot([pk], [hv[pk]], "o", color=colr, markersize=8, zorder=5, markeredgecolor=DOT_EDGE)
     axm.axhline(0, color=GRID, linewidth=0.8)
     if np.isfinite(hv).any():
@@ -175,7 +175,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
         axm.set_ylim(min(lo_, 0) - 0.12 * (hi_ - lo_), max(hi_, 0) + 0.08 * (hi_ - lo_))
     axm.text(0.005, 0.85, "Volumi tick" if tick else f"MACD {macd_par}", transform=axm.transAxes, color=FG, fontsize=8)
     axm.yaxis.tick_right()
-    step = max(n // 8, 1)
+    step = max(int(np.ceil(n / 7)), 1)
     axm.set_xticks(x[::step])
     axm.set_xticklabels([f"{t:%d/%m %H:%M}" for t in df.index[::step]], rotation=0, fontsize=7)
     buf = io.BytesIO()

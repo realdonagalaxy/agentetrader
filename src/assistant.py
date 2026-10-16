@@ -74,6 +74,12 @@ def analyze_gold(m5: pd.DataFrame, tf: int = 15, days: int = 25, recent_min: int
         t_col = sig.columns[0]
         fresh = sig[(sig.kind != "watch") & (pd.to_datetime(sig[t_col]) >= last - pd.Timedelta(minutes=recent_min))]
         watch = sig[sig.kind == "watch"]
+        def stage_time(r):                         # istante dell'ultimo passo (ST oltre l'SC, o Spring oltre l'ST)
+            for k in ("utad_time", "ut_time", "bc_time"):
+                if k in r and pd.notna(r[k]):
+                    return pd.Timestamp(r[k])
+            return pd.NaT
+        watch = watch[[(pd.notna(stage_time(r)) and stage_time(r) >= last - pd.Timedelta(minutes=recent_min)) for _, r in watch.iterrows()]]
         for _, r in pd.concat([fresh, watch.sort_values(t_col).groupby(["side", "bc_time"]).tail(1)]).iterrows():
             d = r.to_dict()
             d["time"] = d.pop(t_col)
@@ -92,10 +98,17 @@ def format_gold(sym: str, a: dict, r: dict) -> str:
     ut, utad = ("ST", "Spring") if buy else ("UT", "UTAD")
     struct = (f"Struttura: {'minimi' if buy else 'massimi'} uguali a {_px(r['level'], d)} · Leg 1 fino a {_px(r['b_price'], d)} "
               f"({float(r['leg1_len']) / pip:.0f} pip) · {cl} a {_px(r['bc_price'], d)} (gobba più profonda del MACD 8,21,5)")
+    if r["kind"] == "watch" and not (r.get("ut_time") is not None and pd.notna(r.get("ut_time"))):
+        return f"🚨 SEGNALE DI {side} IN ARRIVO SU {html.escape(sym)} 🚨"           # climax SC/BC confermato
     if r["kind"] == "watch":
-        nxt = f"{utad} e CHoCH M5" if r.get("ut_time") is not None and pd.notna(r.get("ut_time")) else f"{ut} (minimo oltre il {cl}) e CHoCH M5"
-        return "\n".join([f"<b>{side} {html.escape(sym)}</b> — in formazione", "",
-                          f"{cl} rilevato. Attendo: {nxt}. Poi arriva l'ordine con entry, SL e TP.", ctx, struct, "", DISCLAIMER_GOLD])
+        sp = r.get("utad_time") is not None and pd.notna(r.get("utad_time"))
+        if sp:
+            body = (f"{utad} a {_px(r['utad_price'], d)}: il minimo ha superato l'{ut} ({_px(r['ut_price'], d)}).\n"
+                    f"Attendo il CHoCH M5: poi arriva lo stop pendente con entry, SL e TP.")
+        else:
+            body = (f"{ut} a {_px(r['ut_price'], d)}: il minimo ha superato l'{cl} ({_px(r['bc_price'], d)}).\n"
+                    f"Attendo il CHoCH M5: poi arriva l'ingresso a mercato con entry, SL e TP.")
+        return "\n".join([f"<b>{side} {html.escape(sym)}</b> — {utad if sp else ut} oltre {ut if sp else cl}", "", body, ctx, struct, "", DISCLAIMER_GOLD])
     entry, sl, tp1, tp = float(r["entry"]), float(r["sl"]), float(r["tp1"]), float(r["tp"])
     risk = abs(entry - sl)
     if r["kind"] == "UT":
@@ -209,7 +222,7 @@ def run_once(sym: str, m5: pd.DataFrame, tf: int, journal=aj.PATH, bot=None, cha
             msg = format_gold(sym, a, rec) if gold else format_alert(sym, a, rec)
             sent.append(msg)
             png = None
-            if chart:
+            if chart and not msg.startswith("🚨"):                  # l'avviso del climax è solo testo
                 try:
                     tps = None if gold else (take_profits(float(rec["entry"]), float(rec["sl"]), float(rec["tp"]), rec["side"] == "buy")
                                              if pd.notna(rec["entry"]) else None)

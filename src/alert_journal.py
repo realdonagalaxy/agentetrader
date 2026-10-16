@@ -39,8 +39,13 @@ def _open(path: Path):
 def alert_key(sym: str, rec: dict) -> str:
     if rec.get("kind") in ("UT", "UTAD"):
         return f"{sym}|{rec['kind']}|{rec['side']}|{rec['level']:.2f}|{pd.Timestamp(rec['choch_time']):%Y%m%d%H%M}"
-    if rec.get("kind") == "watch":
-        return f"{sym}|watch|{rec['side']}|{rec['level']:.2f}|{pd.Timestamp(rec['b_time']):%Y%m%d%H%M}"
+    if rec.get("kind") == "watch":                      # un avviso per ogni passo: ST oltre l'SC, poi Spring oltre l'ST
+        has = lambda k: rec.get(k) is not None and pd.notna(rec.get(k))
+        if has("utad_time"):
+            return f"{sym}|watch|{rec['side']}|{rec['level']:.2f}|Spring|{pd.Timestamp(rec['utad_time']):%Y%m%d%H%M}"
+        if has("ut_time"):
+            return f"{sym}|watch|{rec['side']}|{rec['level']:.2f}|ST|{pd.Timestamp(rec['ut_time']):%Y%m%d%H%M}"
+        return f"{sym}|watch|{rec['side']}|{rec['level']:.2f}|SC"          # primo climax confermato della struttura: un solo avviso
     if rec["state"] == "watching":
         return f"{sym}|{rec['side']}|{rec['level']:.2f}|watch|{rec.get('b_price', 0):.2f}"
     return f"{sym}|{rec['side']}|{rec['level']:.2f}|{pd.Timestamp(rec['choch_time']):%Y%m%d%H%M}"
