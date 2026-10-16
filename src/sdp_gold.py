@@ -290,7 +290,7 @@ def filters(sig: pd.DataFrame, p: GoldParams = GoldParams()) -> pd.DataFrame:
 if __name__ == "__main__":
     import sys
     sym = sys.argv[1] if len(sys.argv) > 1 else "XAUUSD"
-    tf = int(sys.argv[2]) if len(sys.argv) > 2 else 15
+    tf = int(sys.argv[2]) if len(sys.argv) > 2 else 5
     mode = sys.argv[3] if len(sys.argv) > 3 else "full"            # full | test
     m5 = load_ohlc(f"data/{sym}_BID_M5.csv.gz")
     if mode == "test":

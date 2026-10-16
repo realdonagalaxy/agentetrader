@@ -196,7 +196,7 @@ def split_message(msg: str) -> tuple[str, str]:
 
 def run_once(sym: str, m5: pd.DataFrame, tf: int, journal=aj.PATH, bot=None, chart: bool = True, chart_dir=None) -> list[str]:
     gold = is_gold(sym)
-    a = analyze_gold(m5, tf) if gold else analyze(m5, tf)
+    a = analyze_gold(m5, 5) if gold else analyze(m5, tf)          # oro: tutto a M5 (struttura, MACD, CHoCH, grafico)
     sent = []
     for r in a["rows"]:
         r = {k: (None if (isinstance(v, float) and pd.isna(v)) else v) for k, v in r.items()}
