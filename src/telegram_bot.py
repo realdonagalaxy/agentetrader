@@ -23,10 +23,17 @@ class TelegramBot:
 
     def _call(self, method: str, **payload) -> dict:
         r = requests.post(API.format(token=self.token, method=method), json=payload, timeout=15)
-        r.raise_for_status()
-        data = r.json()
-        if not data.get("ok"):
-            raise RuntimeError(f"Telegram: {data}")
+        return self._result(r, method)
+
+    def _result(self, r: requests.Response, method: str) -> dict:
+        """Errori leggibili (descrizione di Telegram) senza mai stampare l'URL, che contiene il token."""
+        try:
+            data = r.json()
+        except ValueError:
+            data = {}
+        if not r.ok or not data.get("ok"):
+            raise RuntimeError(f"Telegram {method}: {data.get('description') or r.status_code} "
+                               f"(chat_id usato: {self.chat_id!r}). Se dice 'chat not found': l'id/@nome è sbagliato o il bot non è amministratore del canale.")
         return data["result"]
 
     def send(self, text: str) -> None:
@@ -39,9 +46,7 @@ class TelegramBot:
         r = requests.post(API.format(token=self.token, method="sendPhoto"),
                           data={"chat_id": self.chat_id, "caption": caption[:1024], "parse_mode": "HTML"},
                           files={"photo": ("setup.png", png, "image/png")}, timeout=30)
-        r.raise_for_status()
-        if not r.json().get("ok"):
-            raise RuntimeError(f"Telegram: {r.text}")
+        self._result(r, "sendPhoto")
 
     def send_signal(self, symbol: str, side: str, entry: float, sl: float, tp: float, note: str = "") -> None:
         risk = abs(entry - sl)
