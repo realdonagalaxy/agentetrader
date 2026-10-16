@@ -133,7 +133,11 @@ def generate_gold(m5: pd.DataFrame, p: GoldParams = GoldParams(), stats: dict | 
             return None
 
         clim, stage, ut = None, 0, None            # clim = (s, e, low, volume)
-        bc = lambda c: (pd.Timestamp(t5[c[0] + int(np.argmin(adv[c[0]:c[1] + 1]))]), sgn * c[2])
+        def bc(c):
+            """Candela del climax: con il MACD è la barra del picco della gobba (in linea col pallino sull'istogramma);
+            con i volumi tick il minimo/massimo di swing."""
+            i = c[0] + int(np.argmin(h_[c[0]:c[1] + 1] if p.mode == "macd" else adv[c[0]:c[1] + 1]))
+            return pd.Timestamp(t5[i]), sgn * float(adv[i] if p.mode == "macd" else c[2])
         for s, e in lobes:
             lowT, volT = float(adv[s:e + 1].min()), mt(s, e)
             if lowT < lvl - p.abort_ext * length:
