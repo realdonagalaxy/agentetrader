@@ -16,3 +16,7 @@
 - [ ] **Analisi dal vivo su Telegram** (`src/live_analysis.py`): collaudata in replay su storico. Mancano: fonte dati cTrader Open API (app in stato "Active"),
       ciclo ogni 5 minuti con deduplica degli avvisi, esecuzione sul Mac/VPS. Il trade lo decide l'utente; esecuzione automatica solo dopo validazione.
 - [ ] Validare SDP-Wyckoff su altri strumenti: XAUUSD (in download), EURCAD, BTCUSD, ETHUSD (finestre proprie del documento), indici, argento, GBPUSD.
+- [x] Assistente SDP v3 (`src/assistant.py`) + journal avvisi (`src/alert_journal.py`, foglio "Avvisi"): collaudato in replay su EURUSD. Esiti calcolati in automatico.
+- [ ] Fonte dati dal vivo: cTrader Open API (app "Active") o alternativa; ciclo ogni 5 minuti; esecuzione sul Mac/VPS.
+- [ ] Test in avanti: dopo ≥ 30 avvisi confrontare esito del codice e decisioni dell'utente (colonna "Decisione utente").
+- [ ] Trade "sulla Leg 1" (esempio 5): regola da definire con l'utente.

@@ -29,3 +29,11 @@ Il trade lo decide l'utente. Esecuzione automatica solo dopo validazione statist
 - Nessun parametro inventato senza dirlo; chiedere all'utente in caso di ambiguità (CLAUDE.md).
 - Confronto sempre con il placebo, errore standard e in/fuori campione; molte combinazioni testate = attenzione al caso.
 - File dati e segnali (`data/`) non sono su git: vanno riallegati nella nuova sessione.
+
+
+## Aggiornamento 16 ott 2026 (sera)
+- Regole **v3** calibrate sui trade reali dell'utente (`src/sdp_v3.py`): Leg 1 = prima induzione fuori dalla lateralizzazione; CHoCH M5 sullo swing dopo l'ultimo test; ingresso limite sul ritorno al livello rotto;
+  SL oltre l'ultimo test; TP fine Leg 1; R:R ≥ 1:3; gestione BE+50% a 3R. Il codice riproduce i 4 trade Leg 3 dell'utente (entry/SL/TP entro pochi punti).
+- Risultati v3 (EURUSD, oro, Nasdaq; M5/M15): nessun vantaggio statistico (media ≈ −0,01R). Dettagli in `knowledge/backtest_log.md`.
+- Decisione: nessuna esecuzione automatica. Assistente di analisi su Telegram (`src/assistant.py`) + journal degli avvisi per un test in avanti.
+- Da fare: fonte dati live (cTrader, app non ancora Active), test «solo New York» sul Nasdaq, GBPUSD/EURCAD/crypto, trade sulla Leg 1.

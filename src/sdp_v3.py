@@ -37,7 +37,8 @@ class V3Params(WyParams):
     leg1_ret: float = 0.25        # la prima induzione finisce al primo ritracciamento >= questa frazione dell'impulso
 
 
-def generate_v3(m5: pd.DataFrame, p: V3Params = V3Params(), stats: dict | None = None) -> pd.DataFrame:
+def generate_v3(m5: pd.DataFrame, p: V3Params = V3Params(), stats: dict | None = None, live: bool = False) -> pd.DataFrame:
+    """live=True registra anche gli ordini limite in attesa (state='waiting_fill') e i setup 'watching' alla fine dei dati."""
     tf = p.struct_tf_min
     ms = m5 if tf == 5 else resample(m5, f"{tf}min")
     A = atr(ms).to_numpy()
@@ -137,9 +138,13 @@ def generate_v3(m5: pd.DataFrame, p: V3Params = V3Params(), stats: dict | None =
             bump("CHoCH")
             sl_adv = adv[pt:j + 1].min()                        # SL oltre l'ultimo test
             f = next((k for k in range(j + 1, min(j + 1 + p.retest_bars, len(t5))) if adv[k] <= ref), None)
+            state = "filled"
             if f is None:
-                bump("senza ritorno")
-                continue
+                if live and j + p.retest_bars >= len(t5) - 1:       # la finestra del ritorno non è ancora scaduta
+                    state, f = "waiting_fill", j
+                else:
+                    bump("senza ritorno")
+                    continue
             risk = ref - sl_adv
             if risk <= 0:
                 continue
@@ -156,7 +161,8 @@ def generate_v3(m5: pd.DataFrame, p: V3Params = V3Params(), stats: dict | None =
             with np.errstate(divide="ignore", invalid="ignore"):
                 z = (sgn * adv[sw_idx] - vwap[sw_idx]) / vsd[sw_idx]
             out.append({"time": pd.Timestamp(t5[f]), "sid": sid, "side": "buy" if long else "sell", "entry": sgn * ref,
-                        "sl": sgn * sl_adv, "tp": sgn * B, "rr": rr, "choch_time": pd.Timestamp(t5[j]),
+                        "sl": sgn * sl_adv, "tp": sgn * B, "rr": rr, "choch_time": pd.Timestamp(t5[j]), "state": state,
+                        "b_price": sgn * B, "leg1_len": length,
                         "level": d.level, "kz_lo": sgn * kz_lo, "kz_hi": sgn * kz_hi, "sw_price": sgn * sw_low,
                         "in_kz": bool(sw_low <= kz_hi + pad and sw_low >= lvl - p.abort_ext * length),
                         "ob_touch": bool(cand_hi is not None and np.isfinite(cand_hi) and sw_low <= cand_hi),
@@ -165,6 +171,14 @@ def generate_v3(m5: pd.DataFrame, p: V3Params = V3Params(), stats: dict | None =
             ncand += 1
             if ncand >= p.max_cands:
                 break
+        else:
+            if (live and last == len(t5) - 1 and ncand == 0 and sw_low <= kz_hi + pad
+                    and sw_low >= lvl - p.abort_ext * length):
+                sgn = 1 if long else -1
+                out.append({"time": pd.Timestamp(t5[last]), "sid": sid, "side": "buy" if long else "sell", "state": "watching",
+                            "level": d.level, "kz_lo": sgn * kz_lo, "kz_hi": sgn * kz_hi, "sw_price": sgn * sw_low,
+                            "b_price": sgn * B, "leg1_len": length, "in_kz": True,
+                            "ob_touch": bool(cand_hi is not None and np.isfinite(cand_hi) and sw_low <= cand_hi)})
     return pd.DataFrame(out).set_index("time").sort_index() if out else pd.DataFrame()
 
 
