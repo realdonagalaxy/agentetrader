@@ -62,3 +62,7 @@ EURUSD (fatto), XAUUSD, XAGUSD, NASDAQ (USATECHIDXUSD), SP500 (USA500IDXUSD), Do
 Scale prezzi Dukascopy: forex 1e5; JPY/oro/argento/indici 1e3; BTC/ETH 10 (verificati su BTC 2021-01-05 = 32.007; ETH = 1.040).
 Crypto: mercato 24/7 (sabato incluso). Il documento dà finestre proprie per BTC/ETH (14:00–18:00 sovrapposizione NY e 00:00–02:00 reset/Asia, ora italiana)
 diverse dalle macro Londra/NY del forex: da testare a parte, non mischiare con le macro forex.
+
+## Decisione 16 ott 2026 (utente)
+- Sull'oro il CHoCH di ingresso si prende su **M5**: l'M1 non è attendibile (rumore). Non servono dati M1 per il backtest né per l'analisi dal vivo.
+  (Il documento originale indicava il CHoCH M1 per EURUSD/AUDUSD: da riconsiderare anche lì, per ora il codice usa sempre M5.)
