@@ -21,6 +21,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     gold = rec.get("kind") in ("UT", "UTAD", "watch")
     if gold:
         macd_par = (8, 21, 5)
+        tf, bars = 5, max(bars, 700)         # la sequenza BC/UT/UTAD e il MACD (8,21,5) sono calcolati su M5: grafico M5 coerente
     full = m5 if tf == 5 else resample(m5, f"{tf}min")
     cl = full["close"]
     macd = cl.ewm(span=macd_par[0], adjust=False).mean() - cl.ewm(span=macd_par[1], adjust=False).mean()
@@ -55,32 +56,34 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, color="#9c27b0", alpha=0.25, lw=0))
     ax.text(x1, hi_lat, " lateralizzazione", color="#ce93d8", fontsize=8, va="bottom")
     ax.hlines(float(rec["level"]), x1, right, colors="#ce93d8", linestyles=":", linewidth=0.9)
+    gold_marks = []
     # Leg 1 e Kill Zone
     xb = pos(rec["b_time"])
     ax.plot([x2, xb], [float(rec["level"]), float(rec["b_price"])], color="#9e9e9e", linestyle="--", linewidth=1)
     ax.text(xb, float(rec["b_price"]), " fine Leg 1", color="#bdbdbd", fontsize=8, va="bottom" if buy else "top")
     kz_lo, kz_hi = sorted((float(rec["kz_lo"]), float(rec["kz_hi"])))
-    ax.add_patch(Rectangle((xb, kz_lo), right - xb, kz_hi - kz_lo, color="#42a5f5", alpha=0.22, lw=0))
-    ax.text(xb + 1, kz_hi, " Kill Zone", color="#90caf9", fontsize=8, va="bottom")
+    if not gold:
+        ax.add_patch(Rectangle((xb, kz_lo), right - xb, kz_hi - kz_lo, color="#42a5f5", alpha=0.22, lw=0))
+        ax.text(xb + 1, kz_hi, " Kill Zone", color="#90caf9", fontsize=8, va="bottom")
     if gold:                                   # sequenza Wyckoff: freccia BC/SC, pallino giallo UT, pallino rosso UTAD
-        xc = pos(rec["bc_time"])
-        yr = float(df["high"].max() - df["low"].min())
-        off = (-1 if buy else 1) * 0.09 * yr                                   # freccia: dal testo (sopra il BC / sotto l'SC) verso il climax
-        ax.annotate("SC" if buy else "BC", (xc, float(rec["bc_price"])), xytext=(xc, float(rec["bc_price"]) + off),
-                    color="#ffffff", fontsize=9, fontweight="bold", ha="center", va="top" if buy else "bottom",
-                    arrowprops=dict(arrowstyle="-|>", color="#ffffff", lw=1.8, mutation_scale=14))
+        YEL, GRN = "#ffeb3b", "#4caf50"
+        marks = [("bc", "SC" if buy else "BC", YEL)]
         if rec.get("ut_time") is not None and pd.notna(rec.get("ut_time")):
-            ax.plot([pos(rec["ut_time"])], [float(rec["ut_price"])], "o", color="#ffeb3b", markersize=9, zorder=5)
-            ax.text(pos(rec["ut_time"]), float(rec["ut_price"]), "  UT", color="#ffeb3b", fontsize=8, va="center")
+            marks.append(("ut", "ST" if buy else "UT", YEL))
         if rec.get("utad_time") is not None and pd.notna(rec.get("utad_time")):
-            ax.plot([pos(rec["utad_time"])], [float(rec["utad_price"])], "o", color="#f44336", markersize=9, zorder=5)
-            ax.text(pos(rec["utad_time"]), float(rec["utad_price"]), "  UTAD", color="#f44336", fontsize=8, va="center")
+            marks.append(("utad", "Spring" if buy else "UTAD", GRN))
+        for i_m, (k, name, colr) in enumerate(marks):
+            xi, yv = pos(rec[f"{k}_time"]), float(rec[f"{k}_price"])
+            ax.plot([xi], [yv], "o", color=colr, markersize=10, zorder=5, markeredgecolor="#131722")
+            ax.annotate(name, (xi, yv), xytext=(0, (-1 if buy else 1) * (14 + 13 * (i_m % 2))), textcoords="offset points", color=colr, fontsize=9,
+                        fontweight="bold", ha="center", va="top" if buy else "bottom")
+            gold_marks.append((xi, name, colr))
     else:
         ax.plot([pos(rec["sw_time"])], [float(rec["sw_price"])], "o", color="#ffeb3b", markersize=5)
     # piano
     ymin, ymax = float(df["low"].min()), float(df["high"].max())
     if gold:
-        ymin, ymax = min(ymin, float(rec["bc_price"]) - 0.12 * (ymax - ymin)), max(ymax, float(rec["bc_price"]) + 0.12 * (ymax - ymin))
+        ymin, ymax = min(ymin, float(rec["bc_price"])), max(ymax, float(rec["bc_price"]))
     if pd.notna(rec.get("entry")):
         entry, sl = float(rec["entry"]), float(rec["sl"])
         ts = tps or [float(rec["tp"])]
@@ -92,7 +95,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
             ax.hlines(y, xs, right, colors=colr, linewidth=1.1)
             ax.text(right, y, f" {name} {y:.{d}f}", color=colr, fontsize=8, va="center")
             ymin, ymax = min(ymin, y), max(ymax, y)
-    ymin, ymax = min(ymin, kz_lo), max(ymax, kz_hi, hi_lat)
+    ymin, ymax = (min(ymin, lo_lat), max(ymax, hi_lat)) if gold else (min(ymin, kz_lo), max(ymax, kz_hi, hi_lat))
     pad = (ymax - ymin) * 0.06
     ax.set_ylim(ymin - pad, ymax + pad)
     ax.set_xlim(-1, right + int(n * 0.12))
@@ -101,6 +104,17 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     # MACD
     hv = hist.to_numpy()
     axm.bar(x, hv, color=np.where(hv >= 0, UP, DOWN), width=0.7)
+    for xi, name, colr in gold_marks:                       # pallino sulla gobba del MACD (picco della gobba che contiene la barra)
+        if np.isnan(hv[xi]):
+            continue
+        sg = hv[xi] >= 0
+        lo_i = hi_i = xi
+        while lo_i > 0 and not np.isnan(hv[lo_i - 1]) and (hv[lo_i - 1] >= 0) == sg:
+            lo_i -= 1
+        while hi_i < n - 1 and not np.isnan(hv[hi_i + 1]) and (hv[hi_i + 1] >= 0) == sg:
+            hi_i += 1
+        pk = lo_i + int(np.nanargmax(np.abs(hv[lo_i:hi_i + 1])))
+        axm.plot([pk], [hv[pk]], "o", color=colr, markersize=8, zorder=5, markeredgecolor="#131722")
     axm.axhline(0, color=GRID, linewidth=0.8)
     axm.text(0.005, 0.85, f"MACD {macd_par}", transform=axm.transAxes, color=FG, fontsize=8)
     axm.yaxis.tick_right()

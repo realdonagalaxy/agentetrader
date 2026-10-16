@@ -89,7 +89,7 @@ def format_gold(sym: str, a: dict, r: dict) -> str:
     t_loc = pd.Timestamp(a["time"]).tz_localize("UTC").astimezone(MACRO_TZ)
     ctx = f"🕒 {t_loc:%d/%m %H:%M} (Roma) · macro: {a['macro'] or 'fuori macro'} · Bias H4 {a['bias']['H4']} / H1 {a['bias']['H1']}"
     cl = "SC" if buy else "BC"
-    ut, utad = ("Spring", "Spring 2") if buy else ("UT", "UTAD")
+    ut, utad = ("ST", "Spring") if buy else ("UT", "UTAD")
     struct = (f"Struttura: {'minimi' if buy else 'massimi'} uguali a {_px(r['level'], d)} · Leg 1 fino a {_px(r['b_price'], d)} "
               f"({float(r['leg1_len']) / pip:.0f} pip) · {cl} a {_px(r['bc_price'], d)} (gobba MACD 8,21,5 con più volumi)")
     if r["kind"] == "watch":
