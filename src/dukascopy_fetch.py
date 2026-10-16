@@ -57,7 +57,11 @@ def fetch_day(sym: str, day: date, side: str, session: requests.Session, cache_d
         return None
     if not content:
         return []
-    raw = lzma.decompress(content)
+    try:
+        raw = lzma.decompress(content)
+    except lzma.LZMAError:
+        (cache_dir / "bi5" / sym / side / f"{day:%Y%m%d}.bi5").unlink(missing_ok=True)   # file corrotto: riscarica al prossimo giro
+        return None
     base = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
     sc = scale_for(sym)
     out = []
@@ -99,5 +103,15 @@ if __name__ == "__main__":
     ap.add_argument("end")
     ap.add_argument("--side", default="BID")
     ap.add_argument("--out", default="data/raw")
+    ap.add_argument("--rounds", type=int, default=5, help="tentativi complessivi sugli anni falliti")
     a = ap.parse_args()
-    fetch_range(a.symbol, date.fromisoformat(a.start), date.fromisoformat(a.end), a.side, a.out)
+    start_d, end_d = date.fromisoformat(a.start), date.fromisoformat(a.end)
+    for rnd in range(1, a.rounds + 1):
+        if fetch_range(a.symbol, start_d, end_d, a.side, a.out):
+            break
+        if rnd < a.rounds:
+            print(f"Giro {rnd}/{a.rounds}: alcuni anni mancano, riprovo tra 120 secondi...", flush=True)
+            time.sleep(120)
+    missing = [y for y in range(start_d.year, end_d.year + 1)
+               if not (Path(a.out) / f"{a.symbol}_{a.side}_M1_{y}.csv").exists()]
+    print("COMPLETO" if not missing else f"ANNI MANCANTI: {missing} (nessun dato disponibile oppure ancora bloccato: rilancia più tardi)")
