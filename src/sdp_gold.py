@@ -316,7 +316,50 @@ def generate_gold(m5: pd.DataFrame, p: GoldParams = GoldParams(), stats: dict | 
     if not out:
         return pd.DataFrame()
     df = pd.DataFrame(out).sort_values("time", kind="stable")
-    return df.drop_duplicates(["time", "kind", "side", "level"]).set_index("time")    # strutture sovrapposte con lo stesso segnale
+    df = df.drop_duplicates(["time", "kind", "side", "level"]).set_index("time")      # strutture sovrapposte con lo stesso segnale
+    return add_sweep(m5, df)
+
+
+def add_sweep(m5: pd.DataFrame, df: pd.DataFrame, days: int = 5, n_h1: int = 2) -> pd.DataFrame:
+    """Colonne `sweep_h1` / `sweep_by`: ST/UT o Spring/UTAD che per primi superano un pivot H1 (a 2 barre per lato) degli ultimi `days` giorni.
+    Un pivot H1 conta solo se il BC/SC (e il prezzo prima) non lo aveva già superato: è il punto ST/UT o Spring/UTAD a prendere quella liquidità.
+    Sell: massimi H1 superati verso l'alto; Buy: minimi H1 superati verso il basso. Il pivot è noto solo n_h1 barre H1 dopo (nessun look-ahead)."""
+    if df.empty:
+        return df
+    h1 = resample(m5, "1h")
+    ph, pl = pivots(h1, n_h1)
+    hour = pd.Timedelta(hours=1)
+    t5 = m5.index.values
+    H, L = m5["high"].to_numpy(), m5["low"].to_numpy()
+    hi = [(h1.index[i], h1.index[min(i + n_h1, len(h1) - 1)] + hour, float(h1["high"].iloc[i])) for i in ph]
+    lo = [(h1.index[i], h1.index[min(i + n_h1, len(h1) - 1)] + hour, float(h1["low"].iloc[i])) for i in pl]
+    flags, by = [], []
+    for t, r in df.iterrows():
+        sell = r["side"] == "sell"
+        pts = []
+        if pd.notna(r.get("ut_time")):
+            pts.append(("UT" if sell else "ST", pd.Timestamp(r["ut_time"]), float(r["ut_price"])))
+        if pd.notna(r.get("utad_time")):
+            pts.append(("UTAD" if sell else "Spring", pd.Timestamp(r["utad_time"]), float(r["utad_price"])))
+        ok, who = False, ""
+        i_bc = int(np.searchsorted(t5, np.datetime64(r["bc_time"]))) if pd.notna(r.get("bc_time")) else None
+        for name, tp_, pr in pts:
+            for t_p, t_conf, P in (hi if sell else lo):
+                if not (tp_ - pd.Timedelta(days=days) <= t_p < tp_ and t_conf <= tp_ and i_bc is not None):
+                    continue
+                if (pr > P) if sell else (pr < P):
+                    i0 = int(np.searchsorted(t5, np.datetime64(t_conf)))
+                    seen = (H[i0:i_bc + 1].max() > P) if sell else (L[i0:i_bc + 1].min() < P) if i_bc >= i0 else False
+                    if not seen:
+                        ok, who = True, name
+                        break
+            if ok:
+                break
+        flags.append(ok)
+        by.append(who)
+    out = df.copy()
+    out["sweep_h1"], out["sweep_by"] = flags, by
+    return out
 
 
 def simulate_gold(m5: pd.DataFrame, sig: pd.DataFrame, p: GoldParams = GoldParams()) -> pd.DataFrame:
@@ -429,6 +472,18 @@ if __name__ == "__main__":
             print(f"\n--- {sym} M{tf} | filtro: {name} ---")
             for col, nm in [("R_tp1", "tutto a TP1 (2,5R)"), ("R", "gestita 60% a 2,5R + BE")]:
                 print(_line(nm, res[m].sort_values("time"), col))
+        sw = {(t, k, sd): f for t, k, sd, f in zip(sig.index, sig.kind, sig.side, sig.sweep_h1)}
+        res["sweep"] = [bool(sw.get((t, k, sd), False)) for t, k, sd in zip(res.time, res.kind, res.side)]
+        for name, m in [("CON sweep H1 (ST/UT, Spring/UTAD)", res.sweep), ("SENZA sweep H1", ~res.sweep)]:
+            print(f"\n--- {sym} M{tf} | {name} ---")
+            for col, nm in [("R_tp1", "tutto a TP1 (2,5R)"), ("R", "gestita 60% a 2,5R + BE")]:
+                print(_line(nm, res[m].sort_values("time"), col))
+        ps = sig[sig.sweep_h1] if "sweep_h1" in sig else sig
+        if len(ps):
+            plw = pd.concat([simulate_gold(m5, placebo(m5, ps, sd)) for sd in range(5)])
+            print(f"\n--- {sym} M{tf} | PLACEBO dei soli segnali con sweep H1 ---")
+            for col, nm in [("R_tp1", "tutto a TP1 (2,5R)"), ("R", "gestita 60% a 2,5R + BE")]:
+                print(_line(nm, plw.sort_values("time"), col))
         pl = pd.concat([simulate_gold(m5, placebo(m5, sig, sd)) for sd in range(5)])
         print(f"\n--- {sym} M{tf} | PLACEBO (barre casuali, 5 ripetizioni) ---")
         for col, nm in [("R_tp1", "tutto a TP1 (2,5R)"), ("R", "gestita 60% a 2,5R + BE")]:
