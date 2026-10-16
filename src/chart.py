@@ -64,8 +64,8 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     # lateralizzazione
     lo_lat, hi_lat = sorted((float(rec["level"]), float(rec["lat_hi"])))
     x1, x2 = pos(rec["lat_t1"]), pos(rec["lat_t2"])
-    if gold:                                   # solo rette: lati alto e basso della lateralizzazione
-        ax.hlines([lo_lat, hi_lat], x1, max(x2, x1 + 1), colors=LAT, linewidth=1.2)
+    if gold:                                   # solo rette: contorno del riquadro della lateralizzazione, senza riempimento
+        ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, fill=False, edgecolor=LAT, linewidth=1.2))
     else:
         ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, color="#9c27b0", alpha=0.25, lw=0))
     ax.text(x1, hi_lat, " lateralizzazione", color=LAT, fontsize=8, va="bottom")
