@@ -222,10 +222,8 @@ def run_once(sym: str, m5: pd.DataFrame, tf: int, journal=aj.PATH, bot=None, cha
                 (Path(chart_dir) / f"{sym}_{aid}_{pd.Timestamp(a['time']):%Y%m%d_%H%M}.png").write_bytes(png)
             if bot:
                 if png:
-                    caption, rest = split_message(msg)
+                    caption, _ = split_message(msg)              # solo foto + Entry/SL/TP: niente descrizione sotto
                     bot.send_photo(png, caption)
-                    if rest:
-                        bot.send(rest)
                 else:
                     bot.send(msg)
                 aj.mark_sent(aid, journal)

@@ -88,7 +88,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
         xs = pos(rec["choch_time"])
         ax.add_patch(Rectangle((xs, min(entry, sl)), right - xs, abs(entry - sl), color=DOWN, alpha=0.22, lw=0))
         ax.add_patch(Rectangle((xs, min(entry, ts[-1])), right - xs, abs(ts[-1] - entry), color=UP, alpha=0.15, lw=0))
-        for y, name, colr in [(entry, "Entry", "#42a5f5"), (sl, "SL", DOWN)] + [(t, f"TP{i + 1}" if len(ts) > 1 else "TP", UP) for i, t in enumerate(ts)]:
+        for y, name, colr in [(entry, "Entry", "#ffeb3b"), (sl, "SL", DOWN)] + [(t, f"TP{i + 1}" if len(ts) > 1 else "TP", UP) for i, t in enumerate(ts)]:
             ax.hlines(y, xs, right, colors=colr, linewidth=1.1)
             ax.text(right, y, f" {name} {y:.{d}f}", color=colr, fontsize=8, va="center")
             ymin, ymax = min(ymin, y), max(ymax, y)
