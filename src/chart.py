@@ -90,7 +90,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
             xi, yv = pos(rec[f"{k}_time"]), float(rec[f"{k}_price"])
             ax.plot([xi], [yv], "o", color=colr, markersize=10, zorder=5, markeredgecolor=DOT_EDGE)
             ax.annotate(name, (xi, yv), xytext=(0, (-1 if buy else 1) * (14 + 13 * (i_m % 2))), textcoords="offset points", color=FG if gold else colr, fontsize=9,
-                        fontweight="bold", ha="center", va="top" if buy else "bottom")
+                        fontweight="normal", ha="center", va="top" if buy else "bottom")
             gold_marks.append((xi, name, colr))
     else:
         ax.plot([pos(rec["sw_time"])], [float(rec["sw_price"])], "o", color="#ffeb3b", markersize=5)
@@ -109,7 +109,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
         for y, name, colr in [(entry, "Entry", "#ffeb3b"), (sl, "SL", DOWN)] + [(t, f"TP{i + 1}" if len(ts) > 1 else "TP", UP) for i, t in enumerate(ts)]:
             ax.hlines(y, 0 if gold else xs, right, colors=colr, linewidth=1.1)       # oro: linea su tutta la larghezza del grafico
             if gold:                                                       # etichetta a riquadro col colore della linea, testo nero
-                ax.text(right, y, f" {name} {y:.{d}f} ", color="#000000", fontsize=8, va="center", fontweight="bold",
+                ax.text(right, y, f" {name} {y:.{d}f} ", color="#000000", fontsize=8, va="center", fontweight="normal",
                         bbox=dict(boxstyle="square,pad=0.25", facecolor=colr, edgecolor="none"))
             else:
                 ax.text(right, y, f" {name} {y:.{d}f}", color=colr, fontsize=8, va="center")
