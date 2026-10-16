@@ -302,7 +302,7 @@ if __name__ == "__main__":
         m5 = m5.loc["2018":"2019"]
     st: dict = {}
     sig = generate_gold(m5, GoldParams(struct_tf_min=tf, mode=vmode), st)
-    print(f"{sym} struttura M{tf} - Funnel:", st, flush=True)
+    print(f"{sym} struttura M{tf} - modalità volumi: {vmode} - Funnel:", st, flush=True)
     print(f"dati: {m5.index[0]} → {m5.index[-1]} · segnali: {len(sig)}")
     if len(sig):
         sig.to_pickle(f"data/gold_signals_{sym}_M{tf}_{vmode}.pkl")
