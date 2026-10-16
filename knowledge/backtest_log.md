@@ -118,3 +118,17 @@ IS/OOS (Wy+volume solo): +0,070 / +0,157. Con costo 1,0 pip/trade (rischio media
 Lettura: la maggior parte dell'effetto (+0,05R) è presente anche nel placebo (macro + CHoCH dopo sweep); la condizione Wyckoff
 aggiunge circa +0,05R (≈ 2 errori standard, borderline). Effetto piccolo, stabile in IS/OOS, ma da validare su dati non usati
 (altri strumenti) e con costi reali prima di qualsiasi uso operativo.
+
+## SDP-Wyckoff su XAUUSD (struttura M5, tol 0,25 ATR, macro Londra+NY, TP 1:2) — 16 ott 2026 (eseguito dall'utente sul Mac)
+Dati: 1.470.654 barre M5, 2003-05-05 → 2025-12-31, close 339–4548. **Mancano gli anni 2007 e 2021** (download incompleto: da riscaricare).
+| Variante | n | expectancy (±errore) |
+|---|---|---|
+| PLACEBO: qualsiasi CHoCH | 15128 | −0,011R (±0,011) |
+| solo Kill Zone | 7618 | −0,039R (±0,016) |
+| Wyckoff + volume (solo) | 4259 | +0,016R (±0,022) |
+| Kill Zone + Wyckoff + volume | 1795 | +0,046R (±0,034) |
+| Wyckoff senza volume | 5743 | −0,017R (±0,019) |
+Wy+volume (solo): anni positivi 11/21; prima metà +0,085R, seconda metà −0,054R. Rischio mediano 28,7 "pip" (1 pip = 0,1 USD) ≈ 2,9 USD.
+Con 1,0 pip di costo: −0,023R (solo) / +0,004R (KZ+Wy+vol). Spread reale dell'oro tipicamente > 1 pip in questa unità (da confermare col broker).
+Lettura: l'effetto macro visto su EURUSD (placebo +0,049R) NON si ripete sull'oro (placebo −0,011R); il vantaggio di Wy+volume (+0,016R) è dentro l'errore e
+instabile nel tempo (+0,085 → −0,054). Nessuna evidenza di vantaggio sull'oro.
