@@ -104,7 +104,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     # MACD
     tick = gold and rec.get("mode") == "tick"
     hv = df["volume"].to_numpy(dtype=float) if tick else hist.to_numpy()
-    axm.bar(x, hv, color=np.where(c >= o, UP, DOWN) if tick else np.where(hv >= 0, UP, DOWN), width=0.7)
+    axm.bar(x, hv, color="#ffffff" if tick else np.where(hv >= 0, UP, DOWN), width=0.7)
     for xi, name, colr in (gold_marks if tick else []):           # tick: pallino sulla barra col volume massimo attorno al punto
         a0, a1 = max(xi - 6, 0), min(xi + 7, n)
         pk = a0 + int(np.nanargmax(hv[a0:a1]))
