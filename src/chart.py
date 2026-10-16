@@ -30,11 +30,15 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     macd = cl.ewm(span=macd_par[0], adjust=False).mean() - cl.ewm(span=macd_par[1], adjust=False).mean()
     hist_full = macd - macd.ewm(span=macd_par[2], adjust=False).mean()
     t_end = full.index[-1]
-    if gold:                                  # solo la parte dello schema: dal poco prima dell'SC (e della lateralizzazione, se vicina) al segnale
+    if gold:                                  # parte dall'inizio della gobba MACD del climax (SC/BC): si vedono solo le candele che servono a leggerlo
         five = pd.Timedelta(minutes=5)
-        t_bc = pd.Timestamp(rec["bc_time"]) - 25 * five
-        t_lat = pd.Timestamp(rec["lat_t1"]) - 15 * five
-        t_start = min(t_bc, t_lat) if (t_end - t_lat) / five <= 150 else t_bc
+        i_bc = int(full.index.searchsorted(pd.Timestamp(rec["bc_time"])))
+        hv_full = hist_full.to_numpy()
+        i0 = min(i_bc, len(hv_full) - 1)
+        sg = hv_full[i0] >= 0
+        while i0 > 0 and (hv_full[i0 - 1] >= 0) == sg:
+            i0 -= 1
+        t_start = full.index[max(i0 - 3, 0)]
     else:
         t_start = min(pd.Timestamp(rec["lat_t1"]) - pd.Timedelta(hours=12), t_end - pd.Timedelta(days=3))
     df = full.loc[t_start:].iloc[-bars:]
