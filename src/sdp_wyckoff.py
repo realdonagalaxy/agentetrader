@@ -38,26 +38,28 @@ def _lobes(h_seg: np.ndarray, off: int):
 
 
 def _wyckoff(h_, adv, W, b_idx, j, sw_idx, tol_abs, min_frac):
-    """(div, div+volume, div+volume+gobbe decrescenti) per il test che contiene sw_idx."""
+    """(div, div+volume, div+volume+gobbe decrescenti, info) per il test che contiene sw_idx.
+    info: {'sc_idx': barra del climax, 'sc_adv': estremo del climax (coordinate specchiate)} oppure {}."""
     lobes = _lobes(h_[b_idx:j + 1], b_idx)
     T = next((l for l in lobes if l[0] <= sw_idx <= l[1]), None)
     if T is None:
-        return False, False, False
+        return False, False, False, {}
     earlier = [l for l in lobes if l[1] < T[0]]
     if not earlier:
-        return False, False, False
+        return False, False, False, {}
     pk = lambda l: h_[l[0]:l[1] + 1].min()          # gobba = valore più negativo
     sc = min(earlier, key=pk)
     pk_sc, pk_t = pk(sc), pk(T)
     if pk_t <= pk_sc:                               # il test è la gobba più grande: sarebbe lui il climax
-        return False, False, False
+        return False, False, False, {}
     low_sc, low_t = adv[sc[0]:sc[1] + 1].min(), adv[T[0]:T[1] + 1].min()
     div = bool(low_t <= low_sc + tol_abs)
     vol = bool(div and W[T[0]:T[1] + 1].sum() < W[sc[0]:sc[1] + 1].sum())
     after = [l for l in lobes if sc[1] < l[0] and l[1] <= T[1]]
     peaks = [abs(pk(l)) for l in after if abs(pk(l)) >= min_frac * abs(pk_sc)]
     dec = bool(vol and peaks and all(peaks[i] <= peaks[i - 1] for i in range(1, len(peaks))))
-    return div, vol, dec
+    info = {"sc_idx": sc[0] + int(np.argmin(adv[sc[0]:sc[1] + 1])), "sc_adv": float(low_sc)}
+    return div, vol, dec, info
 
 
 def generate(m5: pd.DataFrame, p: WyParams = WyParams(), stats: dict | None = None) -> pd.DataFrame:
@@ -139,7 +141,7 @@ def generate(m5: pd.DataFrame, p: WyParams = WyParams(), stats: dict | None = No
             risk = cl[j] - extreme
             if risk <= 0:
                 continue
-            div, vol, dec = _wyckoff(h_, adv, W, b_idx, j, sw_idx, p.clim_tol_atr * A[i_s], p.lobe_min_frac)
+            div, vol, dec, winfo = _wyckoff(h_, adv, W, b_idx, j, sw_idx, p.clim_tol_atr * A[i_s], p.lobe_min_frac)
             sgn = 1 if long else -1
             with np.errstate(divide="ignore", invalid="ignore"):
                 z = (sgn * adv[sw_idx] - vwap[sw_idx]) / vsd[sw_idx]
@@ -149,17 +151,37 @@ def generate(m5: pd.DataFrame, p: WyParams = WyParams(), stats: dict | None = No
                         "in_kz": bool(kz_lo - pad <= sw_low <= kz_hi + pad),
                         "ob_touch": bool(cand_hi is not None and np.isfinite(cand_hi) and sw_low <= cand_hi),
                         "wy_div": div, "wy_vol": vol, "wy_dec": dec,
+                        "kind": "signal", "kz_lo": sgn * kz_lo, "kz_hi": sgn * kz_hi, "b_price": sgn * B, "sw_price": sgn * sw_low,
+                        "sw_time": pd.Timestamp(t5[sw_idx]),
+                        "sc_price": sgn * winfo["sc_adv"] if winfo else np.nan,
+                        "sc_time": pd.Timestamp(t5[winfo["sc_idx"]]) if winfo else pd.NaT,
+                        "ob_hi": (sgn * cand_hi) if (cand_hi is not None and np.isfinite(cand_hi)) else np.nan,
                         "vwap_ext": float(-sgn * z) if np.isfinite(z) else np.nan, "vwap_bars": int(vbars[sw_idx])})
             bump("candidati CHoCH")
             ncand += 1
             if ncand >= p.max_cands:
                 break
+        else:
+            # struttura ancora aperta all'ultima barra disponibile: setup "in formazione" (usato dall'analisi dal vivo)
+            if last == len(t5) - 1 and sw_low >= lvl - p.abort_ext * length:
+                jj = last
+                div, vol, dec, winfo = _wyckoff(h_, adv, W, b_idx, jj, sw_idx, p.clim_tol_atr * A[i_s], p.lobe_min_frac)
+                sgn = 1 if long else -1
+                out.append({"time": pd.Timestamp(t5[jj]), "sid": sid, "kind": "pending", "side": "buy" if long else "sell",
+                            "level": d.level, "leg1_pips": length * 1e4, "b_price": sgn * B,
+                            "kz_lo": sgn * kz_lo, "kz_hi": sgn * kz_hi, "sw_price": sgn * sw_low, "sw_time": pd.Timestamp(t5[sw_idx]),
+                            "in_kz": bool(kz_lo - pad <= sw_low <= kz_hi + pad),
+                            "ob_touch": bool(cand_hi is not None and np.isfinite(cand_hi) and sw_low <= cand_hi),
+                            "ob_hi": (sgn * cand_hi) if (cand_hi is not None and np.isfinite(cand_hi)) else np.nan,
+                            "wy_div": div, "wy_vol": vol, "wy_dec": dec,
+                            "sc_price": sgn * winfo["sc_adv"] if winfo else np.nan,
+                            "sc_time": pd.Timestamp(t5[winfo["sc_idx"]]) if winfo else pd.NaT})
     return pd.DataFrame(out).set_index("time").sort_index() if out else pd.DataFrame()
 
 
 def report(sig: pd.DataFrame, m5: pd.DataFrame, label: str) -> None:
     """Varianti fissate in anticipo. Per ogni struttura si prende il primo candidato che soddisfa la variante."""
-    sig = sig.copy()
+    sig = sig[sig.get("kind", "signal") == "signal"].copy() if "kind" in sig else sig.copy()
     sig["macro"] = [macro_at(t.to_pydatetime()) for t in sig.index]
     ok = sig.vwap_bars >= 24
     variants = {

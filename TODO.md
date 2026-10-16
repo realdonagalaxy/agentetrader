@@ -13,3 +13,6 @@
 - [ ] **Strategia SDP**: chiarire le 7 ambiguità in `knowledge/strategia_sdp.md`, poi implementare il generatore di segnali e backtestare.
 - [ ] **Dati M1/M5/M15** per i simboli: la strategia richiede CHoCH M1/M5, il backtest H1 non basta.
 - [ ] **Wyckoff 2.0**: definire i parametri di shakeout/estremi/minor SOS/SOT (vedi `knowledge/wyckoff_2_0.md`) e integrarli nel generatore di segnali SDP.
+- [ ] **Analisi dal vivo su Telegram** (`src/live_analysis.py`): collaudata in replay su storico. Mancano: fonte dati cTrader Open API (app in stato "Active"),
+      ciclo ogni 5 minuti con deduplica degli avvisi, esecuzione sul Mac/VPS. Il trade lo decide l'utente; esecuzione automatica solo dopo validazione.
+- [ ] Validare SDP-Wyckoff su altri strumenti: XAUUSD (in download), EURCAD, BTCUSD, ETHUSD (finestre proprie del documento), indici, argento, GBPUSD.
