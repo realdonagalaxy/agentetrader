@@ -303,7 +303,7 @@ if __name__ == "__main__":
         sig.to_pickle(f"data/gold_signals_{sym}_M{tf}.pkl")
         report(simulate_gold(m5, sig), f"{sym} M{tf}")
         fs = filters(sig)
-        res = simulate_gold(m5, fs).set_index("time", drop=False)
+        res = simulate_gold(m5, fs)
         key = lambda df: list(zip(df.index, df.kind, df.side))
         fm = {k: (a, b) for k, a, b in zip(key(fs), fs.in_kz, fs.macro)}
         res["in_kz"] = [fm[(t, k, s_)][0] for t, k, s_ in zip(res.time, res.kind, res.side)]
