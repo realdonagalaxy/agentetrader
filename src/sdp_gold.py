@@ -259,6 +259,34 @@ def report(res: pd.DataFrame, label: str) -> None:
             print(_line(name, g.sort_values("time"), col) if len(g) else f"{name} n=0")
 
 
+def placebo(m5: pd.DataFrame, sig: pd.DataFrame, seed: int = 0) -> pd.DataFrame:
+    """Stessi lato, rischio e R:R dei segnali ma su barre casuali (±1–30 giorni): misura quanto vale il solo schema SL/TP 2,5R."""
+    rng = np.random.default_rng(seed)
+    cl, n = m5["close"].to_numpy(), len(m5)
+    rows = []
+    for t, r in sig[sig.kind.isin(["UT", "UTAD"])].iterrows():
+        i = m5.index.get_loc(r.start) + int(rng.choice([-1, 1]) * rng.integers(288, 288 * 30))
+        if not 0 <= i < n - 1:
+            continue
+        e, risk, sg = cl[i], abs(r.entry - r.sl), (1 if r.side == "buy" else -1)
+        rows.append({"time": m5.index[i], "kind": r.kind, "side": r.side, "entry": e, "sl": e - sg * risk, "tp1": e + sg * 2.5 * risk,
+                     "tp": e + sg * r.rr * risk, "rr": r.rr, "sid": r.sid, "start": m5.index[i + 1]})
+    return pd.DataFrame(rows).set_index("time")
+
+
+def filters(sig: pd.DataFrame, p: GoldParams = GoldParams()) -> pd.DataFrame:
+    """Aggiunge i flag: in_kz (estremo di UT/UTAD nella Kill Zone, sforamento fino a estensione 2,0) e macro (Londra / New York)."""
+    from src.market_config import macro_at
+    s = sig[sig.kind.isin(["UT", "UTAD"])].copy()
+    sg = np.where(s.side == "buy", 1, -1)
+    ext = np.where(s.kind == "UTAD", s.utad_price, s.ut_price)
+    lvl = np.where(s.side == "buy", s.level, -s.level)
+    a, kz_hi = sg * ext, sg * np.where(s.side == "buy", s.kz_hi, s.kz_hi)
+    s["in_kz"] = (a <= np.maximum(sg * s.kz_hi, sg * s.kz_lo)) & (a >= lvl - p.abort_ext * s.leg1_len)
+    s["macro"] = [macro_at(t.to_pydatetime()) for t in s.index]
+    return s
+
+
 if __name__ == "__main__":
     import sys
     sym = sys.argv[1] if len(sys.argv) > 1 else "XAUUSD"
@@ -274,3 +302,18 @@ if __name__ == "__main__":
     if len(sig):
         sig.to_pickle(f"data/gold_signals_{sym}_M{tf}.pkl")
         report(simulate_gold(m5, sig), f"{sym} M{tf}")
+        fs = filters(sig)
+        res = simulate_gold(m5, fs).set_index("time", drop=False)
+        key = lambda df: list(zip(df.index, df.kind, df.side))
+        fm = {k: (a, b) for k, a, b in zip(key(fs), fs.in_kz, fs.macro)}
+        res["in_kz"] = [fm[(t, k, s_)][0] for t, k, s_ in zip(res.time, res.kind, res.side)]
+        res["macro"] = [fm[(t, k, s_)][1] for t, k, s_ in zip(res.time, res.kind, res.side)]
+        for name, m in [("Kill Zone", res.in_kz), ("Londra+NY", res.macro.notna()), ("solo Londra", res.macro == "Londra"),
+                        ("solo New York", res.macro == "New York"), ("KZ + Londra/NY", res.in_kz & res.macro.notna())]:
+            print(f"\n--- {sym} M{tf} | filtro: {name} ---")
+            for col, nm in [("R_tp1", "tutto a TP1 (2,5R)"), ("R", "gestita 60% a 2,5R + BE")]:
+                print(_line(nm, res[m].sort_values("time"), col))
+        pl = pd.concat([simulate_gold(m5, placebo(m5, sig, sd)) for sd in range(5)])
+        print(f"\n--- {sym} M{tf} | PLACEBO (barre casuali, 5 ripetizioni) ---")
+        for col, nm in [("R_tp1", "tutto a TP1 (2,5R)"), ("R", "gestita 60% a 2,5R + BE")]:
+            print(_line(nm, pl.sort_values("time"), col))

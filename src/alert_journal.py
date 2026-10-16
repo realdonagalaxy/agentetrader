@@ -15,7 +15,7 @@ from src.sdp_v3 import V3Params, simulate_v3
 PATH = Path("journal/trading_journal.xlsx")
 SHEET = "Avvisi"
 HEAD = ["ID", "Creato (UTC)", "Simbolo", "Lato", "Stato", "Livello", "KZ basso", "KZ alto", "Entry limite", "SL", "TP", "R:R",
-        "Chiave", "Telegram", "Decisione utente", "Riempito (UTC)", "Esito", "R (TP unico)", "R (gestione utente)", "Chiuso (UTC)", "Note", "Eventi"]
+        "Chiave", "Telegram", "Decisione utente", "Riempito (UTC)", "Esito", "R (TP unico)", "R (gestione utente)", "Chiuso (UTC)", "Note", "Eventi", "Tipo"]
 COL = {h: i for i, h in enumerate(HEAD)}
 
 
@@ -37,6 +37,10 @@ def _open(path: Path):
 
 
 def alert_key(sym: str, rec: dict) -> str:
+    if rec.get("kind") in ("UT", "UTAD"):
+        return f"{sym}|{rec['kind']}|{rec['side']}|{rec['level']:.2f}|{pd.Timestamp(rec['choch_time']):%Y%m%d%H%M}"
+    if rec.get("kind") == "watch":
+        return f"{sym}|watch|{rec['side']}|{rec['level']:.2f}|{pd.Timestamp(rec['b_time']):%Y%m%d%H%M}"
     if rec["state"] == "watching":
         return f"{sym}|{rec['side']}|{rec['level']:.2f}|watch|{rec.get('b_price', 0):.2f}"
     return f"{sym}|{rec['side']}|{rec['level']:.2f}|{pd.Timestamp(rec['choch_time']):%Y%m%d%H%M}"
@@ -56,7 +60,7 @@ def upsert(sym: str, rec: dict, path: Path = PATH) -> tuple[int, bool]:
                None if pd.isna(rec.get("sl")) else round(float(rec["sl"]), 5),
                None if pd.isna(rec.get("tp")) else round(float(rec["tp"]), 5),
                None if pd.isna(rec.get("rr")) else round(float(rec["rr"]), 2),
-               key, None, None, None, None, None, None, None, None, None])
+               key, None, None, None, None, None, None, None, None, None, rec.get("kind")])
     wb.save(path)
     return new_id, True
 
@@ -77,6 +81,8 @@ def resolve(m5: pd.DataFrame, row: dict, p: V3Params = V3Params()) -> dict | Non
         return None
     buy = row["Lato"] == "buy"
     entry = float(row["Entry limite"])
+    if row.get("Tipo") in ("UT", "UTAD"):
+        return _resolve_gold(m5, row, after, buy, entry, p)
     window = after.iloc[1:1 + p.retest_bars]
     touch = (window["low"] <= entry) if buy else (window["high"] >= entry)
     if not touch.any():
@@ -95,6 +101,47 @@ def resolve(m5: pd.DataFrame, row: dict, p: V3Params = V3Params()) -> dict | Non
     rm = float(managed.R.iloc[0]) if len(managed) else None
     out.update({"Esito": ("TP" if (rp or 0) > 0 else "SL") if rp is not None else "aperto",
                 "R (TP unico)": rp, "R (gestione utente)": rm})
+    return out
+
+
+def gold_tps(r: dict) -> list[float]:
+    risk = abs(float(r["Entry limite"]) - float(r["SL"]))
+    return [float(r["Entry limite"]) + (1 if r["Lato"] == "buy" else -1) * 2.5 * risk, float(r["TP"])]
+
+
+def _gold_fill(after: pd.DataFrame, r: dict, buy: bool, entry: float, p: V3Params):
+    """UT: ingresso a mercato (prima barra dopo l'avviso). UTAD: stop pendente, annullato se prima tocca lo SL. Restituisce (fill, scaduto)."""
+    if r["Tipo"] == "UT":
+        return after.index[1], False
+    win = after.iloc[1:1 + p.retest_bars]
+    hit = (win["high"] >= entry) if buy else (win["low"] <= entry)
+    dead = (win["low"] <= float(r["SL"])) if buy else (win["high"] >= float(r["SL"]))
+    i_hit, i_dead = (int(hit.to_numpy().argmax()) if hit.any() else 10**9), (int(dead.to_numpy().argmax()) if dead.any() else 10**9)
+    if i_hit < i_dead:
+        return win.index[i_hit], False
+    if i_dead < 10**9 or len(win) >= p.retest_bars:
+        return None, True
+    return None, False
+
+
+def _resolve_gold(m5, row, after, buy, entry, p):
+    from src.sdp_gold import simulate_gold
+    fill, expired = _gold_fill(after, row, buy, entry, p)
+    if expired:
+        return {"Esito": "scaduto (non riempito)"}
+    if fill is None:
+        return None
+    tp1, tp = gold_tps(row)
+    sig = pd.DataFrame([{"kind": row["Tipo"], "side": row["Lato"], "entry": entry, "sl": float(row["SL"]), "tp1": tp1, "tp": float(row["TP"]),
+                         "rr": float(row["R:R"]), "sid": 0, "start": fill}], index=pd.DatetimeIndex([fill]))
+    res = simulate_gold(m5, sig)
+    out = {"Riempito (UTC)": pd.Timestamp(fill).isoformat()}
+    if res.empty or pd.isna(res.R_fine.iloc[0]) and pd.isna(res.R.iloc[0]) and pd.isna(res.R_tp1.iloc[0]):
+        out["Esito"] = "aperto"
+        return out
+    g = res.iloc[0]
+    out.update({"Esito": "SL" if g.R_tp1 == -1 else ("TP1+" if pd.notna(g.R) else "aperto"),
+                "R (TP unico)": None if pd.isna(g.R_fine) else float(g.R_fine), "R (gestione utente)": None if pd.isna(g.R) else float(g.R)})
     return out
 
 
@@ -136,11 +183,19 @@ def events_for(m5: pd.DataFrame, r: dict, tps: list[float], p: V3Params = V3Para
     buy = r["Lato"] == "buy"
     entry, sl = float(r["Entry limite"]), float(r["SL"])
     window = after.iloc[1:1 + p.retest_bars]
-    touch = (window["low"] <= entry) if buy else (window["high"] >= entry)
-    if not touch.any():
-        return [("expired", window.index[-1])] if len(window) >= p.retest_bars else []
-    fill = touch.idxmax()
-    ev = [("filled", fill)]
+    if r.get("Tipo") in ("UT", "UTAD"):
+        fill, expired = _gold_fill(after, r, buy, entry, p)
+        if expired:
+            return [("expired", window.index[-1])]
+        if fill is None:
+            return []
+        ev = [("filled", fill)] if r["Tipo"] == "UTAD" else []
+    else:
+        touch = (window["low"] <= entry) if buy else (window["high"] >= entry)
+        if not touch.any():
+            return [("expired", window.index[-1])] if len(window) >= p.retest_bars else []
+        fill = touch.idxmax()
+        ev = [("filled", fill)]
     seg = m5.loc[fill:]
     lo, hi, idx = seg["low"].to_numpy(), seg["high"].to_numpy(), seg.index
     reached = 0
