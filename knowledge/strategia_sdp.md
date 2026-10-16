@@ -56,3 +56,9 @@ PS, AC, UT, UTAD, ST, SPRING: il CHoCH M1 può essere sbilanciato da deep mitiga
 2. Il documento cita anche Box Asiatico, volumi tick, Session Volume Profile: non ancora implementati.
 3. CHoCH M1: servono i dati M1 (disponibili sul Mac in data/raw, non ancora caricati qui).
 4. Asset: finora solo EURUSD; oro, argento, indici e GBPUSD da scaricare per la verifica su dati nuovi.
+
+## Strumenti da validare (aggiornato)
+EURUSD (fatto), XAUUSD, XAGUSD, NASDAQ (USATECHIDXUSD), SP500 (USA500IDXUSD), Dow (USA30IDXUSD), GBPUSD, EURCAD, BTCUSD, ETHUSD.
+Scale prezzi Dukascopy: forex 1e5; JPY/oro/argento/indici 1e3; BTC/ETH 10 (verificati su BTC 2021-01-05 = 32.007; ETH = 1.040).
+Crypto: mercato 24/7 (sabato incluso). Il documento dà finestre proprie per BTC/ETH (14:00–18:00 sovrapposizione NY e 00:00–02:00 reset/Asia, ora italiana)
+diverse dalle macro Londra/NY del forex: da testare a parte, non mischiare con le macro forex.

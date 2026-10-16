@@ -16,7 +16,8 @@ import pandas as pd
 import requests
 
 URL = "https://datafeed.dukascopy.com/datafeed/{sym}/{y}/{m:02d}/{d:02d}/{side}_candles_min_1.bi5"
-SCALES = {"JPY": 1e3, "XAU": 1e3, "XAG": 1e3, "IDX": 1e3}  # default 1e5 (forex); indici: simboli *IDX* (da verificare)
+SCALES = {"JPY": 1e3, "XAU": 1e3, "XAG": 1e3, "IDX": 1e3, "BTC": 10, "ETH": 10}  # default 1e5 (forex); BTC/ETH verificati; indici da verificare
+CRYPTO = ("BTC", "ETH")                                                       # mercato 24/7: scaricare anche il sabato
 REC = struct.Struct(">IIIIIf")
 
 
@@ -76,7 +77,8 @@ def fetch_range(sym: str, start: date, end: date, side: str = "BID", out: str = 
         if path.exists():
             continue
         d0, d1 = max(start, date(year, 1, 1)), min(end, date(year, 12, 31))
-        days = [d0 + timedelta(n) for n in range((d1 - d0).days + 1) if (d0 + timedelta(n)).weekday() != 5]
+        days = [d0 + timedelta(n) for n in range((d1 - d0).days + 1)
+                if sym.startswith(CRYPTO) or (d0 + timedelta(n)).weekday() != 5]
         with requests.Session() as s, ThreadPoolExecutor(threads) as ex:
             res = list(ex.map(lambda d: fetch_day(sym, d, side, s, out_dir), days))
         failed = [d for d, r in zip(days, res) if r is None]

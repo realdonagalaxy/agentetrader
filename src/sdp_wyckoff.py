@@ -197,8 +197,9 @@ if __name__ == "__main__":
     tf = int(sys.argv[1]) if len(sys.argv) > 1 else 15
     tol = float(sys.argv[2]) if len(sys.argv) > 2 else 0.25
     sample = sys.argv[3] if len(sys.argv) > 3 else "full"        # "full" | "report" | "test"
-    m5 = load_ohlc("data/EURUSD_BID_M5.csv.gz")
-    name = f"data/wy_signals_M{tf}_tol{tol}.pkl"
+    sym = sys.argv[4] if len(sys.argv) > 4 else "EURUSD"
+    m5 = load_ohlc(f"data/{sym}_BID_M5.csv.gz")
+    name = f"data/wy_signals_M{tf}_tol{tol}.pkl" if sym == "EURUSD" else f"data/wy_signals_{sym}_M{tf}_tol{tol}.pkl"
     if sample == "test":
         m5 = m5.loc["2018":"2019"]
     if sample == "report":
@@ -210,4 +211,4 @@ if __name__ == "__main__":
             sig.to_pickle(name)
         print(f"STRUTTURA M{tf} tol {tol} - Funnel:", st, flush=True)
         print("Candidati con flag:", {c: int(sig[c].sum()) for c in ("in_kz", "ob_touch", "wy_div", "wy_vol", "wy_dec")}, "su", len(sig), flush=True)
-    report(sig, m5, f"M{tf} tol{tol}")
+    report(sig, m5, f"{sym} M{tf} tol{tol}")
