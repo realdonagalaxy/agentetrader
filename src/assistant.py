@@ -91,21 +91,21 @@ def format_gold(sym: str, a: dict, r: dict) -> str:
     cl = "SC" if buy else "BC"
     ut, utad = ("ST", "Spring") if buy else ("UT", "UTAD")
     struct = (f"Struttura: {'minimi' if buy else 'massimi'} uguali a {_px(r['level'], d)} · Leg 1 fino a {_px(r['b_price'], d)} "
-              f"({float(r['leg1_len']) / pip:.0f} pip) · {cl} a {_px(r['bc_price'], d)} (gobba MACD 8,21,5 con più volumi)")
+              f"({float(r['leg1_len']) / pip:.0f} pip) · {cl} a {_px(r['bc_price'], d)} (gobba più profonda del MACD 8,21,5)")
     if r["kind"] == "watch":
-        nxt = f"{utad} con CHoCH M5" if r.get("ut_time") is not None and pd.notna(r.get("ut_time")) else f"{ut} (nuovo estremo con meno volumi) e CHoCH M5"
+        nxt = f"{utad} e CHoCH M5" if r.get("ut_time") is not None and pd.notna(r.get("ut_time")) else f"{ut} (minimo oltre il {cl}) e CHoCH M5"
         return "\n".join([f"<b>{side} {html.escape(sym)}</b> — in formazione", "",
                           f"{cl} rilevato. Attendo: {nxt}. Poi arriva l'ordine con entry, SL e TP.", ctx, struct, "", DISCLAIMER_GOLD])
     entry, sl, tp1, tp = float(r["entry"]), float(r["sl"]), float(r["tp1"]), float(r["tp"])
     risk = abs(entry - sl)
     if r["kind"] == "UT":
         how = f"{ut}: entry a mercato alla chiusura della candela del CHoCH M5."
-        seq = f"{ut} a {_px(r['ut_price'], d)} con gobba MACD a meno volumi del {cl}"
+        seq = f"{cl} → {ut} a {_px(r['ut_price'], d)} (minimo oltre il {cl}) con CHoCH M5"
         head = f"➡️ Entry (mercato): {_px(entry, d)}"
     else:
         dl = (pd.Timestamp(r["choch_time"]) + pd.Timedelta(minutes=5 * V3Params().retest_bars)).tz_localize("UTC").astimezone(MACRO_TZ)
         how = f"{utad}: {'BUY' if buy else 'SELL'} STOP immediato dopo il CHoCH M5, valido fino alle {dl:%H:%M} (Roma)."
-        seq = f"{ut} a {_px(r['ut_price'], d)} → {utad} a {_px(r['utad_price'], d)}"
+        seq = f"{cl} → {ut} a {_px(r['ut_price'], d)} → {utad} a {_px(r['utad_price'], d)}, poi CHoCH M5"
         head = f"➡️ Entry ({'BUY' if buy else 'SELL'} STOP): {_px(entry, d)}"
     lines = [f"<b>{side} {html.escape(sym)}</b>", "", head, "", f"❌ SL: {_px(sl, d)}", f"✅ TP1: {_px(tp1, d)} (2,5R)", f"✅ TP2: {_px(tp, d)} (fine Leg 1)",
              "", how, f"Rischio {risk / pip:.0f} pip · R:R verso fine Leg 1: {float(r['rr']):.1f}. A TP1 chiudi il 60% e porta lo SL a pareggio; il resto scorre fino a fine Leg 1.",
@@ -237,6 +237,19 @@ def run_once(sym: str, m5: pd.DataFrame, tf: int, journal=aj.PATH, bot=None, cha
     return sent
 
 
+def demo(sym: str, full: pd.DataFrame, journal, bot=None, chart_dir=None, days: int = 90) -> list[str]:
+    """Prende l'ultimo segnale UT/UTAD (oro) degli ultimi `days` giorni dei dati e lo invia come se fosse appena arrivato.
+    Serve a vedere l'aspetto di foto e messaggio su Telegram. Il journal indicato viene ricreato."""
+    from pathlib import Path
+    sig = generate_gold(full.loc[full.index[-1] - pd.Timedelta(days=days):], GoldParams(struct_tf_min=5))
+    sig = sig[sig.kind.isin(["UT", "UTAD"])] if len(sig) else sig
+    if not len(sig):
+        return []
+    t = sig.index[-1]
+    Path(journal).unlink(missing_ok=True)
+    return run_once(sym, full.loc[:t + pd.Timedelta(minutes=10)], 5, Path(journal), bot, True, chart_dir)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbol", default="EURUSD")
@@ -247,6 +260,7 @@ if __name__ == "__main__":
     ap.add_argument("--journal", default=str(aj.PATH))
     ap.add_argument("--send", action="store_true")
     ap.add_argument("--no-chart", action="store_true")
+    ap.add_argument("--demo", action="store_true", help="oro: invia l'ultimo segnale trovato nei dati per vedere foto e messaggio")
     ap.add_argument("--chart-dir", help="salva qui gli screenshot (utile per provare senza Telegram)")
     a = ap.parse_args()
     full = load_ohlc(f"data/{a.symbol}_BID_M5.csv.gz")
@@ -256,7 +270,10 @@ if __name__ == "__main__":
         bot = TelegramBot()
     from pathlib import Path
     jp = Path(a.journal)
-    if a.replay:
+    if a.demo:
+        msgs = demo(a.symbol, full, jp, bot, a.chart_dir)
+        print("\n\n".join(msgs) if msgs else "Nessun segnale UT/UTAD trovato negli ultimi 90 giorni dei dati.")
+    elif a.replay:
         t, end = pd.Timestamp(a.replay[0]), pd.Timestamp(a.replay[1])
         n = 0
         while t <= end:
