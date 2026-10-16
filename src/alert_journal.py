@@ -15,7 +15,7 @@ from src.sdp_v3 import V3Params, simulate_v3
 PATH = Path("journal/trading_journal.xlsx")
 SHEET = "Avvisi"
 HEAD = ["ID", "Creato (UTC)", "Simbolo", "Lato", "Stato", "Livello", "KZ basso", "KZ alto", "Entry limite", "SL", "TP", "R:R",
-        "Chiave", "Telegram", "Decisione utente", "Riempito (UTC)", "Esito", "R (TP unico)", "R (gestione utente)", "Chiuso (UTC)", "Note"]
+        "Chiave", "Telegram", "Decisione utente", "Riempito (UTC)", "Esito", "R (TP unico)", "R (gestione utente)", "Chiuso (UTC)", "Note", "Eventi"]
 COL = {h: i for i, h in enumerate(HEAD)}
 
 
@@ -29,7 +29,11 @@ def _open(path: Path):
     if SHEET not in wb.sheetnames:
         ws = wb.create_sheet(SHEET)
         ws.append(HEAD)
-    return wb, wb[SHEET]
+    ws = wb[SHEET]
+    for i, h in enumerate(HEAD, start=1):          # aggiunge eventuali colonne nuove a un journal già esistente
+        if ws.cell(row=1, column=i).value is None:
+            ws.cell(row=1, column=i).value = h
+    return wb, ws
 
 
 def alert_key(sym: str, rec: dict) -> str:
@@ -52,7 +56,7 @@ def upsert(sym: str, rec: dict, path: Path = PATH) -> tuple[int, bool]:
                None if pd.isna(rec.get("sl")) else round(float(rec["sl"]), 5),
                None if pd.isna(rec.get("tp")) else round(float(rec["tp"]), 5),
                None if pd.isna(rec.get("rr")) else round(float(rec["rr"]), 2),
-               key, None, None, None, None, None, None, None, None])
+               key, None, None, None, None, None, None, None, None, None])
     wb.save(path)
     return new_id, True
 
@@ -120,3 +124,58 @@ def summary(path: Path = PATH) -> pd.DataFrame:
     wb, ws = _open(path)
     df = pd.DataFrame([[c.value for c in row] for row in ws.iter_rows(min_row=2)], columns=HEAD)
     return df
+
+
+def events_for(m5: pd.DataFrame, r: dict, tps: list[float], p: V3Params = V3Params()) -> list[tuple[str, pd.Timestamp]]:
+    """Eventi dell'ordine nell'ordine in cui accadono: filled, tp1..tpN, be (ritorno a pareggio dopo TP1), sl, expired.
+    Ipotesi prudente sulla stessa barra: prima l'evento avverso."""
+    t0 = pd.Timestamp(r["Creato (UTC)"])
+    after = m5.loc[t0:]
+    if len(after) < 2:
+        return []
+    buy = r["Lato"] == "buy"
+    entry, sl = float(r["Entry limite"]), float(r["SL"])
+    window = after.iloc[1:1 + p.retest_bars]
+    touch = (window["low"] <= entry) if buy else (window["high"] >= entry)
+    if not touch.any():
+        return [("expired", window.index[-1])] if len(window) >= p.retest_bars else []
+    fill = touch.idxmax()
+    ev = [("filled", fill)]
+    seg = m5.loc[fill:]
+    lo, hi, idx = seg["low"].to_numpy(), seg["high"].to_numpy(), seg.index
+    reached = 0
+    for i in range(len(seg)):
+        stop = entry if reached >= 1 else sl                    # dopo TP1 lo SL è a pareggio
+        if (lo[i] <= stop) if buy else (hi[i] >= stop):
+            ev.append(("be" if reached >= 1 else "sl", idx[i]))
+            break
+        k = reached
+        while k < len(tps) and ((hi[i] >= tps[k]) if buy else (lo[i] <= tps[k])):
+            k += 1
+            ev.append((f"tp{k}", idx[i]))
+        reached = k
+        if reached == len(tps):
+            break
+    return ev
+
+
+def process_events(sym: str, m5: pd.DataFrame, path: Path, tps_fn) -> list[tuple[int, str, pd.Timestamp, dict]]:
+    """Restituisce gli eventi NUOVI (non ancora notificati) e li segna nel journal."""
+    if not path.exists():
+        return []
+    wb, ws = _open(path)
+    out = []
+    for row in ws.iter_rows(min_row=2):
+        r = {h: row[i].value for h, i in COL.items()}
+        if r["Simbolo"] != sym or r["Stato"] == "watching" or r["Entry limite"] is None:
+            continue
+        tps = tps_fn(r)
+        done = {x for x in (r["Eventi"] or "").split(",") if x}
+        if done & {"sl", "be", "expired", f"tp{len(tps)}"}:
+            continue
+        new = [(n, t) for n, t in events_for(m5, r, tps) if n not in done]
+        if new:
+            row[COL["Eventi"]].value = ",".join(sorted(done | {n for n, _ in new}))
+            out += [(r["ID"], n, t, r) for n, t in new]
+    wb.save(path)
+    return out

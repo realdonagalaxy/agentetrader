@@ -102,6 +102,28 @@ def format_alert(sym: str, a: dict, r: dict) -> str:
     return "\n".join(lines + ["", DISCLAIMER])
 
 
+def format_event(sym: str, name: str, r: dict, tps: list[float]) -> str:
+    d = decimals(sym)
+    buy = r["Lato"] == "buy"
+    head = f"<b>{'BUY' if buy else 'SELL'} {html.escape(sym)}</b>"
+    entry = _px(r["Entry limite"], d)
+    n = len(tps)
+    if name == "filled":
+        return f"{head}\n\n✅ Ordine limite riempito a {entry}.\nSL {_px(r['SL'], d)} · TP1 {_px(tps[0], d)}" + (f" · TP{n} {_px(tps[-1], d)}" if n > 1 else "")
+    if name == "tp1" and n > 1:
+        return (f"{head}\n\n🎯 TP1 raggiunto ({_px(tps[0], d)})\n\n"
+                f"👉 Chiudi il 60% della posizione\n👉 Porta lo SL a pareggio (BE): {entry}")
+    if name == f"tp{n}":
+        return f"{head}\n\n🏁 {'TP finale' if n == 1 else f'TP{n}'} raggiunto ({_px(tps[-1], d)}): trade chiuso a target."
+    if name.startswith("tp"):
+        return f"{head}\n\n🎯 {name.upper()} raggiunto ({_px(tps[int(name[2:]) - 1], d)}). Il resto resta aperto con SL a pareggio ({entry})."
+    if name == "be":
+        return f"{head}\n\n↩️ Prezzo tornato a pareggio ({entry}) dopo TP1: il resto si chiude a BE. Il 60% era già incassato."
+    if name == "sl":
+        return f"{head}\n\n🛑 SL colpito ({_px(r['SL'], d)}): -1R."
+    return f"{head}\n\n⌛ Ordine limite scaduto senza riempimento: setup annullato."
+
+
 def split_message(msg: str) -> tuple[str, str]:
     """(didascalia per la foto, descrizione da mandare sotto): il blocco Entry/SL/TP resta con la foto."""
     parts = msg.split("\n\n")
@@ -144,6 +166,12 @@ def run_once(sym: str, m5: pd.DataFrame, tf: int, journal=aj.PATH, bot=None, cha
                     bot.send(msg)
                 aj.mark_sent(aid, journal)
     aj.update_outcomes(sym, m5, journal)
+    tps_of = lambda r: take_profits(float(r["Entry limite"]), float(r["SL"]), float(r["TP"]), r["Lato"] == "buy")
+    for aid, name, t, row in aj.process_events(sym, m5, journal, tps_of):          # aggiornamenti: riempimento, TP1/BE, TP, SL...
+        msg = format_event(sym, name, row, tps_of(row))
+        sent.append(f"[aggiornamento · {pd.Timestamp(t)} UTC · avviso {aid}]\n{msg}")
+        if bot:
+            bot.send(msg)
     return sent
 
 
