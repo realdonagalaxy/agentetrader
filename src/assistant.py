@@ -12,13 +12,14 @@ Fonte dati dal vivo (cTrader Open API): da collegare quando l'applicazione sarà
 import argparse
 import html
 
+import numpy as np
 import pandas as pd
 
 from src import alert_journal as aj
 from src.chart import render_chart
 from src.data_loader import load_ohlc, resample
 from src.live_analysis import decimals, pip_size
-from src.market_config import ENTRY_FROM, ENTRY_TO, MACRO_TZ, VWAP_RULE, in_entry_window, macro_at
+from src.market_config import ENTRY_FROM, ENTRY_TO, MACRO_TZ, SEND_TRADE_PLAN, VWAP_RULE, in_entry_window, macro_at
 from src.market_structure import multi_tf_trend
 from src.range_detector import atr
 from src.sdp_gold import GoldParams, generate_gold
@@ -82,10 +83,13 @@ def analyze_gold(m5: pd.DataFrame, tf: int = 15, days: int = 25, recent_min: int
                 if k in r and pd.notna(r[k]):
                     return pd.Timestamp(r[k])
             return pd.NaT
-        watch = watch[[(pd.notna(stage_time(r)) and stage_time(r) >= last - pd.Timedelta(minutes=recent_min)) for _, r in watch.iterrows()]]
+        keep_w = np.array([(pd.notna(stage_time(r)) and stage_time(r) >= last - pd.Timedelta(minutes=recent_min)) for _, r in watch.iterrows()], dtype=bool)
+        watch = watch.loc[keep_w] if len(watch) else watch
         for _, r in pd.concat([fresh, watch.sort_values(t_col).groupby(["side", "bc_time"]).tail(1)]).iterrows():
             d = r.to_dict()
             d["time"] = d.pop(t_col)
+            if d["kind"] in ("UT", "UTAD") and not SEND_TRADE_PLAN:
+                continue                                                  # niente piani Entry/SL/TP: solo conformazione
             if d["kind"] in ("UT", "UTAD") and VWAP_RULE and not bool(d.get("vwap_out" if VWAP_RULE == "choch" else "ext_out", True)):
                 continue                                                  # CHoCH dentro le bande del VWAP: trade scartato
             if d["kind"] in ("UT", "UTAD") and not in_entry_window(pd.Timestamp(d["choch_time"]).to_pydatetime()):
@@ -120,6 +124,12 @@ def format_gold(sym: str, a: dict, r: dict) -> str:
             body = (f"{ut} a {_px(r['ut_price'], d)}: il {ext} ha superato {'l' + chr(39) + cl if buy else 'il ' + cl} ({_px(r['bc_price'], d)}).\n"
                     f"Attendo il CHoCH M5: poi arriva l'ingresso a mercato con entry, SL e TP.")
         return "\n".join([f"<b>{side} {html.escape(sym)}</b> — {utad if sp else ut} oltre {ut if sp else cl}", "", body, ctx, struct, "", DISCLAIMER_GOLD])
+    if r["kind"] == "setup":
+        lat = "minimi" if buy else "massimi"
+        return "\n".join([f"<b>{side} {html.escape(sym)}</b> — SETUP: lateralizzazione, Leg 1 e Leg 2", "",
+                          f"{lat.capitalize()} uguali a {_px(r['level'], d)} (lateralizzazione) · Leg 1 fino a {_px(r['b_price'], d)} "
+                          f"({float(r['leg1_len']) / pip:.0f} pip) · il prezzo ha rotto il livello: Leg 2 in corso.",
+                          "Valuta il contesto.", ctx, "", "ℹ️ Segnale di struttura, non di ingresso: la valutazione è tua. Esito registrato nel journal."])
     if r["kind"] == "early":
         t_loc = pd.Timestamp(r["choch_time"]).tz_localize("UTC").astimezone(MACRO_TZ)
         return "\n".join([f"<b>{side} {html.escape(sym)}</b> — setup individuato alle {t_loc:%H:%M} (Roma)", "",

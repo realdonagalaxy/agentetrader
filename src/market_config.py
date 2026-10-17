@@ -65,3 +65,7 @@ def in_entry_window(ts: datetime, start=ENTRY_FROM, end=ENTRY_TO) -> bool:
 # Filtro VWAP (banda 2σ, VWAP giornaliero): "choch" = la chiusura del CHoCH M5 deve essere oltre la banda (lettura letterale);
 # "extreme" = basta che l'estremo ST/UT, Spring/UTAD sia oltre la banda; None = nessun filtro. DA CONFERMARE con l'utente.
 VWAP_RULE = "choch"
+
+# Messaggi con Entry/SL/TP (UT/UTAD): spenti dopo il cambio di approccio (17 ott 2026): l'assistente segnala la CONFORMAZIONE
+# (setup, climax, ST/Spring) e il contesto lo valuta l'utente. Rimettere True per riavere i piani di trade.
+SEND_TRADE_PLAN = False

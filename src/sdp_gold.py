@@ -132,6 +132,8 @@ def generate_gold(m5: pd.DataFrame, p: GoldParams = GoldParams(), stats: dict | 
                 return j, sw_idx, float(adv[sw_idx:j + 1].min()), mt(s, min(j, e)), pt
             return None
 
+        if live:                                   # conformazione trovata: lateralizzazione + Leg 1 + inizio Leg 2 (rottura del livello)
+            out.append({**base, "time": pd.Timestamp(t5[k0]), "kind": "setup", "state": "watching", "choch_time": pd.Timestamp(t5[k0])})
         if p.mode == "macd":
             # Sequenza (etichette = swing/pivot successivi, "tutto spostato a sinistra" come da utente):
             #  SC = candela del picco dell'istogramma (gobba più profonda della Leg 2); ST = primo swing low sotto il minimo della candela SC;
@@ -386,7 +388,9 @@ def add_vwap(m5: pd.DataFrame, df: pd.DataFrame, k: float = 2.0) -> pd.DataFrame
     for t, r in df.iterrows():
         sg = 1 if r["side"] == "sell" else -1
         zs = []
-        i = int(np.searchsorted(t5, np.datetime64(r.get("choch_time", t))))
+        ct = r.get("choch_time")
+        ct = t if (ct is None or pd.isna(ct)) else ct
+        i = int(np.searchsorted(t5, np.datetime64(pd.Timestamp(ct))))
         with np.errstate(divide="ignore", invalid="ignore"):
             zs.append(sg * (C[min(i, len(C) - 1)] - vwap[min(i, len(C) - 1)]) / vsd[min(i, len(C) - 1)] if vsd[min(i, len(C) - 1)] > 0 else np.nan)
         ext_t = r["utad_time"] if pd.notna(r.get("utad_time")) else r.get("ut_time")

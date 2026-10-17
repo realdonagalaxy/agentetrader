@@ -48,7 +48,8 @@ def volume_profile(m5: pd.DataFrame, t0, t1, nbins: int = 48, va: float = 0.70):
 
 def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float] | None = None, bars: int = 360,
                  macd_par: tuple[int, int, int] = (3, 10, 16)) -> bytes:
-    gold = rec.get("kind") in ("UT", "UTAD", "watch", "early")
+    gold = rec.get("kind") in ("UT", "UTAD", "watch", "early", "setup")
+    has_bc = rec.get("bc_time") is not None and pd.notna(rec.get("bc_time"))
     # tema: oro = stile TradingView dell'utente (sfondo grigio, candele nere); altri strumenti = tema scuro
     BG, FG, GRID = ("#9e9e9e", "#161616", "#858585") if gold else (BG0, FG0, GRID0)
     LAT, DOT_EDGE = ("#4a148c", "#222222") if gold else ("#ce93d8", "#131722")
@@ -60,7 +61,9 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     macd = cl.ewm(span=macd_par[0], adjust=False).mean() - cl.ewm(span=macd_par[1], adjust=False).mean()
     hist_full = macd - macd.ewm(span=macd_par[2], adjust=False).mean()
     t_end = full.index[-1]
-    if gold:                                  # parte dall'inizio della gobba MACD del climax (SC/BC): si vedono solo le candele che servono a leggerlo
+    if gold and not has_bc:                   # setup: lateralizzazione + Leg 1 + inizio Leg 2 (ancora nessun climax)
+        t_start = pd.Timestamp(rec["lat_t1"]) - 15 * pd.Timedelta(minutes=5)
+    elif gold:                                # parte dall'inizio della gobba MACD del climax (SC/BC): si vedono solo le candele che servono a leggerlo
         five = pd.Timedelta(minutes=5)
         i_bc = int(full.index.searchsorted(pd.Timestamp(rec["bc_time"])))
         hv_full = hist_full.to_numpy()
@@ -120,7 +123,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
         ax.text(xb + 1, kz_hi, " Kill Zone", color="#90caf9", fontsize=8, va="bottom")
     if gold:                                   # sequenza Wyckoff: freccia BC/SC, pallino giallo UT, pallino rosso UTAD
         YEL, GRN = "#ffeb3b", "#4caf50"
-        marks = [("bc", "SC" if buy else "BC", YEL)]
+        marks = [("bc", "SC" if buy else "BC", YEL)] if has_bc else []
         if rec.get("ut_time") is not None and pd.notna(rec.get("ut_time")):
             marks.append(("ut", "ST" if buy else "UT", YEL))
         if rec.get("utad_time") is not None and pd.notna(rec.get("utad_time")):
@@ -136,7 +139,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     # piano
     tags = []
     ymin, ymax = float(df["low"].min()), float(df["high"].max())
-    if gold:
+    if gold and has_bc:
         ymin, ymax = min(ymin, float(rec["bc_price"])), max(ymax, float(rec["bc_price"]))
     if pd.notna(rec.get("entry")):
         entry, sl = float(rec["entry"]), float(rec["sl"])
