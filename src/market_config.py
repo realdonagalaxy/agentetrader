@@ -69,3 +69,10 @@ VWAP_RULE = "choch"
 # Messaggi con Entry/SL/TP (UT/UTAD): spenti dopo il cambio di approccio (17 ott 2026): l'assistente segnala la CONFORMAZIONE
 # (setup, climax, ST/Spring) e il contesto lo valuta l'utente. Rimettere True per riavere i piani di trade.
 SEND_TRADE_PLAN = False
+
+# Tipi di avviso da inviare. "approach" = foto + direzione quando la Leg 2 sta per arrivare sulla Kill Zone (richiesta dell'utente, 17 ott 2026).
+# Altri disponibili: "setup" (rottura del livello), "climax" (🚨 SC/BC), "st" (ST oltre SC / UT oltre BC), "spring" (Spring oltre ST / UTAD oltre UT).
+ALERT_STAGES = ("approach",)
+KZ_APPROACH = 0.10      # ASSUNZIONE: "quasi all'arrivo" = prezzo a meno di 0,10 x lunghezza Leg 1 dall'inizio della Kill Zone (estensione 1,272), o già dentro
+ALERT_LEG_ATR = 2.0     # ASSUNZIONE: avvisi solo con Leg 1 >= 2 ATR (M15)
+ALERT_COOLDOWN_MIN = 60 # al massimo un avviso per direzione ogni 60 minuti (tra più strutture sovrapposte vale la Leg 1 più lunga)

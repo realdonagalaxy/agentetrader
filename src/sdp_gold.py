@@ -34,6 +34,8 @@ class GoldParams(V3Params):
     macd_signal: int = 5
     tp1_r: float = 2.5
     frac: float = 0.6             # quota chiusa a TP1
+    alert_leg_atr: float = 2.0    # avvisi "in arrivo sulla Kill Zone": solo Leg 1 di almeno questi ATR M15 (ASSUNZIONE, per ridurre il rumore)
+    kz_approach: float = 0.10     # "quasi all'arrivo" sulla Kill Zone: a meno di questa frazione della Leg 1 dall'inizio (estensione 1,272)
     mode: str = "macd"            # "macd" = gobbe dell'istogramma (la più grande = climax); "tick" = swing con volumi tick (niente MACD)
     tick_win: int = 6             # modalità tick: volume sommato su ±tick_win barre attorno al minimo/massimo di swing
 
@@ -134,6 +136,11 @@ def generate_gold(m5: pd.DataFrame, p: GoldParams = GoldParams(), stats: dict | 
 
         if live:                                   # conformazione trovata: lateralizzazione + Leg 1 + inizio Leg 2 (rottura del livello)
             out.append({**base, "time": pd.Timestamp(t5[k0]), "kind": "setup", "state": "watching", "choch_time": pd.Timestamp(t5[k0])})
+            kz_start = lvl - (p.fib_lo - 1) * length                    # inizio Kill Zone (estensione 1,272) in coordinate "da long"
+            j_ap = next((k for k in range(k0, last + 1) if adv[k] <= kz_start + p.kz_approach * length), None)
+            if j_ap is not None and length >= p.alert_leg_atr * A[i_s] and adv[k0:j_ap + 1].min() > lvl - p.abort_ext * length:
+                out.append({**base, "time": pd.Timestamp(t5[j_ap]), "kind": "approach", "state": "watching", "choch_time": pd.Timestamp(t5[j_ap]),
+                            "sw_price": sgn * float(adv[k0:j_ap + 1].min())})
         if p.mode == "macd":
             # Sequenza (etichette = swing/pivot successivi, "tutto spostato a sinistra" come da utente):
             #  SC = candela del picco dell'istogramma (gobba più profonda della Leg 2); ST = primo swing low sotto il minimo della candela SC;

@@ -19,7 +19,7 @@ from src import alert_journal as aj
 from src.chart import render_chart
 from src.data_loader import load_ohlc, resample
 from src.live_analysis import decimals, pip_size
-from src.market_config import ENTRY_FROM, ENTRY_TO, MACRO_TZ, SEND_TRADE_PLAN, VWAP_RULE, in_entry_window, macro_at
+from src.market_config import ALERT_COOLDOWN_MIN, ALERT_LEG_ATR, ALERT_STAGES, ENTRY_FROM, KZ_APPROACH, ENTRY_TO, MACRO_TZ, SEND_TRADE_PLAN, VWAP_RULE, in_entry_window, macro_at
 from src.market_structure import multi_tf_trend
 from src.range_detector import atr
 from src.sdp_gold import GoldParams, generate_gold
@@ -65,11 +65,39 @@ def is_gold(sym: str) -> bool:
     return sym.upper().startswith(SEQ_PREFIXES)
 
 
+def _stage(d: dict) -> str:
+    """Tipo di avviso di una riga: approach / setup / climax / st / spring / plan."""
+    k = d["kind"]
+    if k in ("approach", "setup"):
+        return k
+    if k == "watch":
+        has = lambda x: d.get(x) is not None and pd.notna(d.get(x))
+        return "spring" if has("utad_time") else ("st" if has("ut_time") else "climax")
+    return "plan"
+
+
+def _cooldown(rows: list[dict], minutes: int = ALERT_COOLDOWN_MIN) -> list[dict]:
+    """Avvisi "approach": al massimo uno per direzione ogni `minutes` minuti; tra strutture sovrapposte resta quella con la Leg 1 più lunga."""
+    out, last_t = [], {}
+    for d in sorted((r for r in rows if r["kind"] == "approach"), key=lambda r: pd.Timestamp(r["time"])):
+        t = pd.Timestamp(d["time"])
+        prev = last_t.get(d["side"])
+        if prev and t - prev[0] < pd.Timedelta(minutes=minutes):
+            if float(d["leg1_len"]) > float(prev[1]["leg1_len"]):
+                out.remove(prev[1])
+                out.append(d)
+                last_t[d["side"]] = (prev[0], d)
+            continue
+        out.append(d)
+        last_t[d["side"]] = (t, d)
+    return out + [r for r in rows if r["kind"] != "approach"]
+
+
 def analyze_gold(m5: pd.DataFrame, tf: int = 15, days: int = 25, recent_min: int = 120) -> dict:
     """Sequenza BC/SC → UT → UTAD sull'oro: segnali degli ultimi `recent_min` minuti e climax in corso."""
     m5 = m5.loc[m5.index[-1] - pd.Timedelta(days=days):]
     last = m5.index[-1]
-    sig = generate_gold(m5, GoldParams(struct_tf_min=tf), live=True)
+    sig = generate_gold(m5, GoldParams(struct_tf_min=tf, kz_approach=KZ_APPROACH, alert_leg_atr=ALERT_LEG_ATR), live=True)
     h1 = resample(m5, "1h")
     bias = multi_tf_trend(h1.iloc[-400:]) if len(h1) > 50 else {"H4": "?", "H1": "?", "bias": "?"}
     rows = []
@@ -96,7 +124,10 @@ def analyze_gold(m5: pd.DataFrame, tf: int = 15, days: int = 25, recent_min: int
                 d.update(kind="early", state="watching")                 # fuori orario operativo: solo individuazione del setup
                 for k in ("entry", "sl", "tp", "tp1", "rr"):
                     d[k] = float("nan")
+            if _stage(d) not in ALERT_STAGES:
+                continue
             rows.append(d)
+    rows = _cooldown(rows)
     a15 = float(atr(resample(m5, "15min")).iloc[-1])
     return {"time": last, "bias": bias, "macro": macro_at(last.to_pydatetime()), "rows": rows, "tf": tf, "atr15": a15}
 
@@ -124,6 +155,9 @@ def format_gold(sym: str, a: dict, r: dict) -> str:
             body = (f"{ut} a {_px(r['ut_price'], d)}: il {ext} ha superato {'l' + chr(39) + cl if buy else 'il ' + cl} ({_px(r['bc_price'], d)}).\n"
                     f"Attendo il CHoCH M5: poi arriva l'ingresso a mercato con entry, SL e TP.")
         return "\n".join([f"<b>{side} {html.escape(sym)}</b> — {utad if sp else ut} oltre {ut if sp else cl}", "", body, ctx, struct, "", DISCLAIMER_GOLD])
+    if r["kind"] == "approach":
+        kz = f"{_px(min(r['kz_lo'], r['kz_hi']), d)} – {_px(max(r['kz_lo'], r['kz_hi']), d)}"
+        return "\n".join([f"<b>{side} {html.escape(sym)}</b>", "", f"Leg 2 in arrivo sulla Kill Zone ({kz})", "", ctx])
     if r["kind"] == "setup":
         lat = "minimi" if buy else "massimi"
         return "\n".join([f"<b>{side} {html.escape(sym)}</b> — SETUP: lateralizzazione, Leg 1 e Leg 2", "",

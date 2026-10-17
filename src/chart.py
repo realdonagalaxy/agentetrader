@@ -48,7 +48,7 @@ def volume_profile(m5: pd.DataFrame, t0, t1, nbins: int = 48, va: float = 0.70):
 
 def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float] | None = None, bars: int = 360,
                  macd_par: tuple[int, int, int] = (3, 10, 16)) -> bytes:
-    gold = rec.get("kind") in ("UT", "UTAD", "watch", "early", "setup")
+    gold = rec.get("kind") in ("UT", "UTAD", "watch", "early", "setup", "approach")
     has_bc = rec.get("bc_time") is not None and pd.notna(rec.get("bc_time"))
     # tema: oro = stile TradingView dell'utente (sfondo grigio, candele nere); altri strumenti = tema scuro
     BG, FG, GRID = ("#9e9e9e", "#161616", "#858585") if gold else (BG0, FG0, GRID0)
@@ -138,7 +138,14 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
         ax.plot([pos(rec["sw_time"])], [float(rec["sw_price"])], "o", color="#ffeb3b", markersize=5)
     # piano
     tags = []
+    if gold and rec.get("kind") in ("approach", "setup"):      # Kill Zone come due rette (estensione 1,272 e 1,618 della Leg 1)
+        for yv, nm in ((float(rec["kz_hi"]), "Kill Zone 1.272"), (float(rec["kz_lo"]), "Kill Zone 1.618")):
+            ax.hlines(yv, 0, right, colors="#1565c0", linewidth=1.2, linestyles="--")
+            ax.text(right, yv, f" {nm} {yv:.{d}f} ", color="#000000", fontsize=8, va="center",
+                    bbox=dict(boxstyle="square,pad=0.25", facecolor="#90caf9", edgecolor="none"))
     ymin, ymax = float(df["low"].min()), float(df["high"].max())
+    if gold and rec.get("kind") in ("approach", "setup"):
+        ymin, ymax = min(ymin, float(rec["kz_lo"]), float(rec["kz_hi"])), max(ymax, float(rec["kz_lo"]), float(rec["kz_hi"]))
     if gold and has_bc:
         ymin, ymax = min(ymin, float(rec["bc_price"])), max(ymax, float(rec["bc_price"]))
     if pd.notna(rec.get("entry")):
