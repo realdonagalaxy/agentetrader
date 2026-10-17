@@ -18,7 +18,7 @@ from src import alert_journal as aj
 from src.chart import render_chart
 from src.data_loader import load_ohlc, resample
 from src.live_analysis import decimals, pip_size
-from src.market_config import MACRO_TZ, macro_at
+from src.market_config import ENTRY_FROM, MACRO_TZ, in_entry_window, macro_at
 from src.market_structure import multi_tf_trend
 from src.range_detector import atr
 from src.sdp_gold import GoldParams, generate_gold
@@ -57,8 +57,11 @@ def analyze(m5: pd.DataFrame, tf: int = 5, days: int = 25) -> dict:
     return {"time": last, "bias": bias, "macro": macro_at(last.to_pydatetime()), "rows": rows, "tf": tf, "atr15": a15}
 
 
+SEQ_PREFIXES = ("XAU", "XAG", "USATECH", "USA500", "USA30")        # oro, argento, indici americani: sequenza SC/ST/Spring + orario operativo
+
+
 def is_gold(sym: str) -> bool:
-    return sym.upper().startswith("XAU")
+    return sym.upper().startswith(SEQ_PREFIXES)
 
 
 def analyze_gold(m5: pd.DataFrame, tf: int = 15, days: int = 25, recent_min: int = 120) -> dict:
@@ -83,6 +86,10 @@ def analyze_gold(m5: pd.DataFrame, tf: int = 15, days: int = 25, recent_min: int
         for _, r in pd.concat([fresh, watch.sort_values(t_col).groupby(["side", "bc_time"]).tail(1)]).iterrows():
             d = r.to_dict()
             d["time"] = d.pop(t_col)
+            if d["kind"] in ("UT", "UTAD") and not in_entry_window(pd.Timestamp(d["choch_time"]).to_pydatetime()):
+                d.update(kind="early", state="watching")                 # fuori orario operativo: solo individuazione del setup
+                for k in ("entry", "sl", "tp", "tp1", "rr"):
+                    d[k] = float("nan")
             rows.append(d)
     a15 = float(atr(resample(m5, "15min")).iloc[-1])
     return {"time": last, "bias": bias, "macro": macro_at(last.to_pydatetime()), "rows": rows, "tf": tf, "atr15": a15}
@@ -103,12 +110,20 @@ def format_gold(sym: str, a: dict, r: dict) -> str:
     if r["kind"] == "watch":
         sp = r.get("utad_time") is not None and pd.notna(r.get("utad_time"))
         if sp:
-            body = (f"{utad} a {_px(r['utad_price'], d)}: il minimo ha superato l'{ut} ({_px(r['ut_price'], d)}).\n"
+            ext = "minimo" if buy else "massimo"
+            body = (f"{utad} a {_px(r['utad_price'], d)}: il {ext} ha superato l'{ut} ({_px(r['ut_price'], d)}).\n"
                     f"Attendo il CHoCH M5: poi arriva lo stop pendente con entry, SL e TP.")
         else:
-            body = (f"{ut} a {_px(r['ut_price'], d)}: il minimo ha superato l'{cl} ({_px(r['bc_price'], d)}).\n"
+            ext = "minimo" if buy else "massimo"
+            body = (f"{ut} a {_px(r['ut_price'], d)}: il {ext} ha superato {'l' + chr(39) + cl if buy else 'il ' + cl} ({_px(r['bc_price'], d)}).\n"
                     f"Attendo il CHoCH M5: poi arriva l'ingresso a mercato con entry, SL e TP.")
         return "\n".join([f"<b>{side} {html.escape(sym)}</b> — {utad if sp else ut} oltre {ut if sp else cl}", "", body, ctx, struct, "", DISCLAIMER_GOLD])
+    if r["kind"] == "early":
+        t_loc = pd.Timestamp(r["choch_time"]).tz_localize("UTC").astimezone(MACRO_TZ)
+        return "\n".join([f"<b>{side} {html.escape(sym)}</b> — setup individuato alle {t_loc:%H:%M} (Roma)", "",
+                          f"La sequenza {cl} → {ut}" + (f" → {utad}" if r.get("utad_time") is not None and pd.notna(r.get("utad_time")) else "")
+                          + f" è completa con CHoCH M5, ma siamo fuori dall'orario operativo: i trade si aprono dalle {ENTRY_FROM[0]}:{ENTRY_FROM[1]:02d} (apertura New York).",
+                          "Non apro il trade: attendo un nuovo CHoCH M5 dopo quell'ora.", ctx, struct, "", DISCLAIMER_GOLD])
     entry, sl, tp1, tp = float(r["entry"]), float(r["sl"]), float(r["tp1"]), float(r["tp"])
     risk = abs(entry - sl)
     if r["kind"] == "UT":

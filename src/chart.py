@@ -48,7 +48,7 @@ def volume_profile(m5: pd.DataFrame, t0, t1, nbins: int = 48, va: float = 0.70):
 
 def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float] | None = None, bars: int = 360,
                  macd_par: tuple[int, int, int] = (3, 10, 16)) -> bytes:
-    gold = rec.get("kind") in ("UT", "UTAD", "watch")
+    gold = rec.get("kind") in ("UT", "UTAD", "watch", "early")
     # tema: oro = stile TradingView dell'utente (sfondo grigio, candele nere); altri strumenti = tema scuro
     BG, FG, GRID = ("#9e9e9e", "#161616", "#858585") if gold else (BG0, FG0, GRID0)
     LAT, DOT_EDGE = ("#4a148c", "#222222") if gold else ("#ce93d8", "#131722")

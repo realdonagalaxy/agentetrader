@@ -39,6 +39,8 @@ def _open(path: Path):
 def alert_key(sym: str, rec: dict) -> str:
     if rec.get("kind") in ("UT", "UTAD"):
         return f"{sym}|{rec['kind']}|{rec['side']}|{rec['level']:.2f}|{pd.Timestamp(rec['choch_time']):%Y%m%d%H%M}"
+    if rec.get("kind") == "early":
+        return f"{sym}|early|{rec['side']}|{rec['level']:.2f}|{pd.Timestamp(rec['choch_time']):%Y%m%d%H%M}"
     if rec.get("kind") == "watch":                      # un avviso per ogni passo: ST oltre l'SC, poi Spring oltre l'ST
         has = lambda k: rec.get(k) is not None and pd.notna(rec.get(k))
         if has("utad_time"):

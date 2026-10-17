@@ -48,3 +48,16 @@ def macro_at(ts: datetime) -> str | None:
         if h0 * 60 + m0 <= m < h1 * 60 + m1:
             return name
     return None
+
+
+# Orario operativo per APRIRE i trade (ora italiana): dall'apertura di New York; prima si individua solo il setup.
+ENTRY_FROM, ENTRY_TO = (15, 30), (22, 0)        # ASSUNZIONE: fine = chiusura di New York (22:00 Roma), da confermare
+
+
+def in_entry_window(ts: datetime, start=ENTRY_FROM, end=ENTRY_TO) -> bool:
+    """True se `ts` (naive = UTC) cade nell'orario in cui è permesso aprire un trade."""
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    loc = ts.astimezone(MACRO_TZ)
+    m = loc.hour * 60 + loc.minute
+    return start[0] * 60 + start[1] <= m < end[0] * 60 + end[1]
