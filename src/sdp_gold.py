@@ -588,6 +588,15 @@ if __name__ == "__main__":
             for col, nm in [("R_tp1", "tutto a TP1 (2,5R)"), ("R", "gestita 60% a 2,5R + BE")]:
                 print(_line(nm, plw.sort_values("time"), col))
         pl = pd.concat([simulate_gold(m5, placebo(m5, sig, sd)) for sd in range(5)])
+        from src.verdict import print_verdicts, verdict
+        gm = {"tutti i segnali": pd.Series(True, index=res.index), "orario 15:30-18:30": res.in_ny, "fuori orario": ~res.in_ny,
+              "VWAP: CHoCH oltre 2σ": res.vwap_out, "VWAP: estremo oltre 2σ": res.ext_out,
+              "con sweep H1": res.sweep, "senza sweep H1": ~res.sweep,
+              "orario + VWAP estremo": res.in_ny & res.ext_out, "A-SETUP (orario+VWAP estremo+sweep)": res.in_ny & res.ext_out & res.sweep,
+              "solo Londra 9-11": res.macro == "Londra", "solo New York 14:30-17": res.macro == "New York"}
+        for col, nm in (("R_tp1", "uscita tutta a TP 2,5R"), ("R", "gestita 60% a 2,5R + BE")):
+            rows = [(g, verdict(res[m][["time", col]].rename(columns={col: "R"}), pl[col])) for g, m in gm.items()]
+            print_verdicts(rows, f"{sym} M{tf} | {nm}")
         print(f"\n--- {sym} M{tf} | PLACEBO (barre casuali, 5 ripetizioni) ---")
         for col, nm in [("R_tp1", "tutto a TP1 (2,5R)"), ("R", "gestita 60% a 2,5R + BE")]:
             print(_line(nm, pl.sort_values("time"), col))

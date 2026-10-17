@@ -182,6 +182,8 @@ def report(res: pd.DataFrame, m5: pd.DataFrame, sig: pd.DataFrame, label: str) -
         print(_line(name, t.sort_values("time")))
     pl = pd.concat([simulate(m5, placebo(m5, sig, s)) for s in range(5)])
     print(_line("PLACEBO (barre casuali, 5 rip.)", pl.sort_values("time")))
+    from src.verdict import print_verdicts, verdict
+    print_verdicts([(n_, verdict(t_[["time", "R"]], pl["R"])) for n_, t_ in variants.items()], f"{label}")
 
 
 if __name__ == "__main__":
