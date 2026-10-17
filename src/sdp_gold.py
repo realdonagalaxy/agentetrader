@@ -349,7 +349,10 @@ def add_sweep(m5: pd.DataFrame, df: pd.DataFrame, days: int = 5, n_h1: int = 2) 
                     continue
                 if (pr > P) if sell else (pr < P):
                     i0 = int(np.searchsorted(t5, np.datetime64(t_conf)))
-                    seen = (H[i0:i_bc + 1].max() > P) if sell else (L[i0:i_bc + 1].min() < P) if i_bc >= i0 else False
+                    if i_bc < i0:                      # il pivot H1 è confermato dopo il BC/SC: il BC non può averlo superato prima
+                        seen = False
+                    else:
+                        seen = bool(H[i0:i_bc + 1].max() > P) if sell else bool(L[i0:i_bc + 1].min() < P)
                     if not seen:
                         ok, who = True, name
                         break
