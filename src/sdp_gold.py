@@ -438,6 +438,40 @@ def simulate_gold(m5: pd.DataFrame, sig: pd.DataFrame, p: GoldParams = GoldParam
     return pd.DataFrame(rows)
 
 
+def tp_scan(m5: pd.DataFrame, sig: pd.DataFrame, mults=(1.0, 1.5, 2.0, 2.5, 3.0)) -> pd.DataFrame:
+    """Stessi ingressi e SL, uscita tutta a TP = k·R (k in `mults`): mostra il compromesso tra win rate e R per trade. Stessa barra: prima lo SL."""
+    Hh, Ll = m5["high"].to_numpy(), m5["low"].to_numpy()
+    idx = m5.index
+    first = lambda m: int(m.argmax()) if m.any() else 10**9
+    rows = []
+    for t, r in sig.iterrows():
+        f = idx.get_loc(r["start"])
+        buy = r["side"] == "buy"
+        risk = abs(r["entry"] - r["sl"])
+        hi, lo = Hh[f:f + 8640], Ll[f:f + 8640]
+        isl = first(lo <= r["sl"]) if buy else first(hi >= r["sl"])
+        row = {"time": t}
+        for k in mults:
+            tp = r["entry"] + (k if buy else -k) * risk
+            itp = first(hi >= tp) if buy else first(lo <= tp)
+            row[k] = np.nan if min(isl, itp) == 10**9 else (-1.0 if isl <= itp else k)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def tp_scan_report(m5: pd.DataFrame, sig: pd.DataFrame, label: str) -> None:
+    if sig.empty:
+        print(f"{label:46s} n=0")
+        return
+    sc = tp_scan(m5, sig)
+    for k in [c for c in sc.columns if c != "time"]:
+        r = sc[k].dropna()
+        if len(r) == 0:
+            continue
+        win = float((r > 0).mean())
+        print(f"{label:46s} TP {k:3.1f}R  n={len(r):4d}  win={win:.3f} (pareggio {1 / (1 + k):.3f})  exp={r.mean():+.3f}R (±{(r.std() / np.sqrt(len(r)) if len(r) > 1 else float('nan')):.3f})")
+
+
 def _line(label, t, col):
     t = t.dropna(subset=[col]).assign(R=lambda x: x[col])
     if len(t) < 30:
@@ -535,6 +569,15 @@ if __name__ == "__main__":
             print(f"\n--- {sym} M{tf} | {name} ---")
             for col, nm in [("R_tp1", "tutto a TP1 (2,5R)"), ("R", "gestita 60% a 2,5R + BE")]:
                 print(_line(nm, res[m].sort_values("time"), col))
+        print(f"\n--- {sym} M{tf} | QUALITÀ: pochi trade con tutte le conferme, uscita tutta a TP = k·R ---")
+        base_q = fs.in_ny
+        for lab, m in [("tutti i segnali", pd.Series(True, index=fs.index)),
+                       ("orario 15:30-18:30", base_q),
+                       ("orario + VWAP (CHoCH oltre 2σ)", base_q & fs.vwap_out),
+                       ("orario + VWAP (estremo oltre 2σ)", base_q & fs.ext_out),
+                       ("A-SETUP: orario + VWAP CHoCH + sweep H1", base_q & fs.vwap_out & fs.sweep_h1),
+                       ("A-SETUP: orario + VWAP estremo + sweep H1", base_q & fs.ext_out & fs.sweep_h1)]:
+            tp_scan_report(m5, fs[m], lab)
         ps = sig[sig.sweep_h1] if "sweep_h1" in sig else sig
         if len(ps):
             plw = pd.concat([simulate_gold(m5, placebo(m5, ps, sd)) for sd in range(5)])
