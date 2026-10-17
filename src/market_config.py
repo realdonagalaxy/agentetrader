@@ -61,3 +61,7 @@ def in_entry_window(ts: datetime, start=ENTRY_FROM, end=ENTRY_TO) -> bool:
     loc = ts.astimezone(MACRO_TZ)
     m = loc.hour * 60 + loc.minute
     return start[0] * 60 + start[1] <= m < end[0] * 60 + end[1]
+
+# Filtro VWAP (banda 2σ, VWAP giornaliero): "choch" = la chiusura del CHoCH M5 deve essere oltre la banda (lettura letterale);
+# "extreme" = basta che l'estremo ST/UT, Spring/UTAD sia oltre la banda; None = nessun filtro. DA CONFERMARE con l'utente.
+VWAP_RULE = "choch"

@@ -317,7 +317,7 @@ def generate_gold(m5: pd.DataFrame, p: GoldParams = GoldParams(), stats: dict | 
         return pd.DataFrame()
     df = pd.DataFrame(out).sort_values("time", kind="stable")
     df = df.drop_duplicates(["time", "kind", "side", "level"]).set_index("time")      # strutture sovrapposte con lo stesso segnale
-    return add_sweep(m5, df)
+    return add_vwap(m5, add_sweep(m5, df))
 
 
 def add_sweep(m5: pd.DataFrame, df: pd.DataFrame, days: int = 5, n_h1: int = 2) -> pd.DataFrame:
@@ -359,6 +359,45 @@ def add_sweep(m5: pd.DataFrame, df: pd.DataFrame, days: int = 5, n_h1: int = 2) 
         by.append(who)
     out = df.copy()
     out["sweep_h1"], out["sweep_by"] = flags, by
+    return out
+
+
+def add_vwap(m5: pd.DataFrame, df: pd.DataFrame, k: float = 2.0) -> pd.DataFrame:
+    """Colonne `vwap_z` / `vwap_out`: la chiusura della candela del CHoCH M5 è oltre la banda ±k·σ del VWAP giornaliero (reset 00:00 UTC,
+    pesato per i volumi tick, σ = deviazione standard pesata del prezzo tipico)? Sell: sopra la banda alta; Buy: sotto la banda bassa.
+    `ext_z` / `ext_out`: lo stesso per l'estremo di UT/UTAD (ST/Spring). Dentro le bande = trade da scartare."""
+    if df.empty:
+        return df
+    W = m5["volume"].to_numpy(dtype=float) if "volume" in m5 else np.ones(len(m5))
+    H, L, C = (m5[c].to_numpy() for c in ("high", "low", "close"))
+    tp_ = (H + L + C) / 3
+    day = m5.index.normalize()
+    cw = pd.Series(W, index=m5.index).groupby(day).cumsum().to_numpy()
+    cpv = pd.Series(W * tp_, index=m5.index).groupby(day).cumsum().to_numpy()
+    cpv2 = pd.Series(W * tp_ * tp_, index=m5.index).groupby(day).cumsum().to_numpy()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        vwap = cpv / cw
+        vsd = np.sqrt(np.maximum(cpv2 / cw - vwap ** 2, 0))
+    t5 = m5.index.values
+    zc, ze = [], []
+    for t, r in df.iterrows():
+        sg = 1 if r["side"] == "sell" else -1
+        zs = []
+        i = int(np.searchsorted(t5, np.datetime64(r.get("choch_time", t))))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            zs.append(sg * (C[min(i, len(C) - 1)] - vwap[min(i, len(C) - 1)]) / vsd[min(i, len(C) - 1)] if vsd[min(i, len(C) - 1)] > 0 else np.nan)
+        ext_t = r["utad_time"] if pd.notna(r.get("utad_time")) else r.get("ut_time")
+        ext_p = r["utad_price"] if pd.notna(r.get("utad_time")) else r.get("ut_price")
+        if pd.notna(ext_t):
+            j = min(int(np.searchsorted(t5, np.datetime64(ext_t))), len(C) - 1)
+            zs.append(sg * (float(ext_p) - vwap[j]) / vsd[j] if vsd[j] > 0 else np.nan)
+        else:
+            zs.append(np.nan)
+        zc.append(zs[0])
+        ze.append(zs[1])
+    out = df.copy()
+    out["vwap_z"], out["ext_z"] = zc, ze
+    out["vwap_out"], out["ext_out"] = out["vwap_z"] >= k, out["ext_z"] >= k
     return out
 
 
@@ -483,6 +522,16 @@ if __name__ == "__main__":
             for col, nm in [("R_tp1", "tutto a TP1 (2,5R)"), ("R", "gestita 60% a 2,5R + BE")]:
                 print(_line(nm, res[m].sort_values("time"), col))
         for name, m in [("15:30-18:30 E sweep H1", res.in_ny & res.sweep), ("15:30-18:30 SENZA sweep H1", res.in_ny & ~res.sweep)]:
+            print(f"\n--- {sym} M{tf} | {name} ---")
+            for col, nm in [("R_tp1", "tutto a TP1 (2,5R)"), ("R", "gestita 60% a 2,5R + BE")]:
+                print(_line(nm, res[m].sort_values("time"), col))
+        vo = {(t, k, sd): (a, b) for t, k, sd, a, b in zip(sig.index, sig.kind, sig.side, sig.vwap_out, sig.ext_out)}
+        res["vwap_out"] = [bool(vo.get((t, k, sd), (False, False))[0]) for t, k, sd in zip(res.time, res.kind, res.side)]
+        res["ext_out"] = [bool(vo.get((t, k, sd), (False, False))[1]) for t, k, sd in zip(res.time, res.kind, res.side)]
+        for name, m in [("VWAP: CHoCH OLTRE la banda 2σ", res.vwap_out), ("VWAP: CHoCH DENTRO le bande (da scartare)", ~res.vwap_out),
+                        ("VWAP: estremo ST/UT-Spring/UTAD oltre 2σ", res.ext_out),
+                        ("15:30-18:30 + CHoCH oltre 2σ", res.in_ny & res.vwap_out),
+                        ("15:30-18:30 + CHoCH oltre 2σ + sweep H1", res.in_ny & res.vwap_out & res.sweep)]:
             print(f"\n--- {sym} M{tf} | {name} ---")
             for col, nm in [("R_tp1", "tutto a TP1 (2,5R)"), ("R", "gestita 60% a 2,5R + BE")]:
                 print(_line(nm, res[m].sort_values("time"), col))

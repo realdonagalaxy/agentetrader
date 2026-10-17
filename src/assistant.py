@@ -18,7 +18,7 @@ from src import alert_journal as aj
 from src.chart import render_chart
 from src.data_loader import load_ohlc, resample
 from src.live_analysis import decimals, pip_size
-from src.market_config import ENTRY_FROM, ENTRY_TO, MACRO_TZ, in_entry_window, macro_at
+from src.market_config import ENTRY_FROM, ENTRY_TO, MACRO_TZ, VWAP_RULE, in_entry_window, macro_at
 from src.market_structure import multi_tf_trend
 from src.range_detector import atr
 from src.sdp_gold import GoldParams, generate_gold
@@ -86,6 +86,8 @@ def analyze_gold(m5: pd.DataFrame, tf: int = 15, days: int = 25, recent_min: int
         for _, r in pd.concat([fresh, watch.sort_values(t_col).groupby(["side", "bc_time"]).tail(1)]).iterrows():
             d = r.to_dict()
             d["time"] = d.pop(t_col)
+            if d["kind"] in ("UT", "UTAD") and VWAP_RULE and not bool(d.get("vwap_out" if VWAP_RULE == "choch" else "ext_out", True)):
+                continue                                                  # CHoCH dentro le bande del VWAP: trade scartato
             if d["kind"] in ("UT", "UTAD") and not in_entry_window(pd.Timestamp(d["choch_time"]).to_pydatetime()):
                 d.update(kind="early", state="watching")                 # fuori orario operativo: solo individuazione del setup
                 for k in ("entry", "sl", "tp", "tp1", "rr"):
