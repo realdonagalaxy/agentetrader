@@ -51,7 +51,7 @@ def macro_at(ts: datetime) -> str | None:
 
 
 # Orario operativo per APRIRE i trade (ora italiana): dall'apertura di New York; prima si individua solo il setup.
-ENTRY_FROM, ENTRY_TO = (15, 30), (22, 0)        # ASSUNZIONE: fine = chiusura di New York (22:00 Roma), da confermare
+ENTRY_FROM, ENTRY_TO = (15, 30), (18, 30)        # confermato dall'utente: CHoCH M5 tra le 15:30 e le 18:30 ora italiana
 
 
 def in_entry_window(ts: datetime, start=ENTRY_FROM, end=ENTRY_TO) -> bool:

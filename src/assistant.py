@@ -18,7 +18,7 @@ from src import alert_journal as aj
 from src.chart import render_chart
 from src.data_loader import load_ohlc, resample
 from src.live_analysis import decimals, pip_size
-from src.market_config import ENTRY_FROM, MACRO_TZ, in_entry_window, macro_at
+from src.market_config import ENTRY_FROM, ENTRY_TO, MACRO_TZ, in_entry_window, macro_at
 from src.market_structure import multi_tf_trend
 from src.range_detector import atr
 from src.sdp_gold import GoldParams, generate_gold
@@ -122,8 +122,8 @@ def format_gold(sym: str, a: dict, r: dict) -> str:
         t_loc = pd.Timestamp(r["choch_time"]).tz_localize("UTC").astimezone(MACRO_TZ)
         return "\n".join([f"<b>{side} {html.escape(sym)}</b> — setup individuato alle {t_loc:%H:%M} (Roma)", "",
                           f"La sequenza {cl} → {ut}" + (f" → {utad}" if r.get("utad_time") is not None and pd.notna(r.get("utad_time")) else "")
-                          + f" è completa con CHoCH M5, ma siamo fuori dall'orario operativo: i trade si aprono dalle {ENTRY_FROM[0]}:{ENTRY_FROM[1]:02d} (apertura New York).",
-                          "Non apro il trade: attendo un nuovo CHoCH M5 dopo quell'ora.", ctx, struct, "", DISCLAIMER_GOLD])
+                          + f" è completa con CHoCH M5, ma siamo fuori dall'orario operativo: i trade si aprono solo se il CHoCH M5 avviene tra le {ENTRY_FROM[0]}:{ENTRY_FROM[1]:02d} (apertura New York) e le {ENTRY_TO[0]}:{ENTRY_TO[1]:02d}.",
+                          "Non apro il trade: attendo un nuovo CHoCH M5 nell'orario operativo.", ctx, struct, "", DISCLAIMER_GOLD])
     entry, sl, tp1, tp = float(r["entry"]), float(r["sl"]), float(r["tp1"]), float(r["tp"])
     risk = abs(entry - sl)
     if r["kind"] == "UT":

@@ -442,7 +442,7 @@ def filters(sig: pd.DataFrame, p: GoldParams = GoldParams()) -> pd.DataFrame:
     a, kz_hi = sg * ext, sg * np.where(s.side == "buy", s.kz_hi, s.kz_hi)
     s["in_kz"] = (a <= np.maximum(sg * s.kz_hi, sg * s.kz_lo)) & (a >= lvl - p.abort_ext * s.leg1_len)
     s["macro"] = [macro_at(t.to_pydatetime()) for t in s.index]
-    s["in_ny"] = [in_entry_window(t.to_pydatetime()) for t in s.index]       # dopo le 15:30 Roma (apertura New York) fino alle 22:00
+    s["in_ny"] = [in_entry_window(t.to_pydatetime()) for t in s.index]       # CHoCH tra le 15:30 e le 18:30 Roma
     return s
 
 
@@ -470,7 +470,7 @@ if __name__ == "__main__":
         res["in_kz"] = [fm[(t, k, s_)][0] for t, k, s_ in zip(res.time, res.kind, res.side)]
         res["macro"] = [fm[(t, k, s_)][1] for t, k, s_ in zip(res.time, res.kind, res.side)]
         res["in_ny"] = [fm_ny[(t, k, s_)] for t, k, s_ in zip(res.time, res.kind, res.side)]
-        for name, m in [("ORARIO: dopo le 15:30 Roma (fino alle 22:00)", res.in_ny), ("ORARIO: prima delle 15:30 / dopo le 22:00", ~res.in_ny),
+        for name, m in [("ORARIO: CHoCH tra le 15:30 e le 18:30 Roma", res.in_ny), ("ORARIO: fuori dalle 15:30-18:30", ~res.in_ny),
                         ("Kill Zone", res.in_kz), ("Londra+NY", res.macro.notna()), ("solo Londra", res.macro == "Londra"),
                         ("solo New York", res.macro == "New York"), ("KZ + Londra/NY", res.in_kz & res.macro.notna())]:
             print(f"\n--- {sym} M{tf} | filtro: {name} ---")
@@ -482,7 +482,7 @@ if __name__ == "__main__":
             print(f"\n--- {sym} M{tf} | {name} ---")
             for col, nm in [("R_tp1", "tutto a TP1 (2,5R)"), ("R", "gestita 60% a 2,5R + BE")]:
                 print(_line(nm, res[m].sort_values("time"), col))
-        for name, m in [("dopo le 15:30 E sweep H1", res.in_ny & res.sweep), ("dopo le 15:30 SENZA sweep H1", res.in_ny & ~res.sweep)]:
+        for name, m in [("15:30-18:30 E sweep H1", res.in_ny & res.sweep), ("15:30-18:30 SENZA sweep H1", res.in_ny & ~res.sweep)]:
             print(f"\n--- {sym} M{tf} | {name} ---")
             for col, nm in [("R_tp1", "tutto a TP1 (2,5R)"), ("R", "gestita 60% a 2,5R + BE")]:
                 print(_line(nm, res[m].sort_values("time"), col))
