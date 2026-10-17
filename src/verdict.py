@@ -43,8 +43,8 @@ def verdict(t: pd.DataFrame, pl: pd.Series, min_n: int = MIN_N, min_edge: float 
 
 def print_verdicts(rows: list[tuple[str, dict]], title: str = "VERDETTO AUTOMATICO") -> None:
     print(f"\n=== {title} (uscita unica; vantaggio = media − placebo) ===")
-    print(f"{'gruppo':44s} {'n':>5s} {'media':>7s} {'placebo':>8s} {'diff':>7s} {'z':>5s} {'IS':>6s} {'OOS':>6s}  esito")
+    print(f"{'gruppo':44s} {'n':>5s} {'bilancio R':>10s} {'media':>7s} {'placebo':>8s} {'diff':>7s} {'z':>5s} {'IS':>6s} {'OOS':>6s}  esito")
     for name, v in rows:
         f = lambda x, w=7, p=3: f"{x:{w}.{p}f}" if np.isfinite(x) else " " * (w - 1) + "-"
         esito = "✅ vantaggio (da confermare su un altro strumento)" if v["ok"] else "❌ " + "; ".join(v["why"])
-        print(f"{name:44s} {v['n']:5d} {f(v['mean'])} {f(v['pl_mean'], 8)} {f(v['edge'])} {f(v['z'], 5, 1)} {f(v['is'], 6, 2)} {f(v['oos'], 6, 2)}  {esito}")
+        print(f"{name:44s} {v['n']:5d} {f(v['mean'] * v['n'] if np.isfinite(v['mean']) else np.nan, 10, 1)} {f(v['mean'])} {f(v['pl_mean'], 8)} {f(v['edge'])} {f(v['z'], 5, 1)} {f(v['is'], 6, 2)} {f(v['oos'], 6, 2)}  {esito}")
