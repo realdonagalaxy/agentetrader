@@ -143,6 +143,22 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
             ax.hlines(yv, 0, right, colors="#1565c0", linewidth=1.2, linestyles="--")
             ax.text(right, yv, f" {nm} {yv:.{d}f} ", color="#000000", fontsize=8, va="center",
                     bbox=dict(boxstyle="square,pad=0.25", facecolor="#90caf9", edgecolor="none"))
+    if gold and rec.get("liquidity", True):                    # liquidità dinamica: trendline su ≥2 massimi (SELL) / minimi (BUY), solo ombre oltre la retta
+        from src.liquidity import find_liquidity_line
+        liq = find_liquidity_line(m5, rec["lat_t1"], t_end, rec["side"])
+        if liq:
+            t_a = max(liq["t_start"], df.index[0])                                  # la retta parte dal primo tocco o dal bordo sinistro
+            x0 = pos(t_a)
+            y0 = liq["p_start"] + liq["slope"] * ((t_a - liq["t_start"]) / pd.Timedelta(minutes=5))
+            xe = n - 1
+            ye = liq["p_end"]
+            ax.plot([x0, xe], [y0, ye], color="#e65100", linewidth=1.3, linestyle="-.", zorder=3)
+            for tt in liq["touches"]:
+                if tt >= df.index[0]:
+                    yt = float(df.loc[tt, "high" if rec["side"] == "sell" else "low"])
+                    ax.plot([pos(tt)], [yt], "o", color="#e65100", markersize=4, zorder=4)
+            ax.text(xe + 1, ye, f" Liquidità dinamica ({len(liq['touches'])} tocchi) ", color="#000000", fontsize=8, va="center",
+                    bbox=dict(boxstyle="square,pad=0.25", facecolor="#ffb74d", edgecolor="none"))
     ymin, ymax = float(df["low"].min()), float(df["high"].max())
     if gold and rec.get("kind") in ("approach", "setup"):
         ymin, ymax = min(ymin, float(rec["kz_lo"]), float(rec["kz_hi"])), max(ymax, float(rec["kz_lo"]), float(rec["kz_hi"]))
