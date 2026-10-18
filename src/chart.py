@@ -74,6 +74,8 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
         t_start = full.index[max(i0 - 3, 0)]
     else:
         t_start = min(pd.Timestamp(rec["lat_t1"]) - pd.Timedelta(hours=12), t_end - pd.Timedelta(days=3))
+    if gold and not has_bc:                    # la lateralizzazione deve restare sempre visibile: nessun taglio a sinistra
+        bars = max(bars, len(full.loc[t_start:]))
     df = full.loc[t_start:].iloc[-bars:]
     hist = hist_full.reindex(df.index)
     n = len(df)
@@ -108,7 +110,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
         lo_lat, hi_lat = sorted((float(rec["level"]), float(rec["lat_hi"])))
         x1, x2 = pos(rec["lat_t1"]), pos(rec["lat_t2"])
         if gold:                                   # solo rette: contorno del riquadro della lateralizzazione, senza riempimento
-            ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, facecolor="#f48fb1", alpha=0.45, edgecolor="#d81b60", linewidth=1.2))   # lateralizzazione: rosa
+            ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, facecolor="#f48fb1", alpha=0.30, edgecolor="none", linewidth=0))   # lateralizzazione: rosa
         else:
             ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, color="#9c27b0", alpha=0.25, lw=0))
         ax.text(x1, hi_lat, " lateralizzazione", color=LAT, fontsize=8, va="bottom")
