@@ -3,9 +3,10 @@
 Regole (utente, documento Strategia_SDP → Aggiornamento Strategia): candela da M5 in su, quasi solo corpo (poche o nulle ombre), che lascia un imbalance e contiene ordini da fillare;
 per un SELL è una candela BUY (prima del sell) il cui imbalance non è ancora stato chiuso dal prezzo, per un BUY una candela SELL;
 si trova nella fascia della Reversal Zone (1.272–1.618 della Leg 1), a volte anche oltre, anche a sinistra nel grafico.
+Gli ordini pendenti si attivano quando il prezzo, anche solo con l'ombra, tocca il CORPO della candela: "da fillare" = corpo non ancora toccato dopo la candela che chiude l'imbalance.
 ASSUNZIONI mie, da confermare: corpo >= BODY_ATR x ATR14 del suo timeframe; ombre totali <= WICK_FRAC del range;
-timeframe M5..M30 (tutti i minuti se ci sono dati M1: M6, M7...; solo multipli di 5 con dati M5) + H1; imbalance = gap a 3 candele (FVG) lasciato dalla candela; "da fillare" = il prezzo non l'ha ancora coperto del tutto
-(se già toccato in parte resta la parte non coperta); ricerca negli ultimi 5 giorni, si prende la zona più vicina al prezzo.
+timeframe M5..M30 (tutti i minuti se ci sono dati M1: M6, M7...; solo multipli di 5 con dati M5) + H1; imbalance = gap a 3 candele (FVG) lasciato dalla candela;
+ricerca negli ultimi 5 giorni, si prende la zona più vicina al prezzo.
 """
 import numpy as np
 import pandas as pd
@@ -24,7 +25,7 @@ BAND_MARGIN = 0.25                           # "alle volte anche oltre il range"
 
 
 def find_zone(m5: pd.DataFrame, t_end, side: str, m1: pd.DataFrame | None = None, band: tuple[float, float] | None = None) -> dict | None:
-    """SELL -> candela BUY con FVG non ancora fillato (il prezzo deve tornare dentro il gap); BUY -> candela SELL. Solo nella fascia `band`. Restituisce la più vicina al prezzo."""
+    """SELL -> candela BUY con FVG il cui corpo non è ancora stato toccato dal prezzo; BUY -> candela SELL. Solo nella fascia `band`. Restituisce la più vicina al prezzo."""
     t_end = pd.Timestamp(t_end)
     last = float(m5["close"].iloc[-1])
     best = None
@@ -49,21 +50,16 @@ def find_zone(m5: pd.DataFrame, t_end, side: str, m1: pd.DataFrame | None = None
             body, rng = abs(c[k] - o[k]), h[k] - l[k]
             if rng <= 0 or body < BODY_ATR * a[k] or (rng - body) > WICK_FRAC * rng:
                 continue
-            fut = m5.loc[idx[k + 1] + step:]                                  # barre successive alla candela che segue l'imbalance
-            if side == "sell" and c[k] > o[k] and l[k + 1] > h[k - 1]:       # SELL: candela BUY; il prezzo è salito, il fill è un ritorno verso il basso nel gap
-                g_lo, g_hi = h[k - 1], l[k + 1]
-                mn = float(fut["low"].min()) if len(fut) else np.inf
-                if mn <= g_lo or last < g_lo:                                 # già fillato del tutto / prezzo sotto il gap
+            fut = m5.loc[idx[k + 1] + step:]                                  # barre dopo quella che chiude l'imbalance (k+1)
+            b_lo_c, b_hi_c = min(o[k], c[k]), max(o[k], c[k])                  # corpo = ordini pendenti
+            if side == "sell" and c[k] > o[k] and l[k + 1] > h[k - 1]:       # SELL: candela BUY; attivata se il prezzo, anche con l'ombra, torna a toccarne il corpo
+                if len(fut) and float(fut["low"].min()) <= b_hi_c:
                     continue
-                top = min(g_hi, mn)                                           # parte non ancora coperta: [g_lo, top]
-                zone = {"tf": name, "t": idx[k], "lo": float(g_lo), "hi": float(top), "dist": float(max(last - top, 0.0))}
-            elif side == "buy" and c[k] < o[k] and h[k + 1] < l[k - 1]:      # BUY: candela SELL; il prezzo è sceso, il fill è un ritorno verso l'alto nel gap
-                g_lo, g_hi = h[k + 1], l[k - 1]
-                mx = float(fut["high"].max()) if len(fut) else -np.inf
-                if mx >= g_hi or last > g_hi:
+                zone = {"tf": name, "t": idx[k], "lo": float(b_lo_c), "hi": float(b_hi_c), "dist": float(max(last - b_hi_c, 0.0))}
+            elif side == "buy" and c[k] < o[k] and h[k + 1] < l[k - 1]:      # BUY: candela SELL; attivata se il prezzo risale a toccarne il corpo
+                if len(fut) and float(fut["high"].max()) >= b_lo_c:
                     continue
-                bot = max(g_lo, mx)
-                zone = {"tf": name, "t": idx[k], "lo": float(bot), "hi": float(g_hi), "dist": float(max(bot - last, 0.0))}
+                zone = {"tf": name, "t": idx[k], "lo": float(b_lo_c), "hi": float(b_hi_c), "dist": float(max(b_lo_c - last, 0.0))}
             else:
                 continue
             if band is not None and (zone["hi"] < b_lo or zone["lo"] > b_hi):
