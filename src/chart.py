@@ -143,9 +143,15 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
             ax.hlines(yv, 0, right, colors="#1565c0", linewidth=1.2, linestyles="--")
             ax.text(right, yv, f" {nm} {yv:.{d}f} ", color="#000000", fontsize=8, va="center",
                     bbox=dict(boxstyle="square,pad=0.25", facecolor="#90caf9", edgecolor="none"))
+    zone = None
+    if gold and rec.get("liquidity", True):                    # candela istituzionale con imbalance da fillare (sopra per SELL, sotto per BUY)
+        from src.institutional import find_zone
+        zone = find_zone(m5, t_end, rec["side"])
     if gold and rec.get("liquidity", True):                    # liquidità dinamica: trendline su ≥2 massimi (SELL) / minimi (BUY), solo ombre oltre la retta
         from src.liquidity import find_liquidity_line
-        liq = find_liquidity_line(m5, rec["lat_t1"], t_end, rec["side"])
+        liq = find_liquidity_line(m5, rec["lat_t1"], t_end, rec["side"]) if zone else None
+        if liq and (liq["p_end"] >= zone["lo"] if rec["side"] == "sell" else liq["p_end"] <= zone["hi"]):
+            liq = None                                          # la liquidità deve stare tra il prezzo e la zona da fillare
         if liq:
             t_a = max(liq["t_start"], df.index[0])                                  # la retta parte dal primo tocco o dal bordo sinistro
             x0 = pos(t_a)
@@ -160,6 +166,12 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
             ax.text(xe + 1, ye, f" Liquidità dinamica ({len(liq['touches'])} tocchi) ", color="#000000", fontsize=8, va="center",
                     bbox=dict(boxstyle="square,pad=0.25", facecolor="#ffb74d", edgecolor="none"))
     ymin, ymax = float(df["low"].min()), float(df["high"].max())
+    if zone and zone["lo"] <= ymax + 0.5 * (ymax - ymin) and zone["hi"] >= ymin - 0.5 * (ymax - ymin):
+        ymin, ymax = min(ymin, zone["lo"]), max(ymax, zone["hi"])
+        xz = pos(zone["t"]) if zone["t"] >= df.index[0] else 0
+        ax.add_patch(Rectangle((xz, zone["lo"]), right - xz, zone["hi"] - zone["lo"], fill=False, edgecolor="#6a1b9a", linewidth=1.2, linestyle="--", zorder=2))
+        ax.text(xz, zone["hi"] if rec["side"] == "sell" else zone["lo"], f" Imbalance {zone['tf']} da fillare ", color="#000000", fontsize=8,
+                va="bottom" if rec["side"] == "sell" else "top", bbox=dict(boxstyle="square,pad=0.25", facecolor="#ce93d8", edgecolor="none"))
     if gold and rec.get("kind") in ("approach", "setup"):
         ymin, ymax = min(ymin, float(rec["kz_lo"]), float(rec["kz_hi"])), max(ymax, float(rec["kz_lo"]), float(rec["kz_hi"]))
     if gold and has_bc:
