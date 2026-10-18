@@ -83,7 +83,8 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     d = decimals(sym)
     buy = rec["side"] == "buy"
 
-    fig, (ax, axm) = plt.subplots(2, 1, figsize=(11, 7), gridspec_kw={"height_ratios": [4, 1], "hspace": 0.04}, sharex=True)
+    wide = float(np.clip(n / 450, 1.0, 2.2)) if gold else 1.0            # molte barre (lateralizzazione lontana): figura più larga, le candele restano leggibili
+    fig, (ax, axm) = plt.subplots(2, 1, figsize=(11 * wide, 7 * (1 + 0.3 * (wide - 1))), gridspec_kw={"height_ratios": [4, 1], "hspace": 0.04}, sharex=True)
     fig.patch.set_facecolor(BG)
     for a in (ax, axm):
         a.set_facecolor(BG)
