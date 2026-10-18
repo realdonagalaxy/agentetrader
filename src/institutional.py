@@ -3,7 +3,7 @@
 Regole (utente): candela da M5 in su, quasi solo corpo (poche o nulle ombre), che lascia un imbalance e contiene ordini da fillare;
 per un SELL la zona sta sopra il prezzo, per un BUY sotto.
 ASSUNZIONI mie, da confermare: corpo >= BODY_ATR x ATR14 del suo timeframe; ombre totali <= WICK_FRAC del range;
-timeframe M5, M15, H1; imbalance = gap a 3 candele (FVG) lasciato dalla candela; "da fillare" = il prezzo non l'ha ancora coperto del tutto
+timeframe M5..M30 (tutti i minuti se ci sono dati M1: M6, M7...; solo multipli di 5 con dati M5) + H1; imbalance = gap a 3 candele (FVG) lasciato dalla candela; "da fillare" = il prezzo non l'ha ancora coperto del tutto
 (se già toccato in parte resta la parte non coperta); ricerca negli ultimi 5 giorni, si prende la zona più vicina al prezzo.
 """
 import numpy as np
@@ -14,17 +14,20 @@ from src.range_detector import atr
 
 BODY_ATR = 1.5
 WICK_FRAC = 0.20
-TFS = (("M5", "5min"), ("M15", "15min"), ("H1", "1h"))
+TF_MIN = tuple(range(5, 31))                 # M5..M30 minuto per minuto (anche TF "nascosti" M6, M7...) + H1
+TF_MIN_M5ONLY = (5, 10, 15, 20, 25, 30)      # senza dati M1 si possono costruire solo i multipli di 5
 LOOKBACK = pd.Timedelta(days=5)
 
 
-def find_zone(m5: pd.DataFrame, t_end, side: str) -> dict | None:
+def find_zone(m5: pd.DataFrame, t_end, side: str, m1: pd.DataFrame | None = None) -> dict | None:
     """SELL -> candela ribassista con FVG ancora aperto sopra il prezzo; BUY -> candela rialzista con FVG sotto. Restituisce la più vicina."""
     t_end = pd.Timestamp(t_end)
     last = float(m5["close"].iloc[-1])
     best = None
-    for name, rule in TFS:
-        df = m5 if rule == "5min" else resample(m5, rule)
+    src = m1.loc[:t_end + pd.Timedelta(minutes=4)] if m1 is not None else m5
+    tfs = [(f"M{n}", f"{n}min") for n in (TF_MIN if m1 is not None else TF_MIN_M5ONLY)] + [("H1", "1h")]
+    for name, rule in tfs:
+        df = src if rule == "1min" else resample(src, rule)
         step = pd.Timedelta(rule)
         df = df[df.index + step <= t_end + pd.Timedelta(minutes=5)]           # solo candele chiuse
         if len(df) < 20:

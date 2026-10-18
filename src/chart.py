@@ -146,7 +146,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     zone = None
     if gold and rec.get("liquidity", True):                    # candela istituzionale con imbalance da fillare (sopra per SELL, sotto per BUY)
         from src.institutional import find_zone
-        zone = find_zone(m5, t_end, rec["side"])
+        zone = find_zone(m5, t_end, rec["side"], rec.get("m1"))
     if gold and rec.get("liquidity", True):                    # liquidità dinamica: trendline su ≥2 massimi (SELL) / minimi (BUY), solo ombre oltre la retta
         from src.liquidity import find_liquidity_line
         liq = find_liquidity_line(m5, rec["lat_t1"], t_end, rec["side"]) if zone else None
