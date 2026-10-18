@@ -108,7 +108,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
         lo_lat, hi_lat = sorted((float(rec["level"]), float(rec["lat_hi"])))
         x1, x2 = pos(rec["lat_t1"]), pos(rec["lat_t2"])
         if gold:                                   # solo rette: contorno del riquadro della lateralizzazione, senza riempimento
-            ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, fill=False, edgecolor=LAT, linewidth=1.2))
+            ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, facecolor="#f48fb1", alpha=0.45, edgecolor="#d81b60", linewidth=1.2))   # lateralizzazione: rosa
         else:
             ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, color="#9c27b0", alpha=0.25, lw=0))
         ax.text(x1, hi_lat, " lateralizzazione", color=LAT, fontsize=8, va="bottom")
@@ -167,9 +167,9 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     if zone and zone["lo"] <= ymax + 0.5 * (ymax - ymin) and zone["hi"] >= ymin - 0.5 * (ymax - ymin):
         ymin, ymax = min(ymin, zone["lo"]), max(ymax, zone["hi"])
         xz = pos(zone["t"]) if zone["t"] >= df.index[0] else 0
-        ax.add_patch(Rectangle((xz, zone["lo"]), right - xz, zone["hi"] - zone["lo"], fill=False, edgecolor="#6a1b9a", linewidth=1.2, linestyle="--", zorder=2))
-        ax.text(xz, zone["hi"] if rec["side"] == "sell" else zone["lo"], f" Imbalance {zone['tf']} da fillare ", color="#000000", fontsize=8,
-                va="bottom" if rec["side"] == "sell" else "top", bbox=dict(boxstyle="square,pad=0.25", facecolor="#ce93d8", edgecolor="none"))
+        ax.add_patch(Rectangle((xz, zone["lo"]), right - xz, zone["hi"] - zone["lo"], facecolor="#616161", alpha=0.55, edgecolor="#424242", linewidth=1.0, zorder=2))   # candela istituzionale: grigio
+        ax.text(xz, zone["hi"] if rec["side"] == "sell" else zone["lo"], f" Candela istituzionale {zone['tf']} ", color="#000000", fontsize=8,
+                va="bottom" if rec["side"] == "sell" else "top", bbox=dict(boxstyle="square,pad=0.25", facecolor="#bdbdbd", edgecolor="none"))
     if gold and rec.get("kind") in ("approach", "setup"):
         ymin, ymax = min(ymin, float(rec["kz_lo"]), float(rec["kz_hi"])), max(ymax, float(rec["kz_lo"]), float(rec["kz_hi"]))
     if gold and has_bc:
