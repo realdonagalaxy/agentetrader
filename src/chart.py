@@ -47,6 +47,7 @@ def volume_profile(m5: pd.DataFrame, t0, t1, nbins: int = 48, va: float = 0.70):
 
 
 LONG_CASE = pd.Timedelta(minutes=5 * 400)       # oltre ~400 barre M5 dalla lateralizzazione il grafico passa a M15
+VERY_LONG_CASE = pd.Timedelta(minutes=5 * 1000)  # oltre ~1000 barre M5 (circa 3,5 giorni) passa a M30
 
 
 def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float] | None = None, bars: int = 360,
@@ -59,8 +60,9 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     if gold:
         macd_par = (8, 21, 5)
         tf, bars = 5, max(bars, 900)         # la sequenza BC/UT/UTAD e il MACD (8,21,5) sono calcolati su M5: grafico M5 coerente
-        if not has_bc and (m5.index[-1] - pd.Timestamp(rec["lat_t1"])) > LONG_CASE:
-            tf = 15                          # caso lungo (lateralizzazione lontana): a M5 le candele diventano una linea, si legge meglio a M15
+        span = m5.index[-1] - pd.Timestamp(rec["lat_t1"])
+        if not has_bc and span > LONG_CASE:  # caso lungo (lateralizzazione lontana): a M5 le candele diventano una linea
+            tf = 30 if span > VERY_LONG_CASE else 15
     full = m5 if tf == 5 else resample(m5, f"{tf}min")
     cl = full["close"]
     macd = cl.ewm(span=macd_par[0], adjust=False).mean() - cl.ewm(span=macd_par[1], adjust=False).mean()
