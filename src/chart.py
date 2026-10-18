@@ -46,6 +46,9 @@ def volume_profile(m5: pd.DataFrame, t0, t1, nbins: int = 48, va: float = 0.70):
     return centers, vol, edges[1] - edges[0], float(centers[poc]), float(edges[lo_i]), float(edges[hi_i + 1])
 
 
+LONG_CASE = pd.Timedelta(minutes=5 * 400)       # oltre ~400 barre M5 dalla lateralizzazione il grafico passa a M15
+
+
 def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float] | None = None, bars: int = 360,
                  macd_par: tuple[int, int, int] = (3, 10, 16)) -> bytes:
     gold = rec.get("kind") in ("UT", "UTAD", "watch", "early", "setup", "approach")
@@ -56,6 +59,8 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     if gold:
         macd_par = (8, 21, 5)
         tf, bars = 5, max(bars, 900)         # la sequenza BC/UT/UTAD e il MACD (8,21,5) sono calcolati su M5: grafico M5 coerente
+        if not has_bc and (m5.index[-1] - pd.Timestamp(rec["lat_t1"])) > LONG_CASE:
+            tf = 15                          # caso lungo (lateralizzazione lontana): a M5 le candele diventano una linea, si legge meglio a M15
     full = m5 if tf == 5 else resample(m5, f"{tf}min")
     cl = full["close"]
     macd = cl.ewm(span=macd_par[0], adjust=False).mean() - cl.ewm(span=macd_par[1], adjust=False).mean()
@@ -149,10 +154,10 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     zone = None
     if gold and rec.get("liquidity", True):                    # candela istituzionale con imbalance da fillare (sopra per SELL, sotto per BUY)
         from src.institutional import find_zone
-        zone = find_zone(m5, t_end, rec["side"], rec.get("m1"), (float(rec["kz_lo"]), float(rec["kz_hi"])))
+        zone = find_zone(m5, m5.index[-1], rec["side"], rec.get("m1"), (float(rec["kz_lo"]), float(rec["kz_hi"])))
     if gold and rec.get("liquidity", True):                    # liquidità dinamica: trendline su ≥2 massimi (SELL) / minimi (BUY), solo ombre oltre la retta
         from src.liquidity import find_liquidity_line
-        liq = find_liquidity_line(m5, rec["lat_t1"], t_end, rec["side"]) if zone else None
+        liq = find_liquidity_line(m5, rec["lat_t1"], m5.index[-1], rec["side"]) if zone else None
         if liq:
             t_a = max(liq["t_start"], df.index[0])                                  # la retta parte dal primo tocco o dal bordo sinistro
             x0 = pos(t_a)
@@ -162,7 +167,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
             ax.plot([x0, xe], [y0, ye], color="#e65100", linewidth=1.3, linestyle="-.", zorder=3)
             for tt in liq["touches"]:
                 if tt >= df.index[0]:
-                    yt = float(df.loc[tt, "high" if rec["side"] == "sell" else "low"])
+                    yt = float(m5.loc[tt, "high" if rec["side"] == "sell" else "low"])
                     ax.plot([pos(tt)], [yt], "o", color="#e65100", markersize=4, zorder=4)
             ax.text(xe + 1, ye, f" Liquidità dinamica ({len(liq['touches'])} tocchi{', spazzata' if liq['spikes'] else ''}) ", color="#000000", fontsize=8, va="center",
                     bbox=dict(boxstyle="square,pad=0.25", facecolor="#ffb74d", edgecolor="none"))
