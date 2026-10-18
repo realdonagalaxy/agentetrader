@@ -146,12 +146,10 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     zone = None
     if gold and rec.get("liquidity", True):                    # candela istituzionale con imbalance da fillare (sopra per SELL, sotto per BUY)
         from src.institutional import find_zone
-        zone = find_zone(m5, t_end, rec["side"], rec.get("m1"))
+        zone = find_zone(m5, t_end, rec["side"], rec.get("m1"), (float(rec["kz_lo"]), float(rec["kz_hi"])))
     if gold and rec.get("liquidity", True):                    # liquidità dinamica: trendline su ≥2 massimi (SELL) / minimi (BUY), solo ombre oltre la retta
         from src.liquidity import find_liquidity_line
         liq = find_liquidity_line(m5, rec["lat_t1"], t_end, rec["side"]) if zone else None
-        if liq and (liq["p_end"] >= zone["lo"] if rec["side"] == "sell" else liq["p_end"] <= zone["hi"]):
-            liq = None                                          # la liquidità deve stare tra il prezzo e la zona da fillare
         if liq:
             t_a = max(liq["t_start"], df.index[0])                                  # la retta parte dal primo tocco o dal bordo sinistro
             x0 = pos(t_a)
@@ -163,7 +161,7 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
                 if tt >= df.index[0]:
                     yt = float(df.loc[tt, "high" if rec["side"] == "sell" else "low"])
                     ax.plot([pos(tt)], [yt], "o", color="#e65100", markersize=4, zorder=4)
-            ax.text(xe + 1, ye, f" Liquidità dinamica ({len(liq['touches'])} tocchi) ", color="#000000", fontsize=8, va="center",
+            ax.text(xe + 1, ye, f" Liquidità dinamica ({len(liq['touches'])} tocchi{', spazzata' if liq['spikes'] else ''}) ", color="#000000", fontsize=8, va="center",
                     bbox=dict(boxstyle="square,pad=0.25", facecolor="#ffb74d", edgecolor="none"))
     ymin, ymax = float(df["low"].min()), float(df["high"].max())
     if zone and zone["lo"] <= ymax + 0.5 * (ymax - ymin) and zone["hi"] >= ymin - 0.5 * (ymax - ymin):
