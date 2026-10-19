@@ -50,6 +50,8 @@ def find_channel(w: pd.DataFrame, atr15: float) -> dict | None:
     """Miglior canale nella finestra `w` (M5) oppure None."""
     if len(w) < MIN_BARS or not np.isfinite(atr15):
         return None
+    if float(w["high"].max() - w["low"].min()) > (MAX_W + 2 * FLAT * MAX_W) * atr15:
+        return None                                    # escursione troppo grande per un canale laterale: scarto subito (velocizza la scansione)
     tol = TOL_ATR * atr15
     ph, pl = pivots(w, 2)
     if len(ph) < 2 or len(pl) < 2:
