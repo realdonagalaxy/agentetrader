@@ -115,17 +115,27 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
     show_lat = (not gold) or pd.Timestamp(rec["lat_t1"]) >= df.index[0]
     gold_marks = []
     if show_lat:
-        lo_lat, hi_lat = sorted((float(rec["level"]), float(rec["lat_hi"])))
+        obl = isinstance(rec.get("obl_up"), (tuple, list)) and isinstance(rec.get("obl_dn"), (tuple, list))
+        lat_level = float(rec["level"])
+        if obl:                                    # lateralizzazione obliqua: riquadro = involucro delle due rette, rette in rosso
+            lo_lat, hi_lat = min(rec["obl_dn"]), max(rec["obl_up"])
+            lat_level = float(rec["obl_dn"][1] if buy else rec["obl_up"][1])
+        else:
+            lo_lat, hi_lat = sorted((float(rec["level"]), float(rec["lat_hi"])))
         x1, x2 = pos(rec["lat_t1"]), pos(rec["lat_t2"])
         if gold:                                   # solo rette: contorno del riquadro della lateralizzazione, senza riempimento
             ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, facecolor="#f48fb1", alpha=0.30, edgecolor="none", linewidth=0))   # lateralizzazione: rosa
         else:
             ax.add_patch(Rectangle((x1, lo_lat), max(x2 - x1, 1), hi_lat - lo_lat, color="#9c27b0", alpha=0.25, lw=0))
         ax.text(x1, hi_lat, " lateralizzazione", color=LAT, fontsize=8, va="bottom")
-        ax.hlines(float(rec["level"]), x1, right, colors=LAT, linestyles=":", linewidth=0.9)
+        if obl:
+            ax.plot([x1, x2], list(rec["obl_up"]), color="#e53935", linewidth=1.4, zorder=3)
+            ax.plot([x1, x2], list(rec["obl_dn"]), color="#e53935", linewidth=1.4, zorder=3)
+        else:
+            ax.hlines(float(rec["level"]), x1, right, colors=LAT, linestyles=":", linewidth=0.9)
         # Leg 1 e Kill Zone
         xb = pos(rec["b_time"])
-        ax.plot([x2, xb], [float(rec["level"]), float(rec["b_price"])], color="#444444" if gold else "#9e9e9e", linestyle="--", linewidth=1)
+        ax.plot([x2, xb], [lat_level, float(rec["b_price"])], color="#444444" if gold else "#9e9e9e", linestyle="--", linewidth=1)
         ax.text(xb, float(rec["b_price"]), " fine Leg 1", color=FG if gold else "#bdbdbd", fontsize=8, va="bottom" if buy else "top")
     kz_lo, kz_hi = sorted((float(rec["kz_lo"]), float(rec["kz_hi"])))
     if not gold:

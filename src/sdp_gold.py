@@ -38,6 +38,23 @@ class GoldParams(V3Params):
     kz_approach: float = 0.10     # "quasi all'arrivo" sulla Kill Zone: a meno di questa frazione della Leg 1 dall'inizio (estensione 1,272)
     mode: str = "macd"            # "macd" = gobbe dell'istogramma (la più grande = climax); "tick" = swing con volumi tick (niente MACD)
     tick_win: int = 6             # modalità tick: volume sommato su ±tick_win barre attorno al minimo/massimo di swing
+    oblique: bool = True          # lateralizzazioni oblique (canale a rette non parallele, >2 ore) oltre ai massimi/minimi uguali
+    oblique_days_live: int = 6    # in modalità live si scandiscono solo gli ultimi giorni (la scansione è lenta)
+
+
+def _oblique_rows(m5: pd.DataFrame, live: bool, live_days: int) -> pd.DataFrame:
+    """Righe nello stesso formato di double_extremes per le lateralizzazioni oblique: una "bottom" (retta inferiore, setup BUY) e una "top" (superiore, SELL)."""
+    from src.oblique_range import scan
+    t0 = m5.index[-1] - pd.Timedelta(days=live_days) if live else None
+    rows = []
+    for c in scan(m5, t0, None):
+        nb = max(int((c["t_end"] - c["t_start"]) / pd.Timedelta(minutes=5)), 1)
+        conf = c["t_end"] + pd.Timedelta(minutes=10)                                  # pivot a 2 barre: la retta è nota 2 barre dopo l'ultimo tocco
+        for kind, line in (("bottom", c["dn_line"]), ("top", c["up_line"])):
+            rows.append({"kind": kind, "level": float(line[1]), "t1": c["t_start"], "t2": c["t_end"], "confirmed": conf,
+                         "slope": float(line[1] - line[0]) / nb, "ref": c["t_end"],
+                         "obl_up": (float(c["up_line"][0]), float(c["up_line"][1])), "obl_dn": (float(c["dn_line"][0]), float(c["dn_line"][1]))})
+    return pd.DataFrame(rows)
 
 
 def generate_gold(m5: pd.DataFrame, p: GoldParams = GoldParams(), stats: dict | None = None, live: bool = False) -> pd.DataFrame:
@@ -45,6 +62,9 @@ def generate_gold(m5: pd.DataFrame, p: GoldParams = GoldParams(), stats: dict | 
     ms = m5 if tf == 5 else resample(m5, f"{tf}min")
     A = atr(ms).to_numpy()
     dbl = double_extremes(ms, p.n_swing, p.tol, max(2, p.min_sep_min // tf), p.max_sep_min // tf)
+    dbl = dbl.assign(slope=0.0, ref=pd.NaT, obl_up=None, obl_dn=None) if len(dbl) else dbl
+    if p.oblique and tf == 5:
+        dbl = pd.concat([dbl, _oblique_rows(m5, live, p.oblique_days_live)], ignore_index=True)
     t5, ts = m5.index.values, ms.index.values
     H, L, C = (m5[c].to_numpy() for c in ("high", "low", "close"))
     W = m5["volume"].to_numpy() if "volume" in m5 else np.ones(len(m5))
@@ -67,7 +87,15 @@ def generate_gold(m5: pd.DataFrame, p: GoldParams = GoldParams(), stats: dict | 
         h_ = hist if long else -hist
         start = int(np.searchsorted(t5, np.datetime64(d.confirmed) + np.timedelta64(tf, "m")))
         end = min(start + p.max_wait_bars, N - 1)
-        k0 = next((k for k in range(start, end) if adv[k] < lvl), None)
+        slope = float(getattr(d, "slope", 0.0) or 0.0)
+        if slope:                                      # retta obliqua: il livello da rompere cambia barra per barra
+            kref = int(np.searchsorted(t5, np.datetime64(d.ref)))
+            sl_adv = slope if long else -slope
+            k0 = next((k for k in range(start, end) if adv[k] < lvl + sl_adv * (k - kref)), None)
+            if k0 is not None:
+                lvl = lvl + sl_adv * (k0 - kref)       # da qui in poi livello fisso = valore della retta alla rottura
+        else:
+            k0 = next((k for k in range(start, end) if adv[k] < lvl), None)
         if k0 is None or (k0, long) in seen_k0:
             continue
         seen_k0.add((k0, long))
@@ -97,7 +125,8 @@ def generate_gold(m5: pd.DataFrame, p: GoldParams = GoldParams(), stats: dict | 
         over = next((k for k in range(k0, last + 1) if cl[k] > B), None)    # Leg 2 annullata se il prezzo torna oltre B
         if over is not None:
             last = over - 1
-        base = {"sid": sid, "mode": p.mode, "side": "buy" if long else "sell", "level": d.level, "b_price": sgn * B, "leg1_len": length,
+        base = {"sid": sid, "mode": p.mode, "side": "buy" if long else "sell", "level": d.level if not slope else sgn * lvl, "b_price": sgn * B, "leg1_len": length,
+                "obl_up": getattr(d, "obl_up", None), "obl_dn": getattr(d, "obl_dn", None),
                 "lat_t1": pd.Timestamp(t5[p1]), "lat_t2": pd.Timestamp(t5[p2]), "lat_hi": sgn * H0, "b_time": pd.Timestamp(t5[b_idx]),
                 "kz_lo": sgn * (lvl - (p.fib_hi - 1) * length), "kz_hi": sgn * (lvl - (p.fib_lo - 1) * length)}
         lobes = [(max(s, k0), e) for s, e in _lobes(h_[k0:last + 1], k0) if e >= k0]
