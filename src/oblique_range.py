@@ -1,7 +1,7 @@
 """Lateralizzazione obliqua: canale con due rette (non necessariamente parallele) su massimi e minimi dell'accumulo.
 
 Regole (utente, 19/10/2026): la liquidità dinamica è la retta obliqua dell'accumulo; le rette possono non essere parallele;
-la lateralizzazione dura più di 2 ore; la retta può essere superata solo dalle ombre (spike), mai dai corpi; almeno 2 tocchi per retta.
+la lateralizzazione dura più di 2 ore; la retta può essere superata solo dalle ombre (spike); i corpi al massimo di una tolleranza (rette non perfette); almeno 2 tocchi per retta.
 ASSUNZIONI mie, da confermare: tocco = ombra a <= TOL_ATR x ATR14 M15 dalla retta (0,15 come per la liquidità); pivot M5 a 2 barre per lato;
 canale "laterale" = ampiezza media tra MIN_W e MAX_W x ATR14 M15 e deriva di ciascuna retta sull'intera durata <= FLAT x ampiezza media;
 le rette non si incrociano nella finestra; si valutano finestre da 2 a 12 ore.
@@ -14,8 +14,8 @@ from src.range_detector import atr, pivots
 
 TOL_ATR = 0.15
 MIN_BARS = 25                      # > 2 ore (24 barre M5)
-LENGTHS = (25, 36, 48, 72, 96, 144)
-STEP = 6
+LENGTHS = (25, 30, 36, 42, 48, 60, 72, 96, 120, 144)
+STEP = 2
 MIN_W, MAX_W = 1.0, 4.0
 COVER = 0.6                        # i tocchi di ciascuna retta coprono almeno il 60% della durata del canale
 FLAT = 0.5
@@ -34,7 +34,7 @@ def _best_line(wick, body, piv, sg, tol):
                 continue
             s = (wick[j] - wick[i]) / (j - i)
             y = wick[i] + s * (k - i)
-            if (body > y + 1e-9).any():
+            if (body > y + tol).any():                     # un corpo può superare la retta al massimo della tolleranza di tocco (rette imperfette)
                 continue
             near = np.abs(wick[piv] - y[piv]) <= tol
             touches = int(near.sum())
@@ -86,7 +86,7 @@ def find_channel(w: pd.DataFrame, atr15: float) -> dict | None:
 
 
 def scan(m5: pd.DataFrame, t0=None, t1=None) -> list[dict]:
-    """Tutti i canali (finestre da 2 a 12 ore) nell'intervallo; sovrapposti: si tiene il migliore (più tocchi, poi più lungo)."""
+    """Tutti i canali (finestre da 2 a 12 ore) nell'intervallo; sovrapposti: si tiene il più denso di tocchi."""
     a15 = atr(resample(m5, "15min")).reindex(m5.index, method="ffill").to_numpy()
     lo_i = 0 if t0 is None else int(m5.index.searchsorted(pd.Timestamp(t0)))
     hi_i = len(m5) if t1 is None else int(m5.index.searchsorted(pd.Timestamp(t1)))
@@ -96,11 +96,11 @@ def scan(m5: pd.DataFrame, t0=None, t1=None) -> list[dict]:
             w = m5.iloc[e - L:e]
             ch = find_channel(w, float(a15[e - 1]))
             if ch:
-                ch["score"] = (ch["up_touch"] + ch["dn_touch"], -ch["spikes"], ch["n"])
+                ch["score"] = ((ch["up_touch"] + ch["dn_touch"]) / ch["n"], -ch["spikes"], ch["n"])      # densità di tocchi: preferisce il canale più "stretto" al più lungo
                 found.append(ch)
     found.sort(key=lambda c: c["score"], reverse=True)
     keep = []
     for c in found:
-        if all(c["t1"] < k["t0"] or c["t0"] > k["t1"] for k in keep):
+        if all(c["t1"] <= k["t0"] or c["t0"] >= k["t1"] for k in keep):
             keep.append(c)
     return sorted(keep, key=lambda c: c["t0"])

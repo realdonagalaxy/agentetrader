@@ -42,6 +42,7 @@ def export(sym: str, start: date, end: date, out: Path, rounds: int = 4) -> bool
         print(f"{sym}: nessun dato nell'intervallo", file=sys.stderr)
         return False
     m1 = pd.DataFrame(data, columns=["time", "open", "high", "low", "close", "volume"]).set_index("time").sort_index()
+    m1.index = m1.index.tz_convert("UTC").tz_localize(None)                     # UTC senza fuso esplicito, come il resto del progetto
     m5 = m1.resample("5min").agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}).dropna(subset=["close"])
     tag = f"{start:%Y%m%d}_{end:%Y%m%d}"
     out.mkdir(parents=True, exist_ok=True)
