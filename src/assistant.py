@@ -281,6 +281,9 @@ def run_once(sym: str, m5: pd.DataFrame, tf: int, journal=aj.PATH, bot=None, cha
         if new:
             rec = {k: (v if v is not None else float("nan")) for k, v in r.items()}
             msg = format_gold(sym, a, rec) if gold else format_alert(sym, a, rec)
+            if gold and rec.get("kind") in ("approach", "setup"):
+                obl = isinstance(rec.get("obl_up"), (tuple, list))
+                msg += f"\n\nLateralizzazione: {'obliqua' if obl else 'orizzontale (livelli uguali)'} · 🆔 avviso {aid}"
             sent.append(msg)
             png = None
             if chart and not msg.startswith("🚨"):                  # l'avviso del climax è solo testo
