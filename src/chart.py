@@ -46,6 +46,22 @@ def volume_profile(m5: pd.DataFrame, t0, t1, nbins: int = 48, va: float = 0.70):
     return centers, vol, edges[1] - edges[0], float(centers[poc]), float(edges[lo_i]), float(edges[hi_i + 1])
 
 
+def prev_day_levels(m5: pd.DataFrame) -> tuple[float, float, pd.Timestamp] | None:
+    """Massimo e minimo della sessione precedente. Giornata di trading = chiusura New York alle 17:00 (standard FX/oro, gestisce l'ora legale).
+    Il lunedì la "precedente" è l'ultima sessione con dati (venerdì)."""
+    if len(m5) < 10:
+        return None
+    ny = m5.index.tz_localize("UTC").tz_convert("America/New_York")
+    day = (ny + pd.Timedelta(hours=7)).normalize()                 # dopo le 17:00 NY si apre la giornata successiva
+    cur = day[-1]
+    prev = m5.loc[day < cur]
+    if prev.empty:
+        return None
+    last_day = day[day < cur][-1]
+    d = prev.loc[day[day < cur] == last_day]
+    return float(d["high"].max()), float(d["low"].min()), pd.Timestamp(last_day.date())
+
+
 LONG_CASE = pd.Timedelta(minutes=5 * 400)       # oltre ~400 barre M5 dalla lateralizzazione il grafico passa a M15
 VERY_LONG_CASE = pd.Timedelta(minutes=5 * 1000)  # oltre ~1000 barre M5 (circa 3,5 giorni) passa a M30
 
@@ -183,6 +199,12 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
                     ax.plot([pos(tt)], [yt], "o", color="#e65100", markersize=4, zorder=4)
             ax.text(xe + 1, ye, f" Liquidità dinamica ({len(liq['touches'])} tocchi{', spazzata' if liq['spikes'] else ''}) ", color="#000000", fontsize=8, va="center",
                     bbox=dict(boxstyle="square,pad=0.25", facecolor="#ffb74d", edgecolor="none"))
+    if gold and rec.get("prev_day", True):                    # massimo e minimo del giorno precedente: rette bianche tratteggiate
+        pdl = prev_day_levels(m5)
+        if pdl:
+            for yv, nm in ((pdl[0], "Max giorno prec."), (pdl[1], "Min giorno prec.")):
+                ax.hlines(yv, 0, right, colors="#ffffff", linestyles="--", linewidth=1.2, zorder=2)
+                tags.append((yv, nm, "#ffffff"))
     ymin, ymax = float(df["low"].min()), float(df["high"].max())
     if zone and zone["lo"] <= ymax + 0.5 * (ymax - ymin) and zone["hi"] >= ymin - 0.5 * (ymax - ymin):
         ymin, ymax = min(ymin, zone["lo"]), max(ymax, zone["hi"])
@@ -208,13 +230,13 @@ def render_chart(sym: str, m5: pd.DataFrame, tf: int, rec: dict, tps: list[float
                 tags.append((y, name, colr))
             else:
                 ax.text(right, y, f" {name} {y:.{d}f}", color=colr, fontsize=8, va="center")
-            if gold and name.startswith("TP"):
+            if gold and name.startswith(("TP", "Max giorno", "Min giorno")):
                 continue                                                   # i TP lontani non allargano la vista (vedi sotto)
             ymin, ymax = min(ymin, y), max(ymax, y)
     if gold and tags:                                                      # zoom: i TP entrano nella vista solo se vicini (entro metà del range dello schema)
         reach = 0.5 * (ymax - ymin)
         for y, name, colr in tags:
-            if name.startswith("TP") and ymin - reach <= y <= ymax + reach:
+            if name.startswith(("TP", "Max giorno", "Min giorno")) and ymin - reach <= y <= ymax + reach:
                 ymin, ymax = min(ymin, y), max(ymax, y)
     ymin, ymax = ((min(ymin, lo_lat), max(ymax, hi_lat)) if show_lat else (ymin, ymax)) if gold else (min(ymin, kz_lo), max(ymax, kz_hi, hi_lat))
     pad = (ymax - ymin) * (0.2 if gold else 0.06)
