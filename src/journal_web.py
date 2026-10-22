@@ -1,6 +1,6 @@
 """Journal dei trade come applicazione web LOCALE (solo sul tuo computer, indirizzo 127.0.0.1).
 
-Avvio:  python3 -m src.journal_web            (il browser si apre da solo, di solito su http://127.0.0.1:8791; se la porta è occupata usa la successiva e la stampa)
+Avvio:  python3 -m src.journal_web            (il browser si apre da solo, di solito su http://127.0.0.1:47931; se la porta è occupata usa la successiva e la stampa)
 Dati:   journal/journal.db (SQLite) e journal/images/ (screenshot). Nessun dato lascia il computer, tranne la lettura opzionale
         dello screenshot: se in config.env c'è ANTHROPIC_API_KEY, il pulsante "Leggi dallo screenshot" invia quell'immagine all'API di Anthropic.
 Import: esporta il tab J-26 del foglio Google in CSV (File > Scarica > CSV) e caricalo dalla pagina ("Importa dal foglio").
@@ -260,6 +260,10 @@ def extract_from_image(data_url: str) -> dict:
     return json.loads(j.group(0)) if j else {}
 
 
+class Server(ThreadingHTTPServer):
+    allow_reuse_address = False        # su macOS il riuso permetterebbe di "sovrapporsi" a un'altra app già in ascolto sulla stessa porta
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "JournalWeb/1.0"
 
@@ -351,20 +355,20 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--port", type=int, default=8791, help="porta di partenza (se occupata prova le successive)")
+    ap.add_argument("--port", type=int, default=47931, help="porta di partenza (se occupata prova le successive)")
     ap.add_argument("--no-browser", action="store_true")
     a = ap.parse_args()
     srv = None
     for port in range(a.port, a.port + 30):                         # porta occupata da un'altra app: provo la successiva
         try:
-            srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)    # solo questo computer
+            srv = Server(("127.0.0.1", port), Handler)    # solo questo computer
             break
         except OSError:
             print(f"Porta {port} occupata, provo la successiva…")
     if srv is None:
         sys.exit(f"Nessuna porta libera tra {a.port} e {a.port + 29}: usa --port con un altro numero.")
     url = f"http://127.0.0.1:{srv.server_address[1]}"
-    print(f"Journal in esecuzione su {url}  (Ctrl+C per chiudere)\nDati: {DB_PATH}")
+    print(f"Journal in esecuzione su {url}  (Ctrl+C per chiudere)\nDati: {DB_PATH}\nApri ESATTAMENTE questo indirizzo; se vedi un'altra app, hai aperto una scheda vecchia.", flush=True)
     if not a.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
