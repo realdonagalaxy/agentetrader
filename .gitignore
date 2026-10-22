@@ -8,3 +8,6 @@ journal/~$*.xlsx
 data/raw/
 data/**/*.pkl
 data/*.pkl
+
+journal/journal.db
+journal/images/
