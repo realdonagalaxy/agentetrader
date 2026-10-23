@@ -14,7 +14,9 @@ Misura: stessi criteri dei backtest precedenti (placebo su barre casuali con ste
 Variante --entry choch (richiesta 23/10/2026): stessa chiusura del FVG H1, ma l'ingresso è il CHoCH M1 (definizione v3 già usata per M5: dopo il minimo/massimo del ritracciamento,
 chiusura M1 oltre l'ultimo pivot opposto che lo precedeva; pivot a 2 barre). Entry a mercato alla chiusura della candela M1 del CHoCH; SL, TP, 24 ore e un trade per gap come sopra.
 Serve lo storico M1 (data/XAUUSD_BID_M1.csv.gz, oppure --m1 file, oppure i file data/raw/XAUUSD_BID_M1_*.csv di dukascopy_fetch).
-Uso: python -m src.sdp_fvg_ema XAUUSD [--entry ema|choch] [--from 2024-01-01] [--to 2025-12-31] [--file path.csv.gz|.pkl --label ETICHETTA]
+Filtro --trend h1 (richiesta 23/10/2026): price action H1 con massimi e minimi (swing a 2 barre, noti solo a conferma avvenuta). Rialzista = HH e HL, ribassista = LH e LL.
+Si entra solo a favore della struttura: BUY dopo la chiusura di un FVG rialzista in struttura rialzista, SELL dopo un FVG ribassista in struttura ribassista (il report mostra anche i trade contro struttura e senza struttura).
+Uso: python -m src.sdp_fvg_ema XAUUSD [--entry ema|choch] [--trend h1] [--from 2024-01-01] [--to 2025-12-31] [--file path.csv.gz|.pkl --label ETICHETTA]
 """
 import argparse
 from bisect import bisect_right
@@ -51,6 +53,26 @@ def find_gaps(m5: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["side", "lo", "hi", "t_known"])
 
 
+def h1_structure(m: pd.DataFrame, times: pd.Series) -> np.ndarray:
+    """Struttura H1 ('up' HH+HL, 'down' LH+LL, 'none') al momento di ciascun istante, usando solo swing già confermati (a 2 barre per lato)."""
+    h1 = resample(m, "1h")
+    ph, pl = pivots(h1, 2)
+    hi, lo = h1["high"].to_numpy(), h1["low"].to_numpy()
+    conf = lambda piv: np.array([(h1.index[i] + pd.Timedelta(hours=3)).value for i in piv])         # barra del pivot + 2 barre di conferma + chiusura
+    ch, cl = conf(ph), conf(pl)
+    out = []
+    for t in times:
+        v = pd.Timestamp(t).value
+        a, b = np.searchsorted(ch, v, side="right"), np.searchsorted(cl, v, side="right")
+        if a < 2 or b < 2:
+            out.append("none")
+            continue
+        hh, hl = hi[ph[a - 1]] > hi[ph[a - 2]], lo[pl[b - 1]] > lo[pl[b - 2]]
+        lh, ll = hi[ph[a - 1]] < hi[ph[a - 2]], lo[pl[b - 1]] < lo[pl[b - 2]]
+        out.append("up" if hh and hl else "down" if lh and ll else "none")
+    return np.array(out)
+
+
 def find_signals(m5: pd.DataFrame, gaps: pd.DataFrame, stats: dict) -> pd.DataFrame:
     """Un segnale per gap chiuso con incrocio dell'EMA 21 entro ENTRY_WAIT_BARS: indice di barra, lato, rischio in prezzo, SL."""
     H, L, C = (m5[k].to_numpy() for k in ("high", "low", "close"))
@@ -78,7 +100,7 @@ def find_signals(m5: pd.DataFrame, gaps: pd.DataFrame, stats: dict) -> pd.DataFr
             sl = extreme - SL_MARGIN * a15[i] if bull else extreme + SL_MARGIN * a15[i]
             risk = (C[i] - sl) if bull else (sl - C[i])
             if risk > 0:
-                rows.append({"i": i, "time": m5.index[i], "side": "buy" if bull else "sell", "risk": float(risk), "t_gap": g.t_known})
+                rows.append({"i": i, "time": m5.index[i], "side": "buy" if bull else "sell", "risk": float(risk), "t_gap": g.t_known, "t_fill": m5.index[i_f]})
                 stats["segnali"] += 1
             break
     return pd.DataFrame(rows)
@@ -125,7 +147,7 @@ def find_signals_choch(m1: pd.DataFrame, gaps: pd.DataFrame, stats: dict) -> pd.
             sl = extreme - SL_MARGIN * a15[j] if bull else extreme + SL_MARGIN * a15[j]
             risk = (C[j] - sl) if bull else (sl - C[j])
             if risk > 0:
-                rows.append({"i": j, "time": m1.index[j], "side": "buy" if bull else "sell", "risk": float(risk), "t_gap": g.t_known})
+                rows.append({"i": j, "time": m1.index[j], "side": "buy" if bull else "sell", "risk": float(risk), "t_gap": g.t_known, "t_fill": m1.index[i_f]})
                 stats["segnali"] += 1
             break
     return pd.DataFrame(rows)
@@ -144,7 +166,7 @@ def simulate(m5: pd.DataFrame, sig: pd.DataFrame, shift: np.ndarray | None = Non
         e = C[i]
         end = min(i + max_bars, n - 1)
         hi, lo = H[i + 1:end + 1], L[i + 1:end + 1]
-        row = {"time": m5.index[i], "side": r.side}
+        row = {"time": m5.index[i], "side": r.side, "k": r_i}
         for k in MULTS:
             sl, tp = (e - r.risk, e + k * r.risk) if buy else (e + r.risk, e - k * r.risk)
             hs, ht = (lo <= sl, hi >= tp) if buy else (hi >= sl, lo <= tp)
@@ -163,7 +185,7 @@ def placebo(m5: pd.DataFrame, sig: pd.DataFrame, seed: int, day_bars: int = 288)
     return simulate(m5, sig, shift, max_bars=day_bars)
 
 
-def report(label: str, m5: pd.DataFrame, mode: str = "ema") -> None:
+def report(label: str, m5: pd.DataFrame, mode: str = "ema", trend: bool = False) -> None:
     st: dict = {}
     gaps = find_gaps(m5)
     day = 288 if mode == "ema" else 1440
@@ -175,18 +197,28 @@ def report(label: str, m5: pd.DataFrame, mode: str = "ema") -> None:
     if sig.empty:
         print("nessun segnale")
         return
+    z_min = 3.0                                                       # più gruppi e due uscite guardati: soglia 3 errori standard
+    sig = sig.reset_index(drop=True)
+    sig["k"] = sig.index
+    if trend:
+        sig["trend"] = h1_structure(m5, sig["t_fill"])
+        fav = ((sig.trend == "up") & (sig.side == "buy")) | ((sig.trend == "down") & (sig.side == "sell"))
+        con = ((sig.trend == "up") & (sig.side == "sell")) | ((sig.trend == "down") & (sig.side == "buy"))
+        print(f"Struttura H1 al momento della chiusura del gap: a favore {int(fav.sum())} · contro {int(con.sum())} · senza struttura {int((~fav & ~con).sum())}")
+        groups = {"A FAVORE della struttura H1 (la proposta)": fav, "   di cui BUY": fav & (sig.side == "buy"), "   di cui SELL": fav & (sig.side == "sell"),
+                  "CONTRO la struttura": con, "senza struttura chiara": ~fav & ~con, "tutti i segnali": sig.side.notna()}
+    else:
+        groups = {"tutti": sig.side.notna(), "BUY (FVG rialzista chiuso)": sig.side == "buy", "SELL (FVG ribassista chiuso)": sig.side == "sell"}
     res = simulate(m5, sig, max_bars=day)
     pl = pd.concat([placebo(m5, sig, sd, day) for sd in range(5)])
-    groups = {"tutti": None, "BUY (FVG rialzista chiuso)": "buy", "SELL (FVG ribassista chiuso)": "sell"}
-    z_min = 3.0                                                       # 3 gruppi x 2 uscite guardati: la soglia dei 2 errori standard darebbe falsi positivi
     for k in MULTS:
         col = f"R{k:g}"
         rows = []
-        for g, sd in groups.items():
-            t = res if sd is None else res[res.side == sd]
-            p = pl if sd is None else pl[pl.side == sd]               # placebo della STESSA direzione: toglie la deriva del mercato
+        for g, mask in groups.items():
+            ks = set(sig.index[mask])
+            t, p = res[res.k.isin(ks)], pl[pl.k.isin(ks)]                  # placebo sugli STESSI segnali (stesso lato e rischio) spostati a orari casuali: toglie la deriva
             rows.append((g, verdict(t[["time", col]].rename(columns={col: "R"}), p[col], z_min=z_min)))
-        print_verdicts(rows, f"{label} | TP {k:g}R, max 24 ore | placebo della stessa direzione, soglia {z_min:g} errori")
+        print_verdicts(rows, f"{label} | TP {k:g}R, max 24 ore | placebo sugli stessi segnali, soglia {z_min:g} errori")
     print("\n--- Stabilità per anno e direzione (TP 3R): se il segno cambia, non è un vantaggio ---")
     for y, g in res.groupby(res.time.dt.year):
         print(f"{y}: " + " | ".join(f"{nm} n={len(x):4d} media {x['R3'].mean():+.3f}R" for nm, x in (("tutti", g), ("BUY", g[g.side == "buy"]), ("SELL", g[g.side == "sell"]))))
@@ -208,6 +240,7 @@ if __name__ == "__main__":
     ap.add_argument("--from", dest="start")
     ap.add_argument("--to", dest="end")
     ap.add_argument("--entry", choices=("ema", "choch"), default="ema")
+    ap.add_argument("--trend", choices=("h1",), help="filtro: solo a favore della struttura H1 (HH/HL, LH/LL)")
     ap.add_argument("--m1", help="file M1 (csv.gz/pkl) per --entry choch")
     a = ap.parse_args()
     if a.entry == "choch":
@@ -222,7 +255,7 @@ if __name__ == "__main__":
             m = pd.concat([load_ohlc(str(f)) for f in files]).sort_index()
         if m.index.tz is not None:
             m.index = m.index.tz_convert("UTC").tz_localize(None)
-        report(a.label or a.symbol, m.loc[a.start:a.end], "choch")
+        report(a.label or a.symbol, m.loc[a.start:a.end], "choch", bool(a.trend))
         raise SystemExit(0)
     if a.file:
         m5 = pd.read_pickle(a.file) if a.file.endswith(".pkl") else pd.read_csv(a.file, index_col=0, parse_dates=True)
@@ -230,4 +263,4 @@ if __name__ == "__main__":
             m5.index = m5.index.tz_convert("UTC").tz_localize(None)
     else:
         m5 = load_ohlc(f"data/{a.symbol}_BID_M5.csv.gz")
-    report(a.label or a.symbol, m5.loc[a.start:a.end])
+    report(a.label or a.symbol, m5.loc[a.start:a.end], "ema", bool(a.trend))
