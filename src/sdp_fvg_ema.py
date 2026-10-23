@@ -11,15 +11,20 @@ Regole concordate con l'utente (23/10/2026):
 ASSUNZIONI mie (non specificate): il gap vale per al massimo GAP_WAIT_BARS barre M5 dopo la formazione (5 giorni) e l'incrocio con l'EMA deve avvenire entro
 ENTRY_WAIT_BARS barre dalla chiusura del gap (24 ore). Sono dichiarate qui e stampate nel report.
 Misura: stessi criteri dei backtest precedenti (placebo su barre casuali con stessa geometria, errori standard, segno dentro/fuori campione, verdetto automatico).
-Uso: python -m src.sdp_fvg_ema XAUUSD [--from 2024-01-01] [--to 2025-12-31] [--file path.csv.gz|.pkl --label ETICHETTA]
+Variante --entry choch (richiesta 23/10/2026): stessa chiusura del FVG H1, ma l'ingresso è il CHoCH M1 (definizione v3 già usata per M5: dopo il minimo/massimo del ritracciamento,
+chiusura M1 oltre l'ultimo pivot opposto che lo precedeva; pivot a 2 barre). Entry a mercato alla chiusura della candela M1 del CHoCH; SL, TP, 24 ore e un trade per gap come sopra.
+Serve lo storico M1 (data/XAUUSD_BID_M1.csv.gz, oppure --m1 file, oppure i file data/raw/XAUUSD_BID_M1_*.csv di dukascopy_fetch).
+Uso: python -m src.sdp_fvg_ema XAUUSD [--entry ema|choch] [--from 2024-01-01] [--to 2025-12-31] [--file path.csv.gz|.pkl --label ETICHETTA]
 """
 import argparse
+from bisect import bisect_right
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from src.data_loader import load_ohlc, resample
-from src.range_detector import atr
+from src.range_detector import atr, pivots
 from src.verdict import print_verdicts, verdict
 
 IMPULSE_ATR = 1.0
@@ -79,7 +84,54 @@ def find_signals(m5: pd.DataFrame, gaps: pd.DataFrame, stats: dict) -> pd.DataFr
     return pd.DataFrame(rows)
 
 
-def simulate(m5: pd.DataFrame, sig: pd.DataFrame, shift: np.ndarray | None = None) -> pd.DataFrame:
+def find_signals_choch(m1: pd.DataFrame, gaps: pd.DataFrame, stats: dict) -> pd.DataFrame:
+    """Come find_signals ma l'ingresso è il CHoCH M1 dopo la chiusura del gap (barre = M1)."""
+    H, L, C = (m1[k].to_numpy() for k in ("high", "low", "close"))
+    a15 = atr(resample(m1, "15min")).shift(1).reindex(m1.index, method="ffill").to_numpy()
+    ph, pl = (list(x) for x in pivots(m1, 2))
+    n, day = len(m1), 1440
+    rows = []
+    stats.update(gap=len(gaps), chiusi=0, segnali=0)
+    for g in gaps.itertuples():
+        f0 = int(m1.index.searchsorted(g.t_known))
+        if f0 >= n - 2:
+            continue
+        end = min(f0 + 5 * day, n - 1)
+        bull = g.side == "bull"
+        hit = (L[f0:end + 1] <= g.lo) if bull else (H[f0:end + 1] >= g.hi)
+        if not hit.any():
+            continue
+        i_f = f0 + int(hit.argmax())
+        stats["chiusi"] += 1
+        # BUY: minimo del ritracciamento = estremo avverso; pivot avversi = minimi, di riferimento = massimi. SELL: specchio.
+        adv, advp, refp = (L, pl, ph) if bull else (H, ph, pl)
+        sw, sw_i = (np.inf if bull else -np.inf), None
+        for j in range(i_f, min(i_f + day, n - 2)):
+            if (adv[j] < sw) if bull else (adv[j] > sw):
+                sw, sw_i = adv[j], j
+            if j <= sw_i:
+                continue
+            q = bisect_right(advp, j - 2) - 1                       # ultimo pivot avverso confermato (2 barre dopo)
+            if q < 0 or advp[q] < sw_i:
+                continue
+            pt = advp[q]
+            mm = bisect_right(refp, pt - 1) - 1                     # ultimo pivot opposto prima del pivot avverso
+            if mm < 0:
+                continue
+            ref = H[refp[mm]] if bull else L[refp[mm]]
+            if not ((C[j] > ref) if bull else (C[j] < ref)) or not np.isfinite(a15[j]):
+                continue
+            extreme = L[i_f:j + 1].min() if bull else H[i_f:j + 1].max()
+            sl = extreme - SL_MARGIN * a15[j] if bull else extreme + SL_MARGIN * a15[j]
+            risk = (C[j] - sl) if bull else (sl - C[j])
+            if risk > 0:
+                rows.append({"i": j, "time": m1.index[j], "side": "buy" if bull else "sell", "risk": float(risk), "t_gap": g.t_known})
+                stats["segnali"] += 1
+            break
+    return pd.DataFrame(rows)
+
+
+def simulate(m5: pd.DataFrame, sig: pd.DataFrame, shift: np.ndarray | None = None, max_bars: int = MAX_BARS) -> pd.DataFrame:
     """R per segnale e per multiplo di TP. shift = spostamento (in barre) per il placebo: stesso lato e rischio su un'altra barra."""
     H, L, C = (m5[k].to_numpy() for k in ("high", "low", "close"))
     n = len(m5)
@@ -90,7 +142,7 @@ def simulate(m5: pd.DataFrame, sig: pd.DataFrame, shift: np.ndarray | None = Non
             continue
         buy = r.side == "buy"
         e = C[i]
-        end = min(i + MAX_BARS, n - 1)
+        end = min(i + max_bars, n - 1)
         hi, lo = H[i + 1:end + 1], L[i + 1:end + 1]
         row = {"time": m5.index[i], "side": r.side}
         for k in MULTS:
@@ -105,24 +157,26 @@ def simulate(m5: pd.DataFrame, sig: pd.DataFrame, shift: np.ndarray | None = Non
     return pd.DataFrame(rows)
 
 
-def placebo(m5: pd.DataFrame, sig: pd.DataFrame, seed: int) -> pd.DataFrame:
+def placebo(m5: pd.DataFrame, sig: pd.DataFrame, seed: int, day_bars: int = 288) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
-    shift = rng.choice([-1, 1], len(sig)) * rng.integers(288, 288 * 30, len(sig))
-    return simulate(m5, sig, shift)
+    shift = rng.choice([-1, 1], len(sig)) * rng.integers(day_bars, day_bars * 30, len(sig))
+    return simulate(m5, sig, shift, max_bars=day_bars)
 
 
-def report(label: str, m5: pd.DataFrame) -> None:
+def report(label: str, m5: pd.DataFrame, mode: str = "ema") -> None:
     st: dict = {}
     gaps = find_gaps(m5)
-    sig = find_signals(m5, gaps, st)
-    print(f"{label} · dati {m5.index[0]} → {m5.index[-1]}\n"
-          f"FVG H1 con spinta >= {IMPULSE_ATR:g} ATR: {st['gap']} · chiusi entro {GAP_WAIT_BARS // 288} giorni: {st['chiusi']} · con incrocio EMA 21 M5 entro {ENTRY_WAIT_BARS // 12} ore: {st['segnali']}\n"
-          f"Parametri miei da confermare: attesa gap {GAP_WAIT_BARS // 288} giorni, attesa incrocio {ENTRY_WAIT_BARS // 12} ore, margine SL {SL_MARGIN:g} ATR M15", flush=True)
+    day = 288 if mode == "ema" else 1440
+    sig = find_signals(m5, gaps, st) if mode == "ema" else find_signals_choch(m5, gaps, st)
+    ent = "incrocio EMA 21 M5" if mode == "ema" else "CHoCH M1"
+    print(f"{label} · entry {ent} · dati {m5.index[0]} → {m5.index[-1]}\n"
+          f"FVG H1 con spinta >= {IMPULSE_ATR:g} ATR: {st['gap']} · chiusi entro 5 giorni: {st['chiusi']} · con {ent} entro 24 ore: {st['segnali']}\n"
+          f"Parametri miei da confermare: attesa gap 5 giorni, attesa ingresso 24 ore, margine SL {SL_MARGIN:g} ATR M15", flush=True)
     if sig.empty:
         print("nessun segnale")
         return
-    res = simulate(m5, sig)
-    pl = pd.concat([placebo(m5, sig, s) for s in range(5)])
+    res = simulate(m5, sig, max_bars=day)
+    pl = pd.concat([placebo(m5, sig, sd, day) for sd in range(5)])
     groups = {"tutti": None, "BUY (FVG rialzista chiuso)": "buy", "SELL (FVG ribassista chiuso)": "sell"}
     z_min = 3.0                                                       # 3 gruppi x 2 uscite guardati: la soglia dei 2 errori standard darebbe falsi positivi
     for k in MULTS:
@@ -153,7 +207,23 @@ if __name__ == "__main__":
     ap.add_argument("--label")
     ap.add_argument("--from", dest="start")
     ap.add_argument("--to", dest="end")
+    ap.add_argument("--entry", choices=("ema", "choch"), default="ema")
+    ap.add_argument("--m1", help="file M1 (csv.gz/pkl) per --entry choch")
     a = ap.parse_args()
+    if a.entry == "choch":
+        if a.m1:
+            m = pd.read_pickle(a.m1) if a.m1.endswith(".pkl") else load_ohlc(a.m1)
+        elif Path(f"data/{a.symbol}_BID_M1.csv.gz").exists():
+            m = load_ohlc(f"data/{a.symbol}_BID_M1.csv.gz")
+        else:
+            files = sorted(Path("data/raw").glob(f"{a.symbol}_BID_M1_*.csv"))
+            if not files:
+                raise SystemExit(f"Serve lo storico M1: scaricalo con  python3 -m src.dukascopy_fetch {a.symbol} 2024-01-01 2025-12-31  (poi riprova), oppure passa --m1 file.")
+            m = pd.concat([load_ohlc(str(f)) for f in files]).sort_index()
+        if m.index.tz is not None:
+            m.index = m.index.tz_convert("UTC").tz_localize(None)
+        report(a.label or a.symbol, m.loc[a.start:a.end], "choch")
+        raise SystemExit(0)
     if a.file:
         m5 = pd.read_pickle(a.file) if a.file.endswith(".pkl") else pd.read_csv(a.file, index_col=0, parse_dates=True)
         if m5.index.tz is not None:
