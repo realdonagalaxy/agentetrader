@@ -53,6 +53,29 @@ def find_signals(m5: pd.DataFrame, stats: dict) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("time").reset_index(drop=True) if rows else pd.DataFrame()
 
 
+def _managed(row: dict, buy: bool, e: float, sl_d: float, tps: tuple, hi: np.ndarray, lo: np.ndarray, c_end: float, isl: int, w: tuple) -> float:
+    """Gestione: quota w[0] chiusa al TP1 e SL spostato a pareggio (ingresso); il resto ai TP2/TP3 con le quote w[1], w[2]. Stessa barra: prima lo stop."""
+    if row["TP1"] == -1.0:
+        return -1.0
+    ht1 = (hi >= e + tps[0]) if buy else (lo <= e - tps[0])
+    if not ht1.any():
+        return row["TP1"]                                                    # tempo scaduto prima del TP1: chiusura a mercato (stessa uscita del TP1 singolo)
+    j = int(ht1.argmax())
+    if isl <= j:
+        return -1.0
+    out = w[0] * tps[0] / sl_d
+    for q, t in ((1, tps[1]), (2, tps[2])):
+        if not w[q]:
+            continue
+        hb, ht = ((lo[j:] <= e), (hi[j:] >= e + t)) if buy else ((hi[j:] >= e), (lo[j:] <= e - t))
+        ib, it = (int(hb.argmax()) if hb.any() else 10**9), (int(ht.argmax()) if ht.any() else 10**9)
+        if ib == 10**9 and it == 10**9:
+            out += w[q] * (((c_end - e) if buy else (e - c_end)) / sl_d)
+        elif it < ib:
+            out += w[q] * t / sl_d
+    return out
+
+
 def simulate(m5: pd.DataFrame, sig: pd.DataFrame, sl_d: float, tps: tuple, shift: np.ndarray | None = None, market: bool = False) -> pd.DataFrame:
     """R per segnale e per TP (in unità di SL: -1 se SL, tp/sl se TP) + colonna MIX = 1/3 della posizione a ciascun TP, SL sempre fisso. Nella barra del fill solo SL; SL prima di TP."""
     H, L, C = (m5[k].to_numpy() for k in ("high", "low", "close"))
@@ -67,11 +90,13 @@ def simulate(m5: pd.DataFrame, sig: pd.DataFrame, sl_d: float, tps: tuple, shift
         end = min(i + 288, n - 1)
         hi, lo = H[i + 1:end + 1], L[i + 1:end + 1]
         row = {"time": m5.index[i], "side": r.side, "k": r_i}
+        isl_g, itp1_g = 10**9, 10**9
         if not market and ((L[i] <= sl) if buy else (H[i] >= sl)):
             row.update({f"TP{j + 1}": -1.0 for j in range(len(tps))})
         else:
             hs = (lo <= sl) if buy else (hi >= sl)
             isl = int(hs.argmax()) if hs.any() else 10**9
+            isl_g = isl
             for j, t in enumerate(tps):
                 ht = (hi >= e + t) if buy else (lo <= e - t)
                 itp = int(ht.argmax()) if ht.any() else 10**9
@@ -79,6 +104,8 @@ def simulate(m5: pd.DataFrame, sig: pd.DataFrame, sl_d: float, tps: tuple, shift
                     row[f"TP{j + 1}"] = ((C[end] - e) if buy else (e - C[end])) / sl_d
                 else:
                     row[f"TP{j + 1}"] = -1.0 if isl <= itp else t / sl_d
+        if len(tps) == 3:
+            row["GESTITO"], row["GESTITO_T3"] = (_managed(row, buy, e, sl_d, tps, hi, lo, C[end], isl_g, w) for w in ((0.6, 0.2, 0.2), (0.6, 0.0, 0.4)))
         row["MIX"] = float(np.mean([row[f"TP{j + 1}"] for j in range(len(tps))]))
         rows.append(row)
     return pd.DataFrame(rows)
@@ -90,14 +117,14 @@ def report(label: str, m5: pd.DataFrame, sl_pips: float, tp_pips: tuple, pip: fl
     print(f"{label} · SL {sl_pips:g} pips ({sl_d:g}) · TP {' / '.join(f'{t:g}' for t in tp_pips)} pips · dati {m5.index[0]} → {m5.index[-1]}\n"
           f"HH in struttura rialzista: {st['hh']} · LL in struttura ribassista: {st['ll']} · toccati entro 5 giorni (trade): {st['trade']}\n"
           f"Assunzioni mie: pip={pip:g}, limit sul livello, validità 5 giorni, un trade per livello, costi ignorati. R in unità di SL (TP1 = +{tps[0] / sl_d:.2f}R). "
-          f"MIX = 1/3 della posizione a ciascun TP, SL sempre fisso (senza spostarlo a pareggio)", flush=True)
+          f"GESTITO = 60% al TP1, SL a pareggio, 20% al TP2 e 20% al TP3; GESTITO_T3 = 60% al TP1 e 40% al TP3; MIX = 1/3 a ciascun TP senza pareggio", flush=True)
     if sig.empty:
         print("nessun segnale")
         return
     res = simulate(m5, sig, sl_d, tps)
     pl = pd.concat([simulate(m5, sig, sl_d, tps, np.random.default_rng(sd).choice([-1, 1], len(sig)) * np.random.default_rng(sd + 100).integers(288, 288 * 30, len(sig)), True) for sd in range(5)])
     groups = {"tutti": sig.side.notna(), "SELL al tocco dell'HH": sig.side == "sell", "BUY al tocco dell'LL": sig.side == "buy"}
-    for col in [f"TP{j + 1}" for j in range(len(tps))] + ["MIX"]:
+    for col in ["GESTITO", "GESTITO_T3", "TP1", "MIX"]:
         rows = []
         for g, mask in groups.items():
             ks = set(sig.index[mask])
