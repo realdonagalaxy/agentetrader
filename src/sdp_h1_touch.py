@@ -5,7 +5,7 @@ ribassista = LH e LL. Quando si conferma un nuovo HH in struttura rialzista, il 
 si vende con ordine limit; nel caso speculare (LL in struttura ribassista) si compra al tocco. SL e TP a PIPS pips (oro: 1 pip = 0,10), R:R 1:1.
 ASSUNZIONI mie: ordine valido 5 giorni, un trade per livello, ordine annullato se prima del tocco si forma un nuovo swing opposto che spezza la struttura non è gestito (resta valido),
 nella barra del fill si controlla solo lo SL, stessa barra SL/TP: prima lo SL, max 24 ore dopo il fill, costi ignorati.
-Uso: python -m src.sdp_h1_touch XAUUSD [--pips 50] [--pip 0.10] [--from 2024-01-01] [--file path.pkl --label ETICHETTA]
+Uso: python -m src.sdp_h1_touch XAUUSD [--sl 150 --tp 50 100 150] [--pip 0.10] [--from 2024-01-01] [--file path.pkl --label ETICHETTA]
 """
 import argparse
 
@@ -14,7 +14,6 @@ import pandas as pd
 
 from src.data_loader import load_ohlc, resample
 from src.range_detector import pivots
-from src.sdp_h1_break import simulate
 from src.verdict import print_verdicts, verdict
 
 WAIT_BARS = 5 * 288
@@ -54,31 +53,66 @@ def find_signals(m5: pd.DataFrame, stats: dict) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("time").reset_index(drop=True) if rows else pd.DataFrame()
 
 
-def report(label: str, m5: pd.DataFrame, pips: float, pip: float) -> None:
-    dist, st = pips * pip, {}
+def simulate(m5: pd.DataFrame, sig: pd.DataFrame, sl_d: float, tps: tuple, shift: np.ndarray | None = None, market: bool = False) -> pd.DataFrame:
+    """R per segnale e per TP (in unità di SL: -1 se SL, tp/sl se TP) + colonna MIX = 1/3 della posizione a ciascun TP, SL sempre fisso. Nella barra del fill solo SL; SL prima di TP."""
+    H, L, C = (m5[k].to_numpy() for k in ("high", "low", "close"))
+    n, rows = len(m5), []
+    for r_i, r in enumerate(sig.itertuples()):
+        i = r.i + (int(shift[r_i]) if shift is not None else 0)
+        if not 0 <= i < n - 2:
+            continue
+        buy = r.side == "buy"
+        e = C[i] if market else r.entry
+        sl = e - sl_d if buy else e + sl_d
+        end = min(i + 288, n - 1)
+        hi, lo = H[i + 1:end + 1], L[i + 1:end + 1]
+        row = {"time": m5.index[i], "side": r.side, "k": r_i}
+        if not market and ((L[i] <= sl) if buy else (H[i] >= sl)):
+            row.update({f"TP{j + 1}": -1.0 for j in range(len(tps))})
+        else:
+            hs = (lo <= sl) if buy else (hi >= sl)
+            isl = int(hs.argmax()) if hs.any() else 10**9
+            for j, t in enumerate(tps):
+                ht = (hi >= e + t) if buy else (lo <= e - t)
+                itp = int(ht.argmax()) if ht.any() else 10**9
+                if isl == 10**9 and itp == 10**9:
+                    row[f"TP{j + 1}"] = ((C[end] - e) if buy else (e - C[end])) / sl_d
+                else:
+                    row[f"TP{j + 1}"] = -1.0 if isl <= itp else t / sl_d
+        row["MIX"] = float(np.mean([row[f"TP{j + 1}"] for j in range(len(tps))]))
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def report(label: str, m5: pd.DataFrame, sl_pips: float, tp_pips: tuple, pip: float) -> None:
+    sl_d, tps, st = sl_pips * pip, tuple(t * pip for t in tp_pips), {}
     sig = find_signals(m5, st)
-    print(f"{label} · SL e TP {pips:g} pips = {dist:g} · dati {m5.index[0]} → {m5.index[-1]}\n"
+    print(f"{label} · SL {sl_pips:g} pips ({sl_d:g}) · TP {' / '.join(f'{t:g}' for t in tp_pips)} pips · dati {m5.index[0]} → {m5.index[-1]}\n"
           f"HH in struttura rialzista: {st['hh']} · LL in struttura ribassista: {st['ll']} · toccati entro 5 giorni (trade): {st['trade']}\n"
-          f"Assunzioni mie da confermare: pip={pip:g}, limit sul livello, validità 5 giorni, un trade per livello, costi ignorati", flush=True)
+          f"Assunzioni mie: pip={pip:g}, limit sul livello, validità 5 giorni, un trade per livello, costi ignorati. R in unità di SL (TP1 = +{tps[0] / sl_d:.2f}R). "
+          f"MIX = 1/3 della posizione a ciascun TP, SL sempre fisso (senza spostarlo a pareggio)", flush=True)
     if sig.empty:
         print("nessun segnale")
         return
-    res = simulate(m5, sig, dist)
-    pl = pd.concat([simulate(m5, sig, dist, np.random.default_rng(sd).choice([-1, 1], len(sig)) * np.random.default_rng(sd + 100).integers(288, 288 * 30, len(sig)), True) for sd in range(5)])
+    res = simulate(m5, sig, sl_d, tps)
+    pl = pd.concat([simulate(m5, sig, sl_d, tps, np.random.default_rng(sd).choice([-1, 1], len(sig)) * np.random.default_rng(sd + 100).integers(288, 288 * 30, len(sig)), True) for sd in range(5)])
     groups = {"tutti": sig.side.notna(), "SELL al tocco dell'HH": sig.side == "sell", "BUY al tocco dell'LL": sig.side == "buy"}
-    rows = []
-    for g, mask in groups.items():
-        ks = set(sig.index[mask])
-        rows.append((g, verdict(res[res.k.isin(ks)][["time", "R"]], pl[pl.k.isin(ks)]["R"], z_min=3.0)))
-    print_verdicts(rows, f"{label} | SL=TP={pips:g} pips, max 24 ore | placebo sugli stessi segnali, soglia 3 errori")
-    print("\n--- Stabilità per anno e direzione ---")
+    for col in [f"TP{j + 1}" for j in range(len(tps))] + ["MIX"]:
+        rows = []
+        for g, mask in groups.items():
+            ks = set(sig.index[mask])
+            rows.append((g, verdict(res[res.k.isin(ks)][["time", col]].rename(columns={col: "R"}), pl[pl.k.isin(ks)][col], z_min=3.0)))
+        print_verdicts(rows, f"{label} | uscita {col} | placebo sugli stessi segnali, soglia 3 errori")
+    print("\n--- Stabilità per anno (MIX) ---")
     for y, g in res.groupby(res.time.dt.year):
-        print(f"{y}: " + " | ".join(f"{nm} n={len(x):4d} media {x.R.mean():+.3f}R" for nm, x in (("tutti", g), ("SELL", g[g.side == "sell"]), ("BUY", g[g.side == "buy"]))))
-    print("\n--- Deriva e placebo (ingresso a mercato a caso, stessa direzione) ---")
+        print(f"{y}: " + " | ".join(f"{nm} n={len(x):4d} media {x.MIX.mean():+.3f}R" for nm, x in (("tutti", g), ("SELL", g[g.side == "sell"]), ("BUY", g[g.side == "buy"]))))
+    print("\n--- Frequenza di arrivo ai TP (trade reali) ---")
+    for j, t in enumerate(tp_pips):
+        print(f"TP{j + 1} {t:g} pips: {np.mean(res[f'TP{j + 1}'] > 0):.3f} · SL: {np.mean(res['TP1'] == -1):.3f} (serve > {1 / (1 + t / sl_pips):.3f} per pareggiare prima dei costi)")
+    print("\n--- Deriva e placebo (mercato a caso, MIX) ---")
     for sd in ("buy", "sell"):
-        x = pl[pl.side == sd].R
-        print(f"{sd.upper():4s} a caso: n={len(x)} media {x.mean():+.3f}R (±{x.std() / np.sqrt(len(x)):.3f}) win {np.mean(x > 0):.3f}")
-    print(f"Win rate dei trade reali: {np.mean(res.R > 0):.3f} (a 1:1 serve > 0.500 prima dei costi; spread oro ~0,3 = {0.3 / dist:.2f}R per trade)")
+        x = pl[pl.side == sd].MIX
+        print(f"{sd.upper():4s} a caso: n={len(x)} media {x.mean():+.3f}R (±{x.std() / np.sqrt(len(x)):.3f})")
 
 
 if __name__ == "__main__":
@@ -88,7 +122,8 @@ if __name__ == "__main__":
     ap.add_argument("--label")
     ap.add_argument("--from", dest="start")
     ap.add_argument("--to", dest="end")
-    ap.add_argument("--pips", type=float, default=50.0)
+    ap.add_argument("--sl", type=float, default=150.0)
+    ap.add_argument("--tp", type=float, nargs="+", default=[50.0, 100.0, 150.0])
     ap.add_argument("--pip", type=float, default=0.10)
     a = ap.parse_args()
     if a.file:
@@ -97,4 +132,4 @@ if __name__ == "__main__":
             m5.index = m5.index.tz_convert("UTC").tz_localize(None)
     else:
         m5 = load_ohlc(f"data/{a.symbol}_BID_M5.csv.gz")
-    report(a.label or a.symbol, m5.loc[a.start:a.end], a.pips, a.pip)
+    report(a.label or a.symbol, m5.loc[a.start:a.end], a.sl, tuple(a.tp), a.pip)
