@@ -123,15 +123,23 @@ def report(label: str, m5: pd.DataFrame) -> None:
         return
     res = simulate(m5, sig)
     pl = pd.concat([placebo(m5, sig, s) for s in range(5)])
-    groups = {"tutti": res.side.notna(), "BUY (FVG rialzista chiuso)": res.side == "buy", "SELL (FVG ribassista chiuso)": res.side == "sell"}
+    groups = {"tutti": None, "BUY (FVG rialzista chiuso)": "buy", "SELL (FVG ribassista chiuso)": "sell"}
+    z_min = 3.0                                                       # 3 gruppi x 2 uscite guardati: la soglia dei 2 errori standard darebbe falsi positivi
     for k in MULTS:
         col = f"R{k:g}"
-        rows = [(g, verdict(res[m][["time", col]].rename(columns={col: "R"}), pl[col])) for g, m in groups.items()]
-        print_verdicts(rows, f"{label} | TP {k:g}R, max 24 ore")
-    print("\n--- Stabilità per anno (TP 3R): se il segno cambia da un anno all'altro, non è un vantaggio ---")
+        rows = []
+        for g, sd in groups.items():
+            t = res if sd is None else res[res.side == sd]
+            p = pl if sd is None else pl[pl.side == sd]               # placebo della STESSA direzione: toglie la deriva del mercato
+            rows.append((g, verdict(t[["time", col]].rename(columns={col: "R"}), p[col], z_min=z_min)))
+        print_verdicts(rows, f"{label} | TP {k:g}R, max 24 ore | placebo della stessa direzione, soglia {z_min:g} errori")
+    print("\n--- Stabilità per anno e direzione (TP 3R): se il segno cambia, non è un vantaggio ---")
     for y, g in res.groupby(res.time.dt.year):
-        r = g["R3"]
-        print(f"{y}: n={len(r):4d} media {r.mean():+.3f}R win {np.mean(r > 0):.2f}")
+        print(f"{y}: " + " | ".join(f"{nm} n={len(x):4d} media {x['R3'].mean():+.3f}R" for nm, x in (("tutti", g), ("BUY", g[g.side == "buy"]), ("SELL", g[g.side == "sell"]))))
+    print("\n--- Deriva del mercato (placebo per direzione, TP 3R): quanto rende comprare o vendere a caso ---")
+    for sd in ("buy", "sell"):
+        x = pl[pl.side == sd]["R3"]
+        print(f"{sd.upper():4s} a caso: n={len(x)} media {x.mean():+.3f}R (±{x.std() / np.sqrt(len(x)):.3f})")
     print("\n--- PLACEBO (barre casuali, 5 ripetizioni) ---")
     for k in MULTS:
         r = pl[f"R{k:g}"]
