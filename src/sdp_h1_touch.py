@@ -117,28 +117,28 @@ def report(label: str, m5: pd.DataFrame, sl_pips: float, tp_pips: tuple, pip: fl
     print(f"{label} · SL {sl_pips:g} pips ({sl_d:g}) · TP {' / '.join(f'{t:g}' for t in tp_pips)} pips · dati {m5.index[0]} → {m5.index[-1]}\n"
           f"HH in struttura rialzista: {st['hh']} · LL in struttura ribassista: {st['ll']} · toccati entro 5 giorni (trade): {st['trade']}\n"
           f"Assunzioni mie: pip={pip:g}, limit sul livello, validità 5 giorni, un trade per livello, costi ignorati. R in unità di SL (TP1 = +{tps[0] / sl_d:.2f}R). "
-          f"GESTITO = 60% al TP1, SL a pareggio, 20% al TP2 e 20% al TP3; GESTITO_T3 = 60% al TP1 e 40% al TP3; MIX = 1/3 a ciascun TP senza pareggio", flush=True)
+          f"GESTITO_T3 = 60% chiuso al TP1 con SL a pareggio, 40% lasciato correre fino al TP3 (150 pips); TP1 = riferimento, tutto chiuso al TP1", flush=True)
     if sig.empty:
         print("nessun segnale")
         return
     res = simulate(m5, sig, sl_d, tps)
     pl = pd.concat([simulate(m5, sig, sl_d, tps, np.random.default_rng(sd).choice([-1, 1], len(sig)) * np.random.default_rng(sd + 100).integers(288, 288 * 30, len(sig)), True) for sd in range(5)])
     groups = {"tutti": sig.side.notna(), "SELL al tocco dell'HH": sig.side == "sell", "BUY al tocco dell'LL": sig.side == "buy"}
-    for col in ["GESTITO", "GESTITO_T3", "TP1", "MIX"]:
+    for col in ["GESTITO_T3", "TP1"]:
         rows = []
         for g, mask in groups.items():
             ks = set(sig.index[mask])
             rows.append((g, verdict(res[res.k.isin(ks)][["time", col]].rename(columns={col: "R"}), pl[pl.k.isin(ks)][col], z_min=3.0)))
         print_verdicts(rows, f"{label} | uscita {col} | placebo sugli stessi segnali, soglia 3 errori")
-    print("\n--- Stabilità per anno (MIX) ---")
+    print("\n--- Stabilità per anno (GESTITO_T3) ---")
     for y, g in res.groupby(res.time.dt.year):
-        print(f"{y}: " + " | ".join(f"{nm} n={len(x):4d} media {x.MIX.mean():+.3f}R" for nm, x in (("tutti", g), ("SELL", g[g.side == "sell"]), ("BUY", g[g.side == "buy"]))))
+        print(f"{y}: " + " | ".join(f"{nm} n={len(x):4d} media {x.GESTITO_T3.mean():+.3f}R" for nm, x in (("tutti", g), ("SELL", g[g.side == "sell"]), ("BUY", g[g.side == "buy"]))))
     print("\n--- Frequenza di arrivo ai TP (trade reali) ---")
     for j, t in enumerate(tp_pips):
         print(f"TP{j + 1} {t:g} pips: {np.mean(res[f'TP{j + 1}'] > 0):.3f} · SL: {np.mean(res['TP1'] == -1):.3f} (serve > {1 / (1 + t / sl_pips):.3f} per pareggiare prima dei costi)")
-    print("\n--- Deriva e placebo (mercato a caso, MIX) ---")
+    print("\n--- Deriva e placebo (mercato a caso, GESTITO_T3) ---")
     for sd in ("buy", "sell"):
-        x = pl[pl.side == sd].MIX
+        x = pl[pl.side == sd].GESTITO_T3
         print(f"{sd.upper():4s} a caso: n={len(x)} media {x.mean():+.3f}R (±{x.std() / np.sqrt(len(x)):.3f})")
 
 
