@@ -9,6 +9,7 @@ Raggruppamento: settimana ISO (lunedì-domenica) in base all'orario di CHIUSURA 
 Netto = profitto + commissioni + swap. Output: tabella a schermo e data/export/mt5_settimane.csv.
 """
 import argparse
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -49,13 +50,99 @@ def from_csv(path: str, text: str | None = None) -> pd.DataFrame:
     tc = col("close time", "ora chiusura", "time", "tempo", "data")
     pc = col("profit", "profitto")
     if not tc or not pc:
-        raise SystemExit(f"Non trovo le colonne tempo/profitto. Colonne presenti: {list(d.columns)}")
-    out = pd.DataFrame({"time": pd.to_datetime(d[tc], dayfirst=True, errors="coerce"), "profit": pd.to_numeric(d[pc], errors="coerce")})
+        raise ValueError(f"Non trovo le colonne tempo/profitto. Colonne presenti: {list(d.columns)}")
+    out = pd.DataFrame({"time": d[tc].map(to_time), "profit": d[pc].map(to_num)})
     for name, keys in (("commission", ("commission", "commissione")), ("swap", ("swap",))):
         c = col(*keys)
-        out[name] = pd.to_numeric(d[c], errors="coerce").fillna(0.0) if c else 0.0
+        out[name] = d[c].map(to_num).fillna(0.0) if c else 0.0
     out["simbolo"] = d[col("symbol", "simbolo")] if col("symbol", "simbolo") else ""
     return out.dropna(subset=["time", "profit"])
+
+
+def to_time(v):
+    """Data/ora da testo o cella Excel: accetta 2026.10.30 15:45 (formato MT5), 2026-10-30 15:45:10 e 30/10/2026 15:45."""
+    import datetime as dt
+    if isinstance(v, (dt.datetime, pd.Timestamp)):
+        return pd.Timestamp(v)
+    t = str(v).strip()
+    if not t or t.lower() == "nan":
+        return pd.NaT
+    m = re.match(r"^(\d{4})[.\-/](\d{2})[.\-/](\d{2})(.*)$", t)
+    if m:
+        t = f"{m[1]}-{m[2]}-{m[3]}{m[4]}"
+        return pd.to_datetime(t, errors="coerce")
+    return pd.to_datetime(t, dayfirst=True, errors="coerce")
+
+
+def to_num(v):
+    """Numero da testo con spazi come separatore di migliaia e virgola o punto decimale (es. '1 234,50'); NaN se non valido."""
+    if isinstance(v, (int, float)):
+        return float(v)
+    t = str(v).strip().replace("\xa0", "").replace(" ", "")
+    if not t:
+        return float("nan")
+    if "," in t and "." in t:
+        t = t.replace(",", "") if t.rfind(".") > t.rfind(",") else t.replace(".", "").replace(",", ".")
+    elif "," in t:
+        t = t.replace(",", ".")
+    try:
+        return float(t)
+    except ValueError:
+        return float("nan")
+
+
+def from_xlsx(raw: bytes) -> tuple[pd.DataFrame, str | None]:
+    """Report MT5 in Excel. Legge la tabella delle POSIZIONI CHIUSE (colonne Posizione, due colonne Ora = apertura e chiusura, Commissione, Swap, Profitto) oppure quella dei DEAL
+    (Operazione, Direzione, Commissione, Swap, Profitto: contano i deal di uscita). Restituisce (trade, valuta). Il 'Report sul Conto Trading', che mostra solo saldo e posizioni
+    aperte, non contiene operazioni chiuse: in quel caso errore con la spiegazione."""
+    import io
+    import openpyxl
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=True)
+    cur, rows_out = None, []
+    open_only = False
+    for ws in wb:
+        rows = [list(r) for r in ws.iter_rows(values_only=True)]
+        for r in rows:
+            txt = " ".join(str(c) for c in r if c is not None)
+            m = re.search(r"\((\w{3}),", txt)
+            if m and cur is None and re.match(r"^\s*(Conto|Account)", txt, re.I):
+                cur = m[1]
+        for i, r in enumerate(rows):
+            names = [str(c).strip().lower() if c is not None else "" for c in r]
+            if "profitto" not in names and "profit" not in names:
+                continue
+            if "prezzo di mercato" in names or "market price" in names:
+                open_only = True                                   # tabella delle posizioni aperte: nessuna chiusura
+                continue
+            pi = names.index("profitto") if "profitto" in names else names.index("profit")
+            si = names.index("swap") if "swap" in names else None
+            ci = next((k for k, n in enumerate(names) if n.startswith(("commissione", "commission"))), None)
+            sym = next((k for k, n in enumerate(names) if n in ("simbolo", "symbol")), None)
+            times = [k for k, n in enumerate(names) if n in ("ora", "time", "orario")]
+            direz = next((k for k, n in enumerate(names) if n in ("direzione", "direction")), None)
+            if not times:
+                continue
+            tcol = times[-1]                                       # posizioni: l'ultima colonna Ora è la chiusura; deal: l'unica
+            for r2 in rows[i + 1:]:
+                if all(c is None for c in r2):
+                    break
+                if direz is not None and str(r2[direz]).strip().lower() not in ("out", "in/out", "out by"):
+                    continue
+                t = to_time(r2[tcol])
+                pr = to_num(r2[pi])
+                if pd.isna(t) or pd.isna(pr):
+                    continue
+                rows_out.append({"time": t, "simbolo": r2[sym] if sym is not None else "", "profit": pr,
+                                 "commission": (to_num(r2[ci]) if ci is not None else 0.0) or 0.0, "swap": (to_num(r2[si]) if si is not None else 0.0) or 0.0})
+    if not rows_out:
+        if open_only:
+            raise ValueError("Questo file è il «Report sul Conto Trading» di MT5: mostra saldo e posizioni APERTE, non le operazioni chiuse. "
+                             "In MT5 apri la scheda «Cronologia» (Ctrl+T), imposta il periodo, tasto destro → Report → «Report Excel (xlsx)» o «CSV» e carica quello.")
+        raise ValueError("Non trovo operazioni chiuse nel file: servono le colonne Ora, Profitto (e Swap/Commissione). Esporta il Report dalla scheda Cronologia di MT5.")
+    return pd.DataFrame(rows_out), cur
 
 
 def aggregate(d: pd.DataFrame, freq: str = "W") -> pd.DataFrame:

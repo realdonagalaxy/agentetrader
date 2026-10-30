@@ -111,10 +111,10 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
     <div class="body" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end">
       <label>Fonte<select id="rsrc"></select></label>
       <label>Dal giorno<input type="text" id="rfrom" placeholder="AAAA-MM-GG"></label>
-      <label id="rfilel" hidden>File CSV<input type="file" id="rfile" accept=".csv,.txt,.tsv"></label>
+      <label id="rfilel" hidden>File CSV o Excel<input type="file" id="rfile" accept=".csv,.txt,.tsv,.xlsx"></label>
       <div class="actions" style="justify-content:flex-start"><button class="btn" id="rload">Carica</button></div>
     </div>
-    <div class="sub" style="padding:0 20px 14px">Da MT5 si legge la cronologia delle operazioni chiuse del conto (orario del server del broker). Dal CSV servono almeno le colonne tempo di chiusura e profitto; commissioni e swap, se presenti, vengono sommati.</div>
+    <div class="sub" style="padding:0 20px 14px">Da MT5 si legge la cronologia delle operazioni chiuse del conto (orario del server del broker). Dal file (CSV o Excel) usa il «Report» della scheda Cronologia di MT5, non il «Report sul Conto Trading»: servono le operazioni chiuse, con le colonne tempo di chiusura e profitto; commissioni e swap, se presenti, vengono sommati.</div>
   </div>
   <div id="rout" hidden style="display:grid;gap:16px">
     <div class="kpis" id="rkpis"></div>
@@ -288,7 +288,7 @@ let R = null, rview = "weeks";
 const fmtN = (v, cur) => cur ? money(v, cur) : new Intl.NumberFormat("it-IT", {minimumFractionDigits: 2, maximumFractionDigits: 2}).format(v);
 const fmtP = (d, w) => { const x = new Date(d + "T00:00:00"); return w ? x.toLocaleDateString("it-IT", {day: "2-digit", month: "short", year: "numeric"}) : x.toLocaleDateString("it-IT", {month: "long", year: "numeric"}); };
 function fillSources() {
-  $("rsrc").innerHTML = accounts.map(a => `<option value="${a.id}">Conto MT5: ${esc(a.name)}</option>`).join("") + `<option value="csv">File CSV…</option>`;
+  $("rsrc").innerHTML = accounts.map(a => `<option value="${a.id}">Conto MT5: ${esc(a.name)}</option>`).join("") + `<option value="csv">File CSV / Excel…</option>`;
   if (!$("rfrom").value) $("rfrom").value = new Date().getFullYear() + "-01-01";
   $("rfilel").hidden = $("rsrc").value !== "csv";
 }
