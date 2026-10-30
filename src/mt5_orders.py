@@ -169,9 +169,9 @@ def main(dry: bool) -> None:
         except Exception as e:
             print("Controllo chiusure:", e, flush=True)
         try:
-            ups = bot._call("getUpdates", offset=offset, timeout=25)
+            ups = bot._call("getUpdates", offset=offset, timeout=8)
         except Exception as e:
-            print("Telegram:", e, flush=True)
+            print("Telegram:", type(e).__name__, str(e)[:200], flush=True)
             time.sleep(5)
             continue
         for u in ups:
