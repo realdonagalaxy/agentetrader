@@ -61,6 +61,20 @@ def check_levels(sig: dict, bid: float, ask: float) -> None:
         raise ValueError(f"il prezzo ({px}) dista più di {MAX_SLIP_PRICE:g} dall'Entry del messaggio ({sig['entry']}): non apro")
 
 
+def relative_levels() -> bool:
+    """Default: SL e TP si applicano come DISTANZE dall'Entry del messaggio al prezzo del TUO broker (il canale quota un altro broker, es. Vantage: i prezzi assoluti differiscono).
+    SIGNAL_LEVELS=absolute in config.env torna ai prezzi scritti nel messaggio."""
+    return os.environ.get("SIGNAL_LEVELS", "relative").lower() != "absolute"
+
+
+def check_message(sig: dict) -> None:
+    """Coerenza interna del messaggio (nelle coordinate del canale): BUY SL < Entry < TP1, SELL TP1 < Entry < SL."""
+    if sig["side"] == "buy" and not sig["sl"] < sig["entry"] < sig["tp1"]:
+        raise ValueError(f"BUY: nel messaggio servono SL < Entry < TP1 (SL {sig['sl']}, Entry {sig['entry']}, TP1 {sig['tp1']})")
+    if sig["side"] == "sell" and not sig["tp1"] < sig["entry"] < sig["sl"]:
+        raise ValueError(f"SELL: nel messaggio servono TP1 < Entry < SL (TP1 {sig['tp1']}, Entry {sig['entry']}, SL {sig['sl']})")
+
+
 def broker_symbol(sym: str) -> str:
     return os.environ.get("MT5_SYMBOL", sym) if sym == "XAUUSD" else sym
 
@@ -85,14 +99,23 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS) -> tuple[str,
     if len(mine) >= MAX_POSITIONS:
         raise ValueError(f"già {len(mine)} posizioni aperte da questo programma (massimo {MAX_POSITIONS})")
     tick = mt5.symbol_info_tick(sym)
-    check_levels(sig, tick.bid, tick.ask)
     buy = sig["side"] == "buy"
     px = tick.ask if buy else tick.bid
     d = info.digits
+    if relative_levels():
+        check_message(sig)
+        sl_d, tp_d = abs(sig["entry"] - sig["sl"]), abs(sig["tp1"] - sig["entry"])
+        sl, tp = (px - sl_d, px + tp_d) if buy else (px + sl_d, px - tp_d)
+        scarto = px - sig["entry"]
+    else:
+        check_levels(sig, tick.bid, tick.ask)
+        sl, tp, scarto = sig["sl"], sig["tp1"], 0.0
     req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": lots, "type": mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL,
-           "price": px, "sl": round(sig["sl"], d), "tp": round(sig["tp1"], d), "deviation": DEVIATION, "magic": MAGIC,
+           "price": px, "sl": round(sl, d), "tp": round(tp, d), "deviation": DEVIATION, "magic": MAGIC,
            "comment": "tg-signal", "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling(mt5, info)}
-    summary = f"{sig['side'].upper()} {sym} {lots} lotti a mercato ~{px} · SL {req['sl']} · TP1 {req['tp']}"
+    summary = f"{sig['side'].upper()} {sym} {lots} lotti a mercato ~{px} · SL {req['sl']} ({abs(px - req['sl']):.2f} $) · TP1 {req['tp']} ({abs(req['tp'] - px):.2f} $)"
+    if relative_levels():
+        summary += f" · scarto del tuo broker dal canale {scarto:+.2f}"
     if dry:
         return f"[PROVA, nessun ordine inviato] {summary}", None
     res = mt5.order_send(req)
