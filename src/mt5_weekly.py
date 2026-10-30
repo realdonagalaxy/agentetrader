@@ -34,9 +34,12 @@ def from_mt5(start: str, end: str | None, login: int | None, server: str | None)
     return d.rename(columns={"symbol": "simbolo"})[["time", "simbolo", "profit", "commission", "swap"]]
 
 
-def from_csv(path: str) -> pd.DataFrame:
-    sep = ";" if open(path, encoding="utf-8-sig").readline().count(";") > open(path, encoding="utf-8-sig").readline().count(",") else ","
-    d = pd.read_csv(path, sep=sep, encoding="utf-8-sig", decimal="," if sep == ";" else ".")
+def from_csv(path: str, text: str | None = None) -> pd.DataFrame:
+    import io
+    text = text if text is not None else read_text(Path(path).read_bytes())
+    first = text.splitlines()[0] if text.strip() else ""
+    sep = "\t" if first.count("\t") > max(first.count(";"), first.count(",")) else ";" if first.count(";") > first.count(",") else ","
+    d = pd.read_csv(io.StringIO(text), sep=sep, decimal="," if sep == ";" else ".", thousands=" " if sep != "," else None)
     low = {c: c.lower().strip() for c in d.columns}
     def col(*names):
         for c, l in low.items():
@@ -53,6 +56,28 @@ def from_csv(path: str) -> pd.DataFrame:
         out[name] = pd.to_numeric(d[c], errors="coerce").fillna(0.0) if c else 0.0
     out["simbolo"] = d[col("symbol", "simbolo")] if col("symbol", "simbolo") else ""
     return out.dropna(subset=["time", "profit"])
+
+
+def aggregate(d: pd.DataFrame, freq: str = "W") -> pd.DataFrame:
+    """Profitto per periodo ('W' settimana ISO lun-dom, 'M' mese) in base all'orario di chiusura. Netto = profitto + commissioni + swap."""
+    d = d.copy()
+    d["netto"] = d.profit + d.commission + d.swap
+    per = d.time.dt.to_period("W-SUN" if freq == "W" else "M")
+    d["inizio"] = per.dt.start_time.dt.date
+    g = d.groupby("inizio").agg(trade=("netto", "size"), vinti=("netto", lambda x: int((x > 0).sum())), persi=("netto", lambda x: int((x < 0).sum())),
+                                profitto=("netto", lambda x: x[x > 0].sum()), perdita=("netto", lambda x: x[x < 0].sum()), netto=("netto", "sum"))
+    g["cumulato"] = g.netto.cumsum()
+    return g.round(2)
+
+
+def read_text(raw: bytes) -> str:
+    """Esportazioni MT5 spesso in UTF-16 o Windows-1252: prova le codifiche comuni."""
+    for enc in ("utf-8-sig", "utf-16", "cp1252"):
+        try:
+            return raw.decode(enc)
+        except UnicodeError:
+            continue
+    return raw.decode("latin-1")
 
 
 def weekly(d: pd.DataFrame) -> pd.DataFrame:

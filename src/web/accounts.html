@@ -62,6 +62,9 @@ tr.det table{min-width:640px;background:var(--surface);border:1px solid var(--li
 .b-err{background:var(--loss-bg);color:var(--loss)}
 .b-off{background:var(--flat-bg);color:var(--flat)}
 .b-sig{background:var(--gain-bg);color:var(--gain)}
+svg text{font:11px var(--mono);fill:var(--ink3)}
+select{width:100%;border:1px solid var(--line);border-radius:5px;background:var(--bg);color:var(--ink);padding:8px 10px;font:inherit}
+input[type=file]{font-size:12px}
 .empty{padding:36px 16px;text-align:center;color:var(--ink3)}
 .actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
 .err{color:var(--loss);font-size:12px;max-width:340px;overflow-wrap:anywhere}
@@ -85,7 +88,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
 <div class="wrap">
 <header class="top">
   <div><h1>Conti MetaTrader 5</h1><div class="hsub" id="upd">Monitoraggio e gestione dei conti</div></div>
-  <nav role="tablist"><button role="tab" aria-selected="true" data-tab="conti">Conti</button><button role="tab" aria-selected="false" data-tab="att">Attività</button></nav>
+  <nav role="tablist"><button role="tab" aria-selected="true" data-tab="conti">Conti</button><button role="tab" aria-selected="false" data-tab="ris">Risultati</button><button role="tab" aria-selected="false" data-tab="att">Attività</button></nav>
   <button class="btn sec" id="refresh" style="color:#fff;border-color:rgba(255,255,255,.3)">Aggiorna</button>
   <button class="btn sec" id="imp" style="color:#fff;border-color:rgba(255,255,255,.3)" title="Aggiunge il conto a cui il terminale MT5 aperto è collegato adesso">Importa da MT5</button>
   <button class="btn" id="add" style="background:#fff;color:#14233a">+ Nuovo conto</button>
@@ -101,6 +104,24 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
       <thead><tr><th>Conto</th><th>Tipo</th><th>Stato</th><th class="r">Saldo</th><th class="r">Equity</th><th class="r">P&amp;L aperto</th><th class="r">Pos.</th><th>Segnali</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table></div>
+  </div>
+</div>
+<div id="tab-ris" hidden style="display:grid;gap:16px">
+  <div class="panel"><h2>Profitto per settimana e mese</h2>
+    <div class="body" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end">
+      <label>Fonte<select id="rsrc"></select></label>
+      <label>Dal giorno<input type="text" id="rfrom" placeholder="AAAA-MM-GG"></label>
+      <label id="rfilel" hidden>File CSV<input type="file" id="rfile" accept=".csv,.txt,.tsv"></label>
+      <div class="actions" style="justify-content:flex-start"><button class="btn" id="rload">Carica</button></div>
+    </div>
+    <div class="sub" style="padding:0 20px 14px">Da MT5 si legge la cronologia delle operazioni chiuse del conto (orario del server del broker). Dal CSV servono almeno le colonne tempo di chiusura e profitto; commissioni e swap, se presenti, vengono sommati.</div>
+  </div>
+  <div id="rout" hidden style="display:grid;gap:16px">
+    <div class="kpis" id="rkpis"></div>
+    <div class="panel"><h2>Periodo <span style="margin-left:auto;display:flex;gap:4px"><button class="btn sm" id="vw">Settimane</button><button class="btn sm sec" id="vm">Mesi</button></span></h2>
+      <div style="padding:16px"><svg id="rchart" role="img" aria-label="Profitto netto per periodo" viewBox="0 0 900 260" preserveAspectRatio="xMidYMid meet"></svg></div>
+      <div class="tw"><table style="min-width:640px"><thead><tr><th id="rph">Settimana dal</th><th class="r">Trade</th><th class="r">Vinti</th><th class="r">Persi</th><th class="r">Profitto</th><th class="r">Perdita</th><th class="r">Netto</th><th class="r">Cumulato</th></tr></thead><tbody id="rrows"></tbody></table></div>
+    </div>
   </div>
 </div>
 <div id="tab-att" hidden>
@@ -263,9 +284,56 @@ $("f").addEventListener("submit", async e => {
   catch (er) { $("tmsg").className = "msg loss"; $("tmsg").textContent = er.message; }
   $("save").disabled = false;
 });
+let R = null, rview = "weeks";
+const fmtN = (v, cur) => cur ? money(v, cur) : new Intl.NumberFormat("it-IT", {minimumFractionDigits: 2, maximumFractionDigits: 2}).format(v);
+const fmtP = (d, w) => { const x = new Date(d + "T00:00:00"); return w ? x.toLocaleDateString("it-IT", {day: "2-digit", month: "short", year: "numeric"}) : x.toLocaleDateString("it-IT", {month: "long", year: "numeric"}); };
+function fillSources() {
+  $("rsrc").innerHTML = accounts.map(a => `<option value="${a.id}">Conto MT5: ${esc(a.name)}</option>`).join("") + `<option value="csv">File CSV…</option>`;
+  if (!$("rfrom").value) $("rfrom").value = new Date().getFullYear() + "-01-01";
+  $("rfilel").hidden = $("rsrc").value !== "csv";
+}
+$("rsrc").onchange = () => $("rfilel").hidden = $("rsrc").value !== "csv";
+$("rload").onclick = async () => {
+  $("rload").disabled = true;
+  try {
+    if ($("rsrc").value === "csv") {
+      const f = $("rfile").files[0]; if (!f) throw new Error("Scegli un file CSV.");
+      const r = await fetch("/api/results/csv", {method: "POST", headers: {"X-Requested-With": "accounts"}, body: await f.arrayBuffer()});
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || "Errore");
+      R = j;
+    } else R = await api(`/api/results?account=${$("rsrc").value}&from=${encodeURIComponent($("rfrom").value)}`);
+    drawResults();
+  } catch (e) { toast(e.message, 7000); }
+  $("rload").disabled = false;
+};
+$("vw").onclick = () => { rview = "weeks"; drawResults(); }; $("vm").onclick = () => { rview = "months"; drawResults(); };
+function drawResults() {
+  $("rout").hidden = false; const c = R.currency, t = R.total, rows = R[rview], w = rview === "weeks";
+  $("vw").className = "btn sm" + (w ? "" : " sec"); $("vm").className = "btn sm" + (w ? " sec" : "");
+  $("rph").textContent = w ? "Settimana dal" : "Mese";
+  const pos = rows.filter(r => r.netto > 0).length;
+  $("rkpis").innerHTML = `<div class="kpi"><div class="l">Netto totale</div><div class="v ${cls(t.netto)}">${fmtN(t.netto, c)}</div><div class="s">${R.source}</div></div>
+    <div class="kpi"><div class="l">Trade chiusi</div><div class="v">${t.trade}</div><div class="s">${t.vinti} vinti · ${t.persi ?? 0} persi</div></div>
+    <div class="kpi"><div class="l">% vincenti</div><div class="v">${t.trade ? (100 * t.vinti / t.trade).toFixed(0) : 0}%</div></div>
+    <div class="kpi"><div class="l">${w ? "Settimane" : "Mesi"} in positivo</div><div class="v">${pos}/${rows.length}</div></div>`;
+  $("rrows").innerHTML = rows.length ? [...rows].reverse().map(r => `<tr><td>${fmtP(r.inizio, w)}</td><td class="r num">${r.trade}</td><td class="r num">${r.vinti}</td><td class="r num">${r.persi}</td>
+    <td class="r num gain">${fmtN(r.profitto, c)}</td><td class="r num loss">${fmtN(r.perdita, c)}</td><td class="r num ${cls(r.netto)}"><b>${fmtN(r.netto, c)}</b></td><td class="r num ${cls(r.cumulato)}">${fmtN(r.cumulato, c)}</td></tr>`).join("") : `<tr><td colspan="8" class="empty">Nessuna operazione chiusa nel periodo.</td></tr>`;
+  const W = 900, Hh = 260, L = 70, B = 30, T = 14, n = rows.length;
+  if (!n) { $("rchart").innerHTML = ""; return; }
+  const mx = Math.max(...rows.map(r => r.netto), 0), mn = Math.min(...rows.map(r => r.netto), 0), span = (mx - mn) || 1, y = v => T + (Hh - T - B) * (mx - v) / span;
+  const bw = Math.min(40, (W - L - 10) / n * 0.7), step = (W - L - 10) / n;
+  let g = `<line x1="${L}" x2="${W - 10}" y1="${y(0)}" y2="${y(0)}" stroke="var(--line)"/>`;
+  [mx, mn].forEach(v => { if (v !== 0) g += `<text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${Math.round(v)}</text>`; });
+  g += `<text x="${L - 8}" y="${y(0) + 4}" text-anchor="end">0</text>`;
+  rows.forEach((r, i) => { const x = L + step * i + (step - bw) / 2, y0 = y(0), y1 = y(r.netto), top = Math.min(y0, y1), h = Math.max(1, Math.abs(y1 - y0));
+    g += `<rect x="${x}" y="${top}" width="${bw}" height="${h}" rx="2" fill="${r.netto >= 0 ? "var(--gain)" : "var(--loss)"}"><title>${fmtP(r.inizio, w)}: ${fmtN(r.netto, c)}</title></rect>`;
+    if (n <= 26 || i % Math.ceil(n / 26) === 0) g += `<text x="${x + bw / 2}" y="${Hh - 10}" text-anchor="middle">${w ? r.inizio.slice(5).split("-").reverse().join("/") : r.inizio.slice(0, 7)}</text>`; });
+  $("rchart").innerHTML = g;
+}
 document.querySelectorAll("nav button").forEach(b => b.onclick = async () => {
   document.querySelectorAll("nav button").forEach(x => x.setAttribute("aria-selected", x === b));
-  $("tab-conti").hidden = b.dataset.tab !== "conti"; $("tab-att").hidden = b.dataset.tab !== "att";
+  $("tab-conti").hidden = b.dataset.tab !== "conti"; $("tab-att").hidden = b.dataset.tab !== "att"; $("tab-ris").hidden = b.dataset.tab !== "ris";
+  if (b.dataset.tab === "ris") fillSources();
   if (b.dataset.tab === "att") { const j = await api("/api/activity"); $("act").innerHTML = j.rows.length ? j.rows.map(r => `<tr><td class="num" style="white-space:nowrap">${esc((r.quando_utc || "").replace("T", " "))}</td><td>${esc(r.messaggio)}</td><td>${esc(r.esito)}</td></tr>`).join("") : `<tr><td colspan="3" class="empty">Nessuna operazione registrata.</td></tr>`; }
 });
 refresh(); setInterval(() => { if (!document.querySelector("dialog[open]") && !document.hidden) refresh(); }, 20000);

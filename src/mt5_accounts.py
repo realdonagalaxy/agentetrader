@@ -332,3 +332,26 @@ if __name__ == "__main__":
             print("Aggiunto:", import_connected())
         except ValueError as e:
             sys.exit(str(e))
+
+
+def history(acc: dict, start: str):
+    """Trade CHIUSI del conto dal giorno `start` (YYYY-MM-DD): una riga per posizione con profitto, commissioni e swap sommati su tutti i suoi deal.
+    L'orario è quello del server del broker (come la settimana/mese mostrati da MT5). Restituisce (DataFrame, valuta)."""
+    import pandas as pd
+    from datetime import datetime, timedelta
+    t0 = datetime.strptime(start, "%Y-%m-%d")
+    t1 = datetime.now() + timedelta(days=2)
+    with session(acc) as mt5:
+        cur = mt5.account_info().currency
+        deals = mt5.history_deals_get(t0, t1)
+        if not deals:
+            return pd.DataFrame(columns=["time", "simbolo", "profit", "commission", "swap"]), cur
+        d = pd.DataFrame([x._asdict() for x in deals])
+        d = d[d["type"].isin([0, 1])]                                      # solo operazioni di mercato (esclude depositi, prelievi, bonus)
+        d["fee"] = d["fee"] if "fee" in d else 0.0
+        d["commission"] = d["commission"] + d["fee"]
+        out = d[d["entry"].isin([1, 2, 3])]                                # deal di chiusura: danno l'orario
+        agg = d.groupby("position_id").agg(profit=("profit", "sum"), commission=("commission", "sum"), swap=("swap", "sum"), simbolo=("symbol", "first"))
+        t = out.groupby("position_id")["time"].max()
+        r = agg.loc[t.index].assign(time=pd.to_datetime(t, unit="s"))
+        return r.reset_index(drop=True)[["time", "simbolo", "profit", "commission", "swap"]], cur

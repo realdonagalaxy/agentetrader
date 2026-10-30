@@ -16,7 +16,8 @@ import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from datetime import datetime
+from urllib.parse import parse_qs, urlparse
 
 from src import mt5_accounts as ma
 
@@ -35,6 +36,19 @@ def activity(n: int = 60) -> list[dict]:
     with p.open(encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
     return rows[-n:][::-1]
+
+
+def results(df, currency: str | None, source: str) -> dict:
+    """Riepilogo per settimana e per mese di un elenco di trade chiusi (time, profit, commission, swap)."""
+    from src.mt5_weekly import aggregate
+    if df.empty:
+        return {"source": source, "currency": currency, "weeks": [], "months": [], "total": {"trade": 0, "netto": 0, "vinti": 0}}
+    def rows(g):
+        return [{"inizio": str(i), **{k: (int(v) if k in ("trade", "vinti", "persi") else float(v)) for k, v in r.items()}} for i, r in g.iterrows()]
+    w, m = aggregate(df, "W"), aggregate(df, "M")
+    return {"source": source, "currency": currency, "weeks": rows(w), "months": rows(m),
+            "total": {"trade": int(w.trade.sum()), "vinti": int(w.vinti.sum()), "persi": int(w.persi.sum()), "netto": round(float(w.netto.sum()), 2),
+                      "profitto": round(float(w.profitto.sum()), 2), "perdita": round(float(w.perdita.sum()), 2)}}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -76,6 +90,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"accounts": ma.list_accounts(), "simulator": os.environ.get("MT5_SIMULATOR") == "1"})
             if path == "/api/activity":
                 return self._json({"rows": activity()})
+            if path == "/api/results":
+                q = parse_qs(urlparse(self.path).query)
+                start = (q.get("from") or [f"{datetime.now().year}-01-01"])[0]
+                df, cur = ma.history(ma.get_account(int((q.get("account") or ["0"])[0])), start)
+                return self._json(results(df, cur, "MT5"))
             m = re.fullmatch(r"/api/accounts/(\d+)/status", path)
             if m:
                 return self._json(ma.snapshot(ma.get_account(int(m[1]))))
@@ -90,6 +109,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/accounts" and method == "POST":
                 return self._json({"id": ma.save_account(self._data())}, 201)
+            if path == "/api/results/csv" and method == "POST":
+                from src.mt5_weekly import from_csv, read_text
+                n = int(self.headers.get("Content-Length") or 0)
+                if n > 10_000_000:
+                    raise ValueError("file troppo grande")
+                return self._json(results(from_csv("", read_text(self.rfile.read(n))), None, "CSV"))
             if path == "/api/import-current" and method == "POST":
                 return self._json(ma.import_connected(str(self._data().get("terminal_path") or "")), 201)
             if path == "/api/test" and method == "POST":

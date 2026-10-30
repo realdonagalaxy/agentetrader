@@ -97,6 +97,19 @@ def positions_get(**kw):
 
 
 def history_deals_get(*a, position=None, **kw):
+    if a:                                                              # intervallo di date: trade di esempio generati
+        import random
+        rnd = random.Random(_state["login"] or 1)
+        out, now = [], int(time.time())
+        for i in range(70):
+            tc = now - int(rnd.random() * 120 * 86400)
+            pl = round(rnd.gauss(4, 28), 2)
+            pid = 7000000 + i
+            out.append(N(ticket=pid * 2, position_id=pid, time=tc - 3000, type=rnd.randint(0, 1), entry=DEAL_ENTRY_IN, profit=0.0, commission=-0.35, swap=0.0, fee=0.0, symbol="GOLD", _asdict=lambda: {}))
+            out.append(N(ticket=pid * 2 + 1, position_id=pid, time=tc, type=rnd.randint(0, 1), entry=DEAL_ENTRY_OUT, profit=pl, commission=-0.35, swap=round(-rnd.random(), 2), fee=0.0, symbol="GOLD", _asdict=lambda: {}))
+        for x in out:
+            x._asdict = (lambda y=x: {k: v for k, v in vars(y).items() if k != "_asdict"})
+        return tuple(x for x in out if x.time >= a[0].timestamp())
     return tuple(_state["deals"].get(position, ()))
 
 
