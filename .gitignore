@@ -12,3 +12,4 @@ data/*.pkl
 journal/journal.db
 journal/images/
 journal/ordini_mt5.csv
+journal/ordini_aperti.json
