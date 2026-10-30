@@ -90,6 +90,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/accounts" and method == "POST":
                 return self._json({"id": ma.save_account(self._data())}, 201)
+            if path == "/api/import-current" and method == "POST":
+                return self._json(ma.import_connected(str(self._data().get("terminal_path") or "")), 201)
             if path == "/api/test" and method == "POST":
                 return self._json(ma.test_connection(self._data()))
             m = re.fullmatch(r"/api/accounts/(\d+)", path)

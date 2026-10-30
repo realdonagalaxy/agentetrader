@@ -87,6 +87,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
   <div><h1>Conti MetaTrader 5</h1><div class="hsub" id="upd">Monitoraggio e gestione dei conti</div></div>
   <nav role="tablist"><button role="tab" aria-selected="true" data-tab="conti">Conti</button><button role="tab" aria-selected="false" data-tab="att">Attività</button></nav>
   <button class="btn sec" id="refresh" style="color:#fff;border-color:rgba(255,255,255,.3)">Aggiorna</button>
+  <button class="btn sec" id="imp" style="color:#fff;border-color:rgba(255,255,255,.3)" title="Aggiunge il conto a cui il terminale MT5 aperto è collegato adesso">Importa da MT5</button>
   <button class="btn" id="add" style="background:#fff;color:#14233a">+ Nuovo conto</button>
 </header>
 <main>
@@ -243,6 +244,12 @@ const form = () => ({name: $("name").value, login: $("login").value, server: $("
 $("add").onclick = () => edit(null);
 $("cancel").onclick = () => $("dlg").close();
 $("refresh").onclick = refresh;
+$("imp").onclick = async () => {
+  $("imp").disabled = true;
+  try { const r = await api("/api/import-current", "POST", {}); toast(`Aggiunto: ${r.name}${r.demo ? "" : " (conto REALE: solo lettura, non usato per i segnali)"}`, 6000); await refresh(); }
+  catch (e) { toast(e.message, 7000); }
+  $("imp").disabled = false;
+};
 $("test").onclick = async () => {
   const m = $("tmsg"); m.className = "msg"; m.textContent = "Collegamento in corso…"; $("test").disabled = true;
   try { const r = await api("/api/test", "POST", form()); m.className = "msg " + (r.connected ? "gain" : "loss");

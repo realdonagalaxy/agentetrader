@@ -294,3 +294,41 @@ def close_positions(acc: dict, tickets: list[int] | None = None) -> list[str]:
         if not pos:
             raise ValueError("nessuna posizione da chiudere (forse è già chiusa)")
         return [_close(mt5, p) for p in pos]
+
+
+def import_connected(terminal_path: str = "") -> dict:
+    """Legge il conto a cui il terminale MT5 (già aperto e collegato) è connesso e lo aggiunge all'archivio, senza password.
+    Conto demo: usato per i segnali con 0,05 lotti. Conto reale: aggiunto in sola lettura, NON usato per i segnali."""
+    with _thread_lock, _file_lock():
+        mt5 = _mt5()
+        kw = {"path": terminal_path} if terminal_path else {}
+        if os.environ.get("MT5_SIMULATOR") == "1":
+            kw["login"] = 51234567
+        if not mt5.initialize(**kw):
+            raise ValueError(f"MT5 non si collega: {mt5.last_error()}. Apri il terminale e accedi al conto.")
+        try:
+            i = mt5.account_info()
+            if i is None:
+                raise ValueError("Il terminale non è collegato a nessun conto.")
+            demo = i.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO
+            login, server = int(i.login), str(i.server)
+            name = f"{(i.company or server).split(',')[0][:30]} {'demo' if demo else 'reale'} {login}"
+        finally:
+            mt5.shutdown()
+    con = db()
+    dup = con.execute("SELECT id FROM accounts WHERE login=? AND server=?", (login, server)).fetchone()
+    con.close()
+    if dup:
+        raise ValueError(f"Il conto {login} ({server}) è già nell'elenco.")
+    aid = save_account({"name": name, "login": login, "server": server, "terminal_path": terminal_path, "lots": 0.05, "enabled": True, "use_signals": demo,
+                        "note": "importato dal terminale MT5"})
+    return {"id": aid, "name": name, "login": login, "server": server, "demo": demo}
+
+
+if __name__ == "__main__":
+    import sys
+    if "--import-current" in sys.argv:
+        try:
+            print("Aggiunto:", import_connected())
+        except ValueError as e:
+            sys.exit(str(e))
