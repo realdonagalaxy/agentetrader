@@ -124,7 +124,7 @@ def check_closed(mt5, pending: dict, bot) -> None:
         if d.reason == mt5.DEAL_REASON_TP:
             n = pips(t["symbol"], d.price, t["open"])
             msg = f"✅ TP HIT\n{t['side'].upper()} {t['symbol']} · {n:.0f} pips · profitto {d.profit:+.2f}"
-            bot._call("sendMessage", chat_id=bot.chat_id, text=msg, reply_to_message_id=t["msg_id"])
+            say(bot, msg, t["msg_id"])
         log([datetime.now(timezone.utc).isoformat(timespec="seconds"), f"chiusura posizione {t['position']}", f"motivo {d.reason} prezzo {d.price} profitto {d.profit}"])
         save_pending(pending)
 
@@ -139,6 +139,15 @@ def load_pending() -> dict:
         return json.loads(PENDING.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
+
+
+def say(bot, text: str, reply_to: int | None = None) -> None:
+    """Risposta in testo semplice (i '<' dei messaggi di rifiuto rompono il formato HTML); un errore di invio non ferma il programma."""
+    kw = {"reply_to_message_id": reply_to} if reply_to else {}
+    try:
+        bot._call("sendMessage", chat_id=bot.chat_id, text=text, **kw)
+    except Exception as e:
+        print("Invio Telegram fallito:", str(e)[:200], flush=True)
 
 
 def log(row: list) -> None:
@@ -162,7 +171,7 @@ def main(dry: bool) -> None:
     offset = last[-1]["update_id"] + 1 if last else 0
     pending = load_pending()
     print(f"In ascolto su Telegram ({'PROVA' if dry else 'ordini su DEMO'}, lotto {LOTS}). Ctrl+C per fermare.", flush=True)
-    bot.send(f"🟢 Pronto: invia il segnale ({'solo prova' if dry else 'apro su conto demo'}, {LOTS} lotti, solo TP1).")
+    say(bot, f"🟢 Pronto: invia il segnale ({'solo prova' if dry else 'apro su conto demo'}, {LOTS} lotti, solo TP1).")
     while True:
         try:
             check_closed(mt5, pending, bot)
@@ -183,7 +192,7 @@ def main(dry: bool) -> None:
                 print(f"Ignorato: chat {cid} (attesa {allowed}), contiene BUY/SELL: {bool(re.search(r'BUY|SELL', text, re.I))}, tipo: {[k for k in u if k != 'update_id']}", flush=True)
                 continue
             if time.time() - m.get("date", 0) > MAX_AGE_S:
-                bot.send("⚠️ Messaggio troppo vecchio (> 2 minuti): ignorato.")
+                say(bot, "⚠️ Messaggio troppo vecchio (> 2 minuti): ignorato.")
                 continue
             try:
                 out, trk = execute(mt5, parse_signal(text), dry)
@@ -196,7 +205,7 @@ def main(dry: bool) -> None:
                 out = f"⛔ Errore: {e}"
             print(out, flush=True)
             log([datetime.now(timezone.utc).isoformat(timespec="seconds"), text.replace("\n", " | "), out])
-            bot.send(out)
+            say(bot, out)
 
 
 if __name__ == "__main__":
