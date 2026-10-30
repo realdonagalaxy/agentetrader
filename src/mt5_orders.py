@@ -11,7 +11,7 @@ Regole: lotto fisso LOTS (0.05); ordine A MERCATO (l'Entry del messaggio serve s
 SL e TP1 impostati sull'ordine; TP2/TP3 ignorati. Il simbolo XAUUSD viene tradotto in MT5_SYMBOL (es. GOLD).
 Sicurezze: accetta messaggi solo dalla chat TELEGRAM_CHAT_ID; ignora i messaggi arrivati prima dell'avvio e quelli più vecchi di MAX_AGE_S;
 rifiuta se il conto NON è demo (non c'è modo di forzare: il live richiede una modifica esplicita del codice, da concordare), se manca SL/TP1, se SL/TP sono dal lato sbagliato,
-se ci sono già MAX_POSITIONS posizioni aperte con il magic number di questo programma, o se il prezzo è lontano dall'Entry. Quando una posizione aperta da qui si chiude a TP, risponde al messaggio del segnale con '✅ TP HIT' e i pips (oro: 1 pip = 0,10). Ogni esito viene risposto su Telegram e registrato in journal/ordini_mt5.csv.
+se ci sono già MAX_POSITIONS posizioni aperte con il magic number di questo programma, o se il prezzo è lontano dall'Entry. Quando una posizione aperta da qui si chiude a TP, risponde al messaggio del segnale con '✅ TP HIT' (o '❌ SL HIT' se chiusa a stop) e i pips (oro: 1 pip = 0,10). Ogni esito viene risposto su Telegram e registrato in journal/ordini_mt5.csv.
 Parametri MIEI da confermare: MAX_SLIP_PRICE=3.0, MAX_POSITIONS=3, MAX_AGE_S=120, deviazione 20 punti.
 Uso: python -m src.mt5_orders            (ascolta Telegram e apre gli ordini)
      python -m src.mt5_orders --dry      (legge e valida ma non invia ordini)
@@ -113,7 +113,7 @@ def mt5_point(sym: str) -> float:
 
 
 def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
-    """Per ogni posizione seguita già chiusa: se è chiusa a TP risponde al messaggio del segnale con '✅ TP HIT' e i pips; poi la toglie dall'elenco."""
+    """Per ogni posizione seguita già chiusa: se è chiusa a TP risponde al messaggio del segnale con '✅ TP HIT' (o '❌ SL HIT' se chiusa a stop) e i pips; poi la toglie dall'elenco."""
     for key, t in list(pending.items()):
         if only is not None and not only(t):
             continue
@@ -123,10 +123,11 @@ def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
             continue
         d = out[-1]
         del pending[key]
+        n = pips(t["symbol"], d.price, t["open"])
         if d.reason == mt5.DEAL_REASON_TP:
-            n = pips(t["symbol"], d.price, t["open"])
-            msg = f"✅ TP HIT{prefix}\n{t['side'].upper()} {t['symbol']} · {n:.0f} pips · profitto {d.profit:+.2f}"
-            say(bot, msg, t["msg_id"])
+            say(bot, f"✅ TP HIT{prefix}\n{t['side'].upper()} {t['symbol']} · +{n:.0f} pips · profitto {d.profit:+.2f}", t["msg_id"])
+        elif d.reason == mt5.DEAL_REASON_SL:
+            say(bot, f"❌ SL HIT{prefix}\n{t['side'].upper()} {t['symbol']} · -{n:.0f} pips · perdita {d.profit:+.2f}", t["msg_id"])
         log([datetime.now(timezone.utc).isoformat(timespec="seconds"), f"chiusura posizione {t['position']}", f"motivo {d.reason} prezzo {d.price} profitto {d.profit}"])
         save_pending(pending)
 
