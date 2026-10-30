@@ -6,3 +6,4 @@ python-dotenv>=1.0
 ctrader-open-api>=0.9
 matplotlib>=3.7
 MetaTrader5>=5.0.45; platform_system == "Windows"
+keyring>=24.0; platform_system == "Windows"

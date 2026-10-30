@@ -20,5 +20,5 @@ if errorlevel 1 (
 if not exist config.env copy config.env.example config.env
 echo.
 echo Fatto. Ora apri config.env con il Blocco note e compila TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID e MT5_SYMBOL.
-echo Poi prova con:  .venv\Scripts\python -m src.live_loop --symbol XAUUSD --once
+echo Poi: conti MT5 = .venv\Scripts\python -m src.accounts_web   ^|   segnali Telegram = .venv\Scripts\python -m src.mt5_orders
 pause

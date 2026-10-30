@@ -70,7 +70,7 @@ def filling(mt5, info) -> int:
     return mt5.ORDER_FILLING_IOC if m & 2 else mt5.ORDER_FILLING_FOK if m & 1 else mt5.ORDER_FILLING_RETURN
 
 
-def execute(mt5, sig: dict, dry: bool = False) -> tuple[str, dict | None]:
+def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS) -> tuple[str, dict | None]:
     """Valida e (se non dry) invia l'ordine. Restituisce (testo di risposta, dati della posizione da seguire); solleva ValueError se rifiutato."""
     acc = mt5.account_info()
     if acc is None:
@@ -89,10 +89,10 @@ def execute(mt5, sig: dict, dry: bool = False) -> tuple[str, dict | None]:
     buy = sig["side"] == "buy"
     px = tick.ask if buy else tick.bid
     d = info.digits
-    req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": LOTS, "type": mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL,
+    req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": lots, "type": mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL,
            "price": px, "sl": round(sig["sl"], d), "tp": round(sig["tp1"], d), "deviation": DEVIATION, "magic": MAGIC,
            "comment": "tg-signal", "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling(mt5, info)}
-    summary = f"{sig['side'].upper()} {sym} {LOTS} lotti a mercato ~{px} · SL {req['sl']} · TP1 {req['tp']}"
+    summary = f"{sig['side'].upper()} {sym} {lots} lotti a mercato ~{px} · SL {req['sl']} · TP1 {req['tp']}"
     if dry:
         return f"[PROVA, nessun ordine inviato] {summary}", None
     res = mt5.order_send(req)
@@ -112,9 +112,11 @@ def mt5_point(sym: str) -> float:
     return mt5.symbol_info(sym).point
 
 
-def check_closed(mt5, pending: dict, bot) -> None:
+def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
     """Per ogni posizione seguita già chiusa: se è chiusa a TP risponde al messaggio del segnale con '✅ TP HIT' e i pips; poi la toglie dall'elenco."""
     for key, t in list(pending.items()):
+        if only is not None and not only(t):
+            continue
         deals = mt5.history_deals_get(position=t["position"]) or []
         out = [d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT]
         if not out:
@@ -123,7 +125,7 @@ def check_closed(mt5, pending: dict, bot) -> None:
         del pending[key]
         if d.reason == mt5.DEAL_REASON_TP:
             n = pips(t["symbol"], d.price, t["open"])
-            msg = f"✅ TP HIT\n{t['side'].upper()} {t['symbol']} · {n:.0f} pips · profitto {d.profit:+.2f}"
+            msg = f"✅ TP HIT{prefix}\n{t['side'].upper()} {t['symbol']} · {n:.0f} pips · profitto {d.profit:+.2f}"
             say(bot, msg, t["msg_id"])
         log([datetime.now(timezone.utc).isoformat(timespec="seconds"), f"chiusura posizione {t['position']}", f"motivo {d.reason} prezzo {d.price} profitto {d.profit}"])
         save_pending(pending)
@@ -174,21 +176,53 @@ def suggest() -> None:
     print(f"BUY XAUUSD\n\n➡️ Entry: {e}\n\n❌ SL: {e - 10}\n✅ TP1: {e + 3}\n✅ TP2: {e + 6}\n✅ TP3: {e + 9}")
 
 
+def active_accounts() -> list[dict]:
+    """Conti dell'archivio (src.mt5_accounts) abilitati e usati per i segnali; riletti a ogni giro, quindi le modifiche dall'app si applicano subito."""
+    from src import mt5_accounts as ma
+    return [a for a in ma.list_accounts() if a["enabled"] and a["use_signals"]]
+
+
+def follow_closures(pending: dict, bot, legacy) -> None:
+    """Controlla le chiusure a TP: per ogni conto con posizioni seguite si collega a quel conto; le posizioni senza conto (modalità a terminale singolo) usano `legacy`."""
+    from src import mt5_accounts as ma
+    for aid in {t["account"] for t in pending.values() if t.get("account")}:
+        try:
+            acc = ma.get_account(aid)
+        except ValueError:                                           # conto cancellato dall'app: smetto di seguire le sue posizioni
+            for k in [k for k, t in pending.items() if t.get("account") == aid]:
+                del pending[k]
+            save_pending(pending)
+            continue
+        try:
+            with ma.session(acc) as m:
+                check_closed(m, pending, bot, only=lambda t, a=aid: t.get("account") == a, prefix=f" · {acc['name']}")
+        except Exception as e:
+            print(f"Controllo chiusure {acc['name']}:", str(e)[:200], flush=True)
+    if legacy is not None and any(not t.get("account") for t in pending.values()):
+        check_closed(legacy, pending, bot, only=lambda t: not t.get("account"))
+
+
 def main(dry: bool) -> None:
     from dotenv import load_dotenv
     load_dotenv("config.env")
-    from src.mt5_feed import connect
+    from src import mt5_accounts as ma
     from src.telegram_bot import TelegramBot
-    bot, mt5 = TelegramBot(), connect()
+    bot = TelegramBot()
+    legacy = None
     allowed = str(bot.chat_id)
     last = bot._call("getUpdates", offset=-1)                     # scarta ciò che è arrivato prima dell'avvio
     offset = last[-1]["update_id"] + 1 if last else 0
     pending = load_pending()
-    print(f"In ascolto su Telegram ({'PROVA' if dry else 'ordini su DEMO'}, lotto {LOTS}). Ctrl+C per fermare.", flush=True)
-    say(bot, f"🟢 Pronto: invia il segnale ({'solo prova' if dry else 'apro su conto demo'}, {LOTS} lotti, solo TP1).")
+    accs = active_accounts()
+    where = f"{len(accs)} conti dall'app" if accs else f"terminale singolo, lotto {LOTS}"
+    print(f"In ascolto su Telegram ({'PROVA' if dry else 'ordini su DEMO'}; {where}). Ctrl+C per fermare.", flush=True)
+    say(bot, f"🟢 Pronto: invia il segnale ({'solo prova' if dry else 'apro su conti demo'}; {where}; solo TP1).")
     while True:
         try:
-            check_closed(mt5, pending, bot)
+            if legacy is None and any(not t.get("account") for t in pending.values()):
+                from src.mt5_feed import connect
+                legacy = connect()
+            follow_closures(pending, bot, legacy)
         except Exception as e:
             print("Controllo chiusure:", e, flush=True)
         try:
@@ -209,16 +243,36 @@ def main(dry: bool) -> None:
                 say(bot, "⚠️ Messaggio troppo vecchio (> 2 minuti): ignorato.")
                 continue
             try:
-                out, trk = execute(mt5, parse_signal(text), dry)
-                if trk:
-                    pending[str(trk["position"])] = {**trk, "msg_id": m["message_id"]}
-                    save_pending(pending)
+                sig = parse_signal(text)
             except ValueError as e:
-                out = f"⛔ Non apro: {e}"
-            except Exception as e:
-                out = f"⛔ Errore: {e}"
+                lines = [f"⛔ Non apro: {e}"]
+            else:
+                lines = []
+                targets = active_accounts() or [None]
+                for acc in targets:
+                    tag = f"[{acc['name']}] " if acc else ""
+                    try:
+                        if acc:
+                            with ma.session(acc) as mt:
+                                res, trk = execute(mt, sig, dry, acc["lots"])
+                        else:
+                            if legacy is None:
+                                from src.mt5_feed import connect
+                                legacy = connect()
+                            res, trk = execute(legacy, sig, dry)
+                        if trk:
+                            if acc:
+                                trk["account"] = acc["id"]
+                            pending[f"{acc['id'] if acc else 0}:{trk['position']}"] = {**trk, "msg_id": m["message_id"]}
+                            save_pending(pending)
+                    except ValueError as e:
+                        res = f"⛔ Non apro: {e}"
+                    except Exception as e:
+                        res = f"⛔ Errore: {e}"
+                    lines.append(tag + res)
+                    log([datetime.now(timezone.utc).isoformat(timespec="seconds"), (tag + text).replace("\n", " | "), res])
+            out = "\n".join(lines)
             print(out, flush=True)
-            log([datetime.now(timezone.utc).isoformat(timespec="seconds"), text.replace("\n", " | "), out])
             say(bot, out)
 
 

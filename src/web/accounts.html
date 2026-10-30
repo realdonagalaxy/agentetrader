@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Conti MetaTrader 5</title>
+<style>
+/* Layout: barra titolo con schede, riepilogo KPI, tabella dei conti con riga espandibile (posizioni aperte), finestra di modifica. Palette e tipografia come il journal. */
+:root{
+  --bg:#f1f3f6;--surface:#fff;--surface2:#f6f8fa;--ink:#14202e;--ink2:#41505f;--ink3:#667483;--line:#d9dfe6;
+  --accent:#1f3a5f;--accent-ink:#fff;--hdr:#14233a;--hdr-ink:#e9eef5;--hdr-mute:#93a3b8;
+  --gain:#1d6f4a;--loss:#a3312b;--flat:#566372;--gain-bg:#e3f0e9;--loss-bg:#f5e4e2;--flat-bg:#e7ebef;--warn:#8a5a00;--warn-bg:#fbf1dc;
+  --sans:system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,"SF Mono",Consolas,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0e1621;--surface:#141e2b;--surface2:#192536;--ink:#e6ebf2;--ink2:#b3becb;--ink3:#8795a6;--line:#263548;
+  --accent:#7aa3d6;--accent-ink:#0b1420;--hdr:#0a111b;--hdr-ink:#e6ebf2;--hdr-mute:#7f8ea1;
+  --gain:#4fb58a;--loss:#e57f78;--flat:#8795a6;--gain-bg:#12261d;--loss-bg:#2d1a19;--flat-bg:#1f2b3a;--warn:#e0b050;--warn-bg:#2b2412;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);padding:0 16px 48px}
+.wrap{max-width:1180px;margin:0 auto}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+header.top{position:sticky;top:0;z-index:20;background:var(--hdr);color:var(--hdr-ink);box-shadow:0 0 0 100vmax var(--hdr);clip-path:inset(0 -100vmax);padding:14px 0;display:flex;gap:10px 20px;align-items:center;flex-wrap:wrap}
+h1{font-size:18px;font-weight:600;margin:0}
+.hsub{color:var(--hdr-mute);font-size:12px}
+nav{display:flex;gap:2px;background:rgba(255,255,255,.07);padding:3px;border-radius:6px;margin-left:auto}
+nav button{background:transparent;color:#b9c6d6;border:0;padding:7px 16px;border-radius:4px;font:500 13px var(--sans);cursor:pointer}
+nav button[aria-selected="true"]{background:rgba(255,255,255,.16);color:#fff}
+button{font:inherit}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn{background:var(--accent);color:var(--accent-ink);border:0;border-radius:5px;padding:8px 14px;font-weight:600;cursor:pointer}
+.btn.sec{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.btn.del{background:transparent;color:var(--loss);border:1px solid var(--line)}
+.btn.sm{padding:4px 10px;font-size:12px}
+.btn:disabled{opacity:.5;cursor:default}
+main{display:grid;gap:16px;padding-top:20px}
+[hidden]{display:none!important}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-top:3px solid var(--accent);border-radius:6px;padding:12px 16px;min-width:0}
+.kpi .l{font-size:11px;color:var(--ink3);text-transform:uppercase;letter-spacing:.06em}
+.kpi .v{font:500 22px/1.25 var(--mono);margin-top:5px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.kpi .s{font-size:12px;color:var(--ink3)}
+.gain{color:var(--gain)}.loss{color:var(--loss)}.flat{color:var(--flat)}
+.banner{border:1px solid var(--line);border-left:4px solid var(--warn);background:var(--warn-bg);color:var(--ink);border-radius:6px;padding:10px 14px;font-size:13px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.panel h2{font-size:12px;font-weight:600;color:var(--ink2);text-transform:uppercase;letter-spacing:.08em;margin:0;padding:12px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:860px}
+th{font-size:11px;font-weight:600;color:var(--ink2);text-transform:uppercase;letter-spacing:.05em;text-align:left;padding:9px 12px;background:var(--surface2);border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+th.r,td.r{text-align:right}
+tr.acc{cursor:pointer}
+tr.acc:hover td{background:var(--surface2)}
+tr.det td{background:var(--surface2);padding:12px 16px 16px}
+tr.det table{min-width:640px;background:var(--surface);border:1px solid var(--line)}
+.name{font-weight:600}
+.sub{color:var(--ink3);font-size:12px}
+.badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;letter-spacing:.03em;white-space:nowrap}
+.b-demo{background:var(--flat-bg);color:var(--ink2)}
+.b-real{background:var(--loss-bg);color:var(--loss)}
+.b-ok{background:var(--gain-bg);color:var(--gain)}
+.b-err{background:var(--loss-bg);color:var(--loss)}
+.b-off{background:var(--flat-bg);color:var(--flat)}
+.b-sig{background:var(--gain-bg);color:var(--gain)}
+.empty{padding:36px 16px;text-align:center;color:var(--ink3)}
+.actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+.err{color:var(--loss);font-size:12px;max-width:340px;overflow-wrap:anywhere}
+dialog{border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);padding:0;width:min(560px,calc(100vw - 32px));box-shadow:0 12px 40px rgba(0,0,0,.3)}
+dialog::backdrop{background:rgba(10,17,27,.55)}
+dialog h3{margin:0;padding:16px 20px;font-size:16px;border-bottom:1px solid var(--line)}
+.body{padding:16px 20px;display:grid;gap:12px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:520px){.row2{grid-template-columns:1fr}}
+label{display:grid;gap:4px;font-size:12px;color:var(--ink2);font-weight:600}
+label .hint{font-weight:400;color:var(--ink3)}
+input[type=text],input[type=number],input[type=password],textarea{width:100%;border:1px solid var(--line);border-radius:5px;background:var(--bg);color:var(--ink);padding:8px 10px;font:inherit}
+.chk{display:flex;gap:8px;align-items:flex-start;font-weight:400;color:var(--ink)}
+.chk input{margin-top:3px}
+.foot{display:flex;gap:8px;justify-content:flex-end;padding:14px 20px;border-top:1px solid var(--line);flex-wrap:wrap;align-items:center}
+.foot .msg{margin-right:auto;font-size:12px;max-width:100%;overflow-wrap:anywhere}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:6px;font-size:13px;display:none;z-index:60;max-width:90vw}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <div><h1>Conti MetaTrader 5</h1><div class="hsub" id="upd">Monitoraggio e gestione dei conti</div></div>
+  <nav role="tablist"><button role="tab" aria-selected="true" data-tab="conti">Conti</button><button role="tab" aria-selected="false" data-tab="att">Attività</button></nav>
+  <button class="btn sec" id="refresh" style="color:#fff;border-color:rgba(255,255,255,.3)">Aggiorna</button>
+  <button class="btn" id="add" style="background:#fff;color:#14233a">+ Nuovo conto</button>
+</header>
+<main>
+<div id="tab-conti" style="display:grid;gap:16px">
+  <div class="banner" id="sim" hidden>Modalità SIMULATORE: conti, prezzi e operazioni sono finti. Serve solo a provare l'interfaccia.</div>
+  <div class="banner" id="warn" hidden></div>
+  <div class="kpis" id="kpis"></div>
+  <div class="panel">
+    <h2>Conti</h2>
+    <div class="tw"><table>
+      <thead><tr><th>Conto</th><th>Tipo</th><th>Stato</th><th class="r">Saldo</th><th class="r">Equity</th><th class="r">P&amp;L aperto</th><th class="r">Pos.</th><th>Segnali</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+  </div>
+</div>
+<div id="tab-att" hidden>
+  <div class="panel"><h2>Ultime operazioni dei segnali Telegram</h2>
+    <div class="tw"><table style="min-width:640px"><thead><tr><th>Quando (UTC)</th><th>Messaggio</th><th>Esito</th></tr></thead><tbody id="act"></tbody></table></div></div>
+</div>
+</main>
+</div>
+
+<dialog id="dlg"><form method="dialog" id="f" autocomplete="off">
+  <h3 id="dtitle">Nuovo conto</h3>
+  <div class="body">
+    <div class="row2">
+      <label>Nome<input type="text" id="name" required maxlength="60" placeholder="es. ActivTrades demo 1"></label>
+      <label>Numero di conto (login)<input type="text" id="login" inputmode="numeric" required placeholder="es. 51234567"></label>
+    </div>
+    <label>Server del broker<input type="text" id="server" required maxlength="80" placeholder="es. ActivTrades-Server"></label>
+    <label>Password <span class="hint" id="pwhint">(salvata nel Gestore credenziali di Windows, non nei file)</span><input type="password" id="password" autocomplete="new-password"></label>
+    <label>Percorso del terminale MT5 <span class="hint">(facoltativo; consigliato un terminale per ogni conto)</span><input type="text" id="terminal_path" placeholder="C:\Program Files\MetaTrader 5\terminal64.exe"></label>
+    <div class="row2">
+      <label>Lotti per operazione<input type="number" id="lots" min="0.01" max="1" step="0.01" value="0.05"></label>
+      <label>Nota<input type="text" id="note" maxlength="300"></label>
+    </div>
+    <label class="chk"><input type="checkbox" id="enabled" checked><span>Conto attivo (viene monitorato)</span></label>
+    <label class="chk"><input type="checkbox" id="use_signals" checked><span>Usa per i segnali Telegram (apre le operazioni; solo se il conto è demo)</span></label>
+  </div>
+  <div class="foot"><span class="msg" id="tmsg"></span>
+    <button type="button" class="btn sec" id="test">Prova connessione</button>
+    <button type="button" class="btn sec" id="cancel">Annulla</button>
+    <button type="submit" class="btn" id="save">Salva</button></div>
+</form></dialog>
+
+<dialog id="ask"><form method="dialog">
+  <h3 id="atitle">Conferma</h3><div class="body" id="atext"></div>
+  <div class="foot"><button value="no" class="btn sec">Annulla</button><button value="yes" class="btn del" id="ayes">Conferma</button></div>
+</form></dialog>
+<div id="toast" role="status"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const H = {"Content-Type": "application/json", "X-Requested-With": "accounts"};
+let accounts = [], status = {}, open = new Set(), editing = null, busy = false;
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const money = (v, cur) => { try { return new Intl.NumberFormat("it-IT", {style: "currency", currency: cur || "EUR"}).format(v); } catch (e) { return Number(v).toFixed(2) + " " + (cur || ""); } };
+const cls = v => v > 0 ? "gain" : v < 0 ? "loss" : "flat";
+function toast(t, ms = 3500) { const e = $("toast"); e.textContent = t; e.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => e.style.display = "none", ms); }
+async function api(path, method = "GET", body) {
+  const r = await fetch(path, {method, headers: method === "GET" ? {} : H, body: body ? JSON.stringify(body) : undefined});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || ("Errore " + r.status));
+  return j;
+}
+function ask(title, text, label = "Conferma") {
+  return new Promise(res => { $("atitle").textContent = title; $("atext").textContent = text; $("ayes").textContent = label; const d = $("ask"); d.onclose = () => res(d.returnValue === "yes"); d.returnValue = ""; d.showModal(); });
+}
+
+function render() {
+  const rows = $("rows");
+  if (!accounts.length) { rows.innerHTML = `<tr><td colspan="9" class="empty">Nessun conto. Clicca «+ Nuovo conto» per aggiungere il primo.</td></tr>`; }
+  else rows.innerHTML = accounts.map(a => {
+    const s = status[a.id], on = a.enabled, ok = s && s.connected;
+    const state = !on ? `<span class="badge b-off">Disattivato</span>` : !s ? `<span class="badge b-off">…</span>` : ok ? `<span class="badge b-ok">Collegato</span>` : `<span class="badge b-err">Errore</span><div class="err">${esc(s.error)}</div>`;
+    const typ = ok ? (s.demo ? `<span class="badge b-demo">DEMO</span>` : `<span class="badge b-real">REALE · sola lettura</span>`) : `<span class="sub">—</span>`;
+    const n = ok ? s.positions.length : "—";
+    const pl = ok ? `<span class="${cls(s.profit)}">${money(s.profit, s.currency)}</span>` : "—";
+    let h = `<tr class="acc" data-id="${a.id}"><td><div class="name">${esc(a.name)}</div><div class="sub num">${esc(a.login)} · ${esc(a.server)}</div></td><td>${typ}</td><td>${state}</td>
+      <td class="r num">${ok ? money(s.balance, s.currency) : "—"}</td><td class="r num">${ok ? money(s.equity, s.currency) : "—"}</td><td class="r num">${pl}</td><td class="r num">${n}</td>
+      <td>${a.use_signals ? `<span class="badge b-sig">${a.lots} lotti</span>` : `<span class="badge b-off">No</span>`}</td>
+      <td><div class="actions"><button class="btn sm sec" data-act="edit">Modifica</button><button class="btn sm del" data-act="del">Elimina</button></div></td></tr>`;
+    if (open.has(a.id) && ok) h += detail(a, s);
+    return h;
+  }).join("");
+  kpis(); warn();
+}
+function detail(a, s) {
+  if (!s.positions.length) return `<tr class="det"><td colspan="9"><span class="sub">Nessuna posizione aperta su questo conto.</span></td></tr>`;
+  const canClose = s.demo;
+  const body = s.positions.map(p => `<tr><td class="num">${p.ticket}</td><td>${esc(p.symbol)}</td><td><span class="badge ${p.side === "buy" ? "b-ok" : "b-err"}">${p.side.toUpperCase()}</span></td><td class="r num">${p.volume}</td>
+    <td class="r num">${p.open}</td><td class="r num">${p.price}</td><td class="r num">${p.sl || "—"}</td><td class="r num">${p.tp || "—"}</td><td class="r num ${cls(p.profit)}">${money(p.profit, s.currency)}</td>
+    <td class="r">${canClose ? `<button class="btn sm del" data-act="close" data-t="${p.ticket}">Chiudi</button>` : ""}</td></tr>`).join("");
+  return `<tr class="det"><td colspan="9"><table><thead><tr><th>Ticket</th><th>Simbolo</th><th>Lato</th><th class="r">Lotti</th><th class="r">Apertura</th><th class="r">Prezzo</th><th class="r">SL</th><th class="r">TP</th><th class="r">Profitto</th><th></th></tr></thead><tbody>${body}</tbody></table>
+    ${canClose ? `<div style="margin-top:10px;text-align:right"><button class="btn sm del" data-act="closeall" data-id="${a.id}">Chiudi tutte le posizioni del conto</button></div>` : `<div class="sub" style="margin-top:8px">Conto reale: solo lettura, nessuna chiusura dal software.</div>`}</td></tr>`;
+}
+function kpis() {
+  const act = accounts.filter(a => a.enabled), conn = act.filter(a => status[a.id] && status[a.id].connected);
+  const byCur = {};
+  conn.forEach(a => { const s = status[a.id]; const c = byCur[s.currency] ||= {eq: 0, pl: 0, n: 0}; c.eq += s.equity; c.pl += s.profit; c.n += s.positions.length; });
+  const fmt = f => Object.entries(byCur).map(([c, v]) => money(f(v), c)).join(" · ") || "—";
+  const pl = Object.entries(byCur).map(([c, v]) => `<span class="${cls(v.pl)}">${money(v.pl, c)}</span>`).join(" · ") || "—";
+  const npos = Object.values(byCur).reduce((t, v) => t + v.n, 0);
+  $("kpis").innerHTML = `<div class="kpi"><div class="l">Conti collegati</div><div class="v">${conn.length}/${act.length}</div><div class="s">${accounts.length} in archivio</div></div>
+    <div class="kpi"><div class="l">Equity totale</div><div class="v">${fmt(v => v.eq)}</div></div>
+    <div class="kpi"><div class="l">P&amp;L aperto</div><div class="v">${pl}</div></div>
+    <div class="kpi"><div class="l">Posizioni aperte</div><div class="v">${npos}</div></div>`;
+}
+function warn() {
+  const act = accounts.filter(a => a.enabled), w = $("warn");
+  const paths = act.map(a => a.terminal_path || "");
+  const dup = new Set(paths).size < paths.length;
+  const nopw = act.filter(a => !a.has_password);
+  const msg = [];
+  if (act.length > 1 && dup) msg.push("Più conti usano lo stesso terminale MT5 (o nessun percorso): il software cambia login a ogni operazione, quindi è più lento. Con un terminale separato per conto (campo «Percorso del terminale») è più veloce e sicuro.");
+  if (act.length > 1 && nopw.length) msg.push("Senza password salvata un conto funziona solo se il terminale è già collegato a quel conto: " + nopw.map(a => a.name).join(", ") + ".");
+  w.hidden = !msg.length; w.innerHTML = msg.map(esc).join("<br>");
+}
+async function refresh() {
+  if (busy) return; busy = true;
+  try {
+    const j = await api("/api/accounts"); accounts = j.accounts; $("sim").hidden = !j.simulator; render();
+    for (const a of accounts.filter(x => x.enabled)) { status[a.id] = await api(`/api/accounts/${a.id}/status`); render(); }
+    $("upd").textContent = "Aggiornato " + new Date().toLocaleTimeString("it-IT");
+  } catch (e) { toast("Errore: " + e.message); }
+  busy = false;
+}
+$("rows").addEventListener("click", async e => {
+  const btn = e.target.closest("button"), tr = e.target.closest("tr.acc");
+  if (btn) {
+    const id = +btn.dataset.id || +btn.closest("tr").dataset.id, a = accounts.find(x => x.id === id), act = btn.dataset.act;
+    if (act === "edit") return edit(a);
+    if (act === "del") { if (await ask("Eliminare il conto?", `«${a.name}» (${a.login}) verrà rimosso dall'elenco e la sua password dal Gestore credenziali. Le posizioni aperte su MT5 non vengono toccate.`, "Elimina")) { try { await api("/api/accounts/" + a.id, "DELETE"); delete status[a.id]; toast("Conto eliminato"); refresh(); } catch (er) { toast(er.message); } } return; }
+    if (act === "close" || act === "closeall") {
+      const acc = accounts.find(x => x.id === (btn.dataset.id ? +btn.dataset.id : openAcc(btn)));
+      const tickets = act === "close" ? [+btn.dataset.t] : null;
+      const txt = act === "close" ? `Chiudere la posizione ${btn.dataset.t} sul conto «${acc.name}» al prezzo di mercato?` : `Chiudere TUTTE le posizioni aperte sul conto «${acc.name}» al prezzo di mercato?`;
+      if (await ask("Chiusura posizioni", txt, "Chiudi")) { btn.disabled = true; try { const r = await api(`/api/accounts/${acc.id}/close`, "POST", {tickets}); toast(r.closed.join(" · ")); } catch (er) { toast(er.message, 6000); } status[acc.id] = await api(`/api/accounts/${acc.id}/status`); render(); }
+    }
+    return;
+  }
+  if (tr && !e.target.closest("button")) { const id = +tr.dataset.id; open.has(id) ? open.delete(id) : open.add(id); render(); }
+});
+function openAcc(btn) { let r = btn.closest("tr.det").previousElementSibling; return +r.dataset.id; }
+function edit(a) {
+  editing = a ? a.id : null; $("dtitle").textContent = a ? "Modifica conto" : "Nuovo conto"; $("tmsg").textContent = "";
+  for (const k of ["name", "login", "server", "terminal_path", "lots", "note"]) $(k).value = a ? a[k] : (k === "lots" ? 0.05 : "");
+  $("password").value = ""; $("password").placeholder = a && a.has_password ? "•••••• (lascia vuoto per non cambiarla)" : "";
+  $("enabled").checked = a ? a.enabled : true; $("use_signals").checked = a ? a.use_signals : true;
+  $("dlg").showModal(); $("name").focus();
+}
+const form = () => ({name: $("name").value, login: $("login").value, server: $("server").value, password: $("password").value, terminal_path: $("terminal_path").value,
+  lots: $("lots").value, note: $("note").value, enabled: $("enabled").checked, use_signals: $("use_signals").checked});
+$("add").onclick = () => edit(null);
+$("cancel").onclick = () => $("dlg").close();
+$("refresh").onclick = refresh;
+$("test").onclick = async () => {
+  const m = $("tmsg"); m.className = "msg"; m.textContent = "Collegamento in corso…"; $("test").disabled = true;
+  try { const r = await api("/api/test", "POST", form()); m.className = "msg " + (r.connected ? "gain" : "loss");
+    m.textContent = r.connected ? `Collegato · ${r.demo ? "conto DEMO" : "conto REALE (sola lettura)"} · saldo ${money(r.balance, r.currency)}` : (r.error || "Non collegato"); }
+  catch (e) { m.className = "msg loss"; m.textContent = e.message; }
+  $("test").disabled = false;
+};
+$("f").addEventListener("submit", async e => {
+  e.preventDefault(); $("save").disabled = true;
+  try { await api(editing ? "/api/accounts/" + editing : "/api/accounts", editing ? "PUT" : "POST", form()); $("dlg").close(); toast("Conto salvato"); refresh(); }
+  catch (er) { $("tmsg").className = "msg loss"; $("tmsg").textContent = er.message; }
+  $("save").disabled = false;
+});
+document.querySelectorAll("nav button").forEach(b => b.onclick = async () => {
+  document.querySelectorAll("nav button").forEach(x => x.setAttribute("aria-selected", x === b));
+  $("tab-conti").hidden = b.dataset.tab !== "conti"; $("tab-att").hidden = b.dataset.tab !== "att";
+  if (b.dataset.tab === "att") { const j = await api("/api/activity"); $("act").innerHTML = j.rows.length ? j.rows.map(r => `<tr><td class="num" style="white-space:nowrap">${esc((r.quando_utc || "").replace("T", " "))}</td><td>${esc(r.messaggio)}</td><td>${esc(r.esito)}</td></tr>`).join("") : `<tr><td colspan="3" class="empty">Nessuna operazione registrata.</td></tr>`; }
+});
+refresh(); setInterval(() => { if (!document.querySelector("dialog[open]") && !document.hidden) refresh(); }, 20000);
+</script>
+</body>
+</html>
