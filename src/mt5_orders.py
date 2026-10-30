@@ -62,7 +62,7 @@ def check_levels(sig: dict, bid: float, ask: float) -> None:
 
 
 def relative_levels() -> bool:
-    """Default: SL e TP si applicano come DISTANZE dall'Entry del messaggio al prezzo del TUO broker (il canale quota un altro broker, es. Vantage: i prezzi assoluti differiscono).
+    """Default: SL e TP si applicano come DISTANZE dall'Entry del messaggio al prezzo del TUO broker (partendo dal bid per i BUY e dall'ask per i SELL, cioè dal prezzo che li fa scattare: lo spread non accorcia lo stop) (il canale quota un altro broker, es. Vantage: i prezzi assoluti differiscono).
     SIGNAL_LEVELS=absolute in config.env torna ai prezzi scritti nel messaggio."""
     return os.environ.get("SIGNAL_LEVELS", "relative").lower() != "absolute"
 
@@ -105,8 +105,9 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS) -> tuple[str,
     if relative_levels():
         check_message(sig)
         sl_d, tp_d = abs(sig["entry"] - sig["sl"]), abs(sig["tp1"] - sig["entry"])
-        sl, tp = (px - sl_d, px + tp_d) if buy else (px + sl_d, px - tp_d)
-        scarto = px - sig["entry"]
+        ref = tick.bid if buy else tick.ask               # SL e TP scattano sul prezzo di CHIUSURA (BUY: bid, SELL: ask), come il grafico del canale: così lo spread non accorcia lo stop
+        sl, tp = (ref - sl_d, ref + tp_d) if buy else (ref + sl_d, ref - tp_d)
+        scarto = tick.bid - sig["entry"]                  # differenza di quotazione tra il tuo broker e il canale (entrambi sul bid)
     else:
         check_levels(sig, tick.bid, tick.ask)
         sl, tp, scarto = sig["sl"], sig["tp1"], 0.0
@@ -115,7 +116,7 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS) -> tuple[str,
            "comment": "tg-signal", "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling(mt5, info)}
     summary = f"{sig['side'].upper()} {sym} {lots} lotti a mercato ~{px} · SL {req['sl']} ({abs(px - req['sl']):.2f} $) · TP1 {req['tp']} ({abs(req['tp'] - px):.2f} $)"
     if relative_levels():
-        summary += f" · scarto del tuo broker dal canale {scarto:+.2f}"
+        summary += f" · scarto dal canale {scarto:+.2f} · spread {tick.ask - tick.bid:.2f}"
     if dry:
         return f"[PROVA, nessun ordine inviato] {summary}", None
     res = mt5.order_send(req)
