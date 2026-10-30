@@ -312,7 +312,7 @@ def import_connected(terminal_path: str = "") -> dict:
                 raise ValueError("Il terminale non è collegato a nessun conto.")
             demo = i.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO
             login, server = int(i.login), str(i.server)
-            name = f"{(i.company or server).split(',')[0][:30]} {'demo' if demo else 'reale'} {login}"
+            name = f"{(getattr(i, 'company', '') or server).split(',')[0][:30]} {'demo' if demo else 'reale'} {login}"
         finally:
             mt5.shutdown()
     con = db()
