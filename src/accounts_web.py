@@ -109,16 +109,6 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/accounts" and method == "POST":
                 return self._json({"id": ma.save_account(self._data())}, 201)
-            if path == "/api/results/csv" and method == "POST":
-                from src.mt5_weekly import from_csv, from_xlsx, read_text
-                n = int(self.headers.get("Content-Length") or 0)
-                if n > 10_000_000:
-                    raise ValueError("file troppo grande")
-                raw = self.rfile.read(n)
-                if raw[:2] == b"PK":                                   # .xlsx (è un archivio zip)
-                    df, cur = from_xlsx(raw)
-                    return self._json(results(df, cur, "Excel"))
-                return self._json(results(from_csv("", read_text(raw)), None, "CSV"))
             if path == "/api/import-current" and method == "POST":
                 return self._json(ma.import_connected(str(self._data().get("terminal_path") or "")), 201)
             if path == "/api/test" and method == "POST":

@@ -344,6 +344,8 @@ def history(acc: dict, start: str):
     with session(acc) as mt5:
         cur = mt5.account_info().currency
         deals = mt5.history_deals_get(t0, t1)
+        if deals is None:
+            raise RuntimeError(f"MT5 non restituisce la cronologia: {mt5.last_error()}. In MT5 apri la scheda Cronologia (Ctrl+T) e scegli «Tutta la cronologia», poi riprova.")
         if not deals:
             return pd.DataFrame(columns=["time", "simbolo", "profit", "commission", "swap"]), cur
         d = pd.DataFrame([x._asdict() for x in deals])

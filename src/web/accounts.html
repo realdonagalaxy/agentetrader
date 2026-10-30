@@ -109,12 +109,11 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
 <div id="tab-ris" hidden style="display:grid;gap:16px">
   <div class="panel"><h2>Profitto per settimana e mese</h2>
     <div class="body" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end">
-      <label>Fonte<select id="rsrc"></select></label>
+      <label>Conto<select id="rsrc"></select></label>
       <label>Dal giorno<input type="text" id="rfrom" placeholder="AAAA-MM-GG"></label>
-      <label id="rfilel" hidden>File CSV o Excel<input type="file" id="rfile" accept=".csv,.txt,.tsv,.xlsx"></label>
       <div class="actions" style="justify-content:flex-start"><button class="btn" id="rload">Carica</button></div>
     </div>
-    <div class="sub" style="padding:0 20px 14px">Da MT5 si legge la cronologia delle operazioni chiuse del conto (orario del server del broker). Dal file (CSV o Excel) usa il «Report» della scheda Cronologia di MT5, non il «Report sul Conto Trading»: servono le operazioni chiuse, con le colonne tempo di chiusura e profitto; commissioni e swap, se presenti, vengono sommati.</div>
+    <div class="sub" style="padding:0 20px 14px">Legge direttamente da MT5 la cronologia delle operazioni chiuse del conto (orario del server del broker); il terminale deve essere aperto. Se la cronologia risulta vuota, in MT5 apri la scheda Cronologia (Ctrl+T) e scegli «Tutta la cronologia».</div>
   </div>
   <div id="rout" hidden style="display:grid;gap:16px">
     <div class="kpis" id="rkpis"></div>
@@ -288,23 +287,18 @@ let R = null, rview = "weeks";
 const fmtN = (v, cur) => cur ? money(v, cur) : new Intl.NumberFormat("it-IT", {minimumFractionDigits: 2, maximumFractionDigits: 2}).format(v);
 const fmtP = (d, w) => { const x = new Date(d + "T00:00:00"); return w ? x.toLocaleDateString("it-IT", {day: "2-digit", month: "short", year: "numeric"}) : x.toLocaleDateString("it-IT", {month: "long", year: "numeric"}); };
 function fillSources() {
-  $("rsrc").innerHTML = accounts.map(a => `<option value="${a.id}">Conto MT5: ${esc(a.name)}</option>`).join("") + `<option value="csv">File CSV / Excel…</option>`;
+  $("rsrc").innerHTML = accounts.map(a => `<option value="${a.id}">${esc(a.name)} (${esc(a.login)})</option>`).join("") || `<option value="">Nessun conto: aggiungine uno</option>`;
   if (!$("rfrom").value) $("rfrom").value = new Date().getFullYear() + "-01-01";
-  $("rfilel").hidden = $("rsrc").value !== "csv";
 }
-$("rsrc").onchange = () => $("rfilel").hidden = $("rsrc").value !== "csv";
 $("rload").onclick = async () => {
   $("rload").disabled = true;
   try {
-    if ($("rsrc").value === "csv") {
-      const f = $("rfile").files[0]; if (!f) throw new Error("Scegli un file CSV.");
-      const r = await fetch("/api/results/csv", {method: "POST", headers: {"X-Requested-With": "accounts"}, body: await f.arrayBuffer()});
-      const j = await r.json(); if (!r.ok) throw new Error(j.error || "Errore");
-      R = j;
-    } else R = await api(`/api/results?account=${$("rsrc").value}&from=${encodeURIComponent($("rfrom").value)}`);
+    if (!$("rsrc").value) throw new Error("Aggiungi prima un conto nella scheda Conti.");
+    $("rload").textContent = "Lettura da MT5…";
+    R = await api(`/api/results?account=${$("rsrc").value}&from=${encodeURIComponent($("rfrom").value)}`);
     drawResults();
   } catch (e) { toast(e.message, 7000); }
-  $("rload").disabled = false;
+  $("rload").disabled = false; $("rload").textContent = "Carica";
 };
 $("vw").onclick = () => { rview = "weeks"; drawResults(); }; $("vm").onclick = () => { rview = "months"; drawResults(); };
 function drawResults() {
