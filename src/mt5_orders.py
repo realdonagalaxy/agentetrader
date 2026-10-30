@@ -176,9 +176,11 @@ def main(dry: bool) -> None:
             continue
         for u in ups:
             offset = u["update_id"] + 1
-            m = u.get("message") or {}
-            text = m.get("text") or ""
-            if str((m.get("chat") or {}).get("id")) != allowed or not re.search(r"\b(BUY|SELL)\b", text, re.I):
+            m = u.get("message") or u.get("channel_post") or u.get("edited_message") or u.get("edited_channel_post") or {}
+            text = m.get("text") or m.get("caption") or ""
+            cid = str((m.get("chat") or {}).get("id"))
+            if cid != allowed or not re.search(r"\b(BUY|SELL)\b", text, re.I):
+                print(f"Ignorato: chat {cid} (attesa {allowed}), contiene BUY/SELL: {bool(re.search(r'BUY|SELL', text, re.I))}, tipo: {[k for k in u if k != 'update_id']}", flush=True)
                 continue
             if time.time() - m.get("date", 0) > MAX_AGE_S:
                 bot.send("⚠️ Messaggio troppo vecchio (> 2 minuti): ignorato.")
