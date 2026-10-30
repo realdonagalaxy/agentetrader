@@ -160,6 +160,20 @@ def log(row: list) -> None:
         w.writerow(row)
 
 
+def suggest() -> None:
+    """Stampa un messaggio di prova coerente con il prezzo di adesso (BUY: SL -10, TP1 +3 dall'ask), da incollare subito nel canale."""
+    from dotenv import load_dotenv
+    load_dotenv("config.env")
+    from src.mt5_feed import connect
+    mt5 = connect()
+    sym = broker_symbol("XAUUSD")
+    mt5.symbol_select(sym, True)
+    t = mt5.symbol_info_tick(sym)
+    e = round(t.ask)
+    print(f"Prezzo ora: bid {t.bid} · ask {t.ask}. Incolla subito (vale 2 minuti):\n")
+    print(f"BUY XAUUSD\n\n➡️ Entry: {e}\n\n❌ SL: {e - 10}\n✅ TP1: {e + 3}\n✅ TP2: {e + 6}\n✅ TP3: {e + 9}")
+
+
 def main(dry: bool) -> None:
     from dotenv import load_dotenv
     load_dotenv("config.env")
@@ -211,4 +225,6 @@ def main(dry: bool) -> None:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true", help="valida ma non invia ordini")
-    main(ap.parse_args().dry)
+    ap.add_argument("--suggest", action="store_true", help="stampa un messaggio di prova coerente con il prezzo attuale")
+    a = ap.parse_args()
+    suggest() if a.suggest else main(a.dry)
