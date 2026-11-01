@@ -65,6 +65,15 @@ tr.det table{min-width:640px;background:var(--surface);border:1px solid var(--li
 svg text{font:11px var(--mono);fill:var(--ink3)}
 select{width:100%;border:1px solid var(--line);border-radius:5px;background:var(--bg);color:var(--ink);padding:8px 10px;font:inherit}
 input[type=file]{font-size:12px}
+.sw{position:relative;display:inline-block;width:40px;height:22px;flex:none}
+.sw input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer;z-index:1}
+.sw span{position:absolute;inset:0;background:var(--line);border-radius:11px;transition:background .15s}
+.sw span::after{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.3)}
+.sw input:checked+span{background:var(--gain)}
+.sw input:checked+span::after{transform:translateX(18px)}
+.sw input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
+tr.acc.off td:not(:last-child):not(:first-child){opacity:.55}
+tr.acc.off .name{opacity:.6}
 .empty{padding:36px 16px;text-align:center;color:var(--ink3)}
 .actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
 .err{color:var(--loss);font-size:12px;max-width:340px;overflow-wrap:anywhere}
@@ -101,7 +110,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
   <div class="panel">
     <h2>Conti</h2>
     <div class="tw"><table>
-      <thead><tr><th>Conto</th><th>Tipo</th><th>Stato</th><th class="r">Saldo</th><th class="r">Equity</th><th class="r">P&amp;L aperto</th><th class="r">Pos.</th><th>Segnali</th><th></th></tr></thead>
+      <thead><tr><th>Conto</th><th>Tipo</th><th>Stato</th><th class="r">Saldo</th><th class="r">Equity</th><th class="r">P&amp;L aperto</th><th class="r">Pos.</th><th>Segnali</th><th>Attivo</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table></div>
   </div>
@@ -179,16 +188,17 @@ function ask(title, text, label = "Conferma") {
 
 function render() {
   const rows = $("rows");
-  if (!accounts.length) { rows.innerHTML = `<tr><td colspan="9" class="empty">Nessun conto. Clicca «+ Nuovo conto» per aggiungere il primo.</td></tr>`; }
+  if (!accounts.length) { rows.innerHTML = `<tr><td colspan="10" class="empty">Nessun conto. Clicca «+ Nuovo conto» per aggiungere il primo.</td></tr>`; }
   else rows.innerHTML = accounts.map(a => {
     const s = status[a.id], on = a.enabled, ok = s && s.connected;
     const state = !on ? `<span class="badge b-off">Disattivato</span>` : !s ? `<span class="badge b-off">…</span>` : ok ? `<span class="badge b-ok">Collegato</span>` : `<span class="badge b-err">Errore</span><div class="err">${esc(s.error)}</div>`;
     const typ = ok ? (s.demo ? `<span class="badge b-demo">DEMO</span>` : `<span class="badge b-real">REALE · sola lettura</span>`) : `<span class="sub">—</span>`;
     const n = ok ? s.positions.length : "—";
     const pl = ok ? `<span class="${cls(s.profit)}">${money(s.profit, s.currency)}</span>` : "—";
-    let h = `<tr class="acc" data-id="${a.id}"><td><div class="name">${esc(a.name)}</div><div class="sub num">${esc(a.login)} · ${esc(a.server)}</div></td><td>${typ}</td><td>${state}</td>
+    let h = `<tr class="acc${on ? "" : " off"}" data-id="${a.id}"><td><div class="name">${esc(a.name)}</div><div class="sub num">${esc(a.login)} · ${esc(a.server)}</div></td><td>${typ}</td><td>${state}</td>
       <td class="r num">${ok ? money(s.balance, s.currency) : "—"}</td><td class="r num">${ok ? money(s.equity, s.currency) : "—"}</td><td class="r num">${pl}</td><td class="r num">${n}</td>
-      <td>${a.use_signals ? `<span class="badge b-sig">${a.lots} lotti</span>` : `<span class="badge b-off">No</span>`}</td>
+      <td>${a.use_signals && on ? `<span class="badge b-sig">${a.lots} lotti</span>` : a.use_signals ? `<span class="badge b-off">Sospeso</span>` : `<span class="badge b-off">No</span>`}</td>
+      <td><label class="sw" title="${on ? "Conto attivo: disattivalo per fermare monitoraggio e segnali" : "Conto disattivato: attivalo per monitorarlo e usarlo per i segnali"}"><input type="checkbox" role="switch" data-act="toggle" ${on ? "checked" : ""} aria-label="Attiva o disattiva ${esc(a.name)}"><span></span></label></td>
       <td><div class="actions"><button class="btn sm sec" data-act="edit">Modifica</button><button class="btn sm del" data-act="del">Elimina</button></div></td></tr>`;
     if (open.has(a.id) && ok) h += detail(a, s);
     return h;
@@ -196,12 +206,12 @@ function render() {
   kpis(); warn();
 }
 function detail(a, s) {
-  if (!s.positions.length) return `<tr class="det"><td colspan="9"><span class="sub">Nessuna posizione aperta su questo conto.</span></td></tr>`;
+  if (!s.positions.length) return `<tr class="det"><td colspan="10"><span class="sub">Nessuna posizione aperta su questo conto.</span></td></tr>`;
   const canClose = s.demo;
   const body = s.positions.map(p => `<tr><td class="num">${p.ticket}</td><td>${esc(p.symbol)}</td><td><span class="badge ${p.side === "buy" ? "b-ok" : "b-err"}">${p.side.toUpperCase()}</span></td><td class="r num">${p.volume}</td>
     <td class="r num">${p.open}</td><td class="r num">${p.price}</td><td class="r num">${p.sl || "—"}</td><td class="r num">${p.tp || "—"}</td><td class="r num ${cls(p.profit)}">${money(p.profit, s.currency)}</td>
     <td class="r">${canClose ? `<button class="btn sm del" data-act="close" data-t="${p.ticket}">Chiudi</button>` : ""}</td></tr>`).join("");
-  return `<tr class="det"><td colspan="9"><table><thead><tr><th>Ticket</th><th>Simbolo</th><th>Lato</th><th class="r">Lotti</th><th class="r">Apertura</th><th class="r">Prezzo</th><th class="r">SL</th><th class="r">TP</th><th class="r">Profitto</th><th></th></tr></thead><tbody>${body}</tbody></table>
+  return `<tr class="det"><td colspan="10"><table><thead><tr><th>Ticket</th><th>Simbolo</th><th>Lato</th><th class="r">Lotti</th><th class="r">Apertura</th><th class="r">Prezzo</th><th class="r">SL</th><th class="r">TP</th><th class="r">Profitto</th><th></th></tr></thead><tbody>${body}</tbody></table>
     ${canClose ? `<div style="margin-top:10px;text-align:right"><button class="btn sm del" data-act="closeall" data-id="${a.id}">Chiudi tutte le posizioni del conto</button></div>` : `<div class="sub" style="margin-top:8px">Conto reale: solo lettura, nessuna chiusura dal software.</div>`}</td></tr>`;
 }
 function kpis() {
@@ -235,7 +245,19 @@ async function refresh() {
   } catch (e) { toast("Errore: " + e.message); }
   busy = false;
 }
+$("rows").addEventListener("change", async e => {
+  const cb = e.target.closest("input[data-act=toggle]"); if (!cb) return;
+  const id = +cb.closest("tr").dataset.id, a = accounts.find(x => x.id === id), on = cb.checked;
+  cb.disabled = true;
+  try {
+    await api(`/api/accounts/${id}/enabled`, "POST", {enabled: on}); a.enabled = on;
+    if (!on) { delete status[id]; open.delete(id); } else { status[id] = await api(`/api/accounts/${id}/status`); }
+    toast(on ? `«${a.name}» attivato` : `«${a.name}» disattivato: non viene monitorato e non riceve segnali`);
+  } catch (er) { cb.checked = !on; toast(er.message); }
+  render();
+});
 $("rows").addEventListener("click", async e => {
+  if (e.target.closest(".sw")) return;
   const btn = e.target.closest("button"), tr = e.target.closest("tr.acc");
   if (btn) {
     const id = +btn.dataset.id || +btn.closest("tr").dataset.id, a = accounts.find(x => x.id === id), act = btn.dataset.act;

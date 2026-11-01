@@ -119,6 +119,10 @@ class Handler(BaseHTTPRequestHandler):
             if m and method == "DELETE":
                 ma.delete_account(int(m[1]))
                 return self._json({"deleted": int(m[1])})
+            m = re.fullmatch(r"/api/accounts/(\d+)/enabled", path)
+            if m and method == "POST":
+                ma.set_enabled(int(m[1]), bool(self._data().get("enabled")))
+                return self._json({"id": int(m[1])})
             m = re.fullmatch(r"/api/accounts/(\d+)/close", path)
             if m and method == "POST":
                 d = self._data()

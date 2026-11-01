@@ -141,6 +141,15 @@ def save_account(d: dict, aid: int | None = None) -> int:
     return aid
 
 
+def set_enabled(aid: int, enabled: bool) -> None:
+    """Abilita o disabilita un conto: un conto disabilitato non viene monitorato e non riceve i segnali."""
+    get_account(aid)
+    con = db()
+    con.execute("UPDATE accounts SET enabled=? WHERE id=?", (1 if enabled else 0, aid))
+    con.commit()
+    con.close()
+
+
 def delete_account(aid: int) -> None:
     a = get_account(aid)
     con = db()
