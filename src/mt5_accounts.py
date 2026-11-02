@@ -212,6 +212,13 @@ def delete_account(aid: int) -> None:
 
 
 # ---------- connessione a MT5 ----------
+def is_portable(terminal_path: str) -> bool:
+    """Il terminale è portable se nella sua cartella c'è il marcatore portable.flag (lo crea installa_terminali.bat)."""
+    if not terminal_path:
+        return False
+    return os.path.isfile(os.path.join(_pm(terminal_path).dirname(terminal_path), "portable.flag"))
+
+
 def explain(mt5, prefix: str = "MT5 non si collega") -> str:
     """Messaggio d'errore di MT5 con la spiegazione dei casi più comuni."""
     err = mt5.last_error()
@@ -295,6 +302,8 @@ def session(acc: dict):
         kw = {}
         if acc.get("terminal_path"):
             kw["path"] = acc["terminal_path"]
+            if is_portable(acc["terminal_path"]):
+                kw["portable"] = True                              # stessa modalità con cui apri il terminale a mano: niente istanze doppie
         pw = get_password(acc)
         if pw or os.environ.get("MT5_SIMULATOR") == "1":
             kw.update(login=int(acc["login"]), password=pw or "", server=acc["server"])
@@ -359,6 +368,8 @@ def _test_with_password(c: dict, pw: str) -> dict:
             kw = {"login": c["login"], "password": pw, "server": c["server"], "timeout": 25000}
             if c["terminal_path"]:
                 kw["path"] = c["terminal_path"]
+                if is_portable(c["terminal_path"]):
+                    kw["portable"] = True
             if not mt5.initialize(**kw):
                 return {"connected": False, "error": explain(mt5)}
             try:
