@@ -34,12 +34,11 @@ echo Terminali creati in: %BASE%
 dir /b "%BASE%"
 echo.
 echo Percorsi da scrivere in Gestione Conti ^(Modifica conto, campo Percorso del terminale^):
-echo   FundedNext : %BASE%\FundedNext\terminal64.exe
-echo   ActivTrades: %BASE%\ActivTrades\terminal64.exe
+for %%N in (%NOMI%) do echo   %%N : %BASE%\%%N\terminal64.exe
 echo.
 echo Passi successivi:
-echo   1. Apri dal Desktop "MT5 FundedNext" e accedi al conto ^(File ^> Accedi al conto di trading, spunta Salva password^). Poi chiudilo.
-echo   2. Fai lo stesso con "MT5 ActivTrades".
+echo   1. Apri dal Desktop il collegamento "MT5 NOME" di un conto e accedi ^(File ^> Accedi al conto di trading, spunta Salva password^). Poi chiudilo.
+echo   2. Ripeti per ogni conto.
 echo   3. In Gestione Conti metti per ogni conto il percorso qui sopra.
 echo.
 echo Registro dettagliato: %LOG%
