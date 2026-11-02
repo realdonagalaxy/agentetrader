@@ -60,6 +60,10 @@ def symbol_select(sym, on=True):
     return sym in ("GOLD", "XAUUSD")
 
 
+def symbols_get(*a, **kw):
+    return (N(name="GOLD"), N(name="EURUSD"), N(name="XAUEUR"))
+
+
 def symbol_info(sym):
     return N(digits=2, filling_mode=3, point=0.01) if sym in ("GOLD", "XAUUSD") else None
 
