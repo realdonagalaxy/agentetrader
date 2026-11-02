@@ -101,6 +101,35 @@ def source_terminal() -> str:
     return os.environ.get("MT5_SOURCE") or r"C:\Program Files\MetaTrader 5"
 
 
+def copy_server_list(src: str, dst: str) -> str:
+    """Copia nella cartella portable la lista dei server che il terminale di origine conosce (servers.dat e file .srv). MT5 la tiene in %APPDATA%\\MetaQuotes\\Terminal\\<codice>\\config,
+    non nella cartella di installazione: senza di essa la copia non conosce i server dei broker. La cartella dati giusta si riconosce da origin.txt, che contiene il percorso dell'installazione.
+    Restituisce una nota su cosa è stato copiato (vuota se non trovato)."""
+    import glob
+    import shutil
+    appdata = os.environ.get("APPDATA")
+    if not appdata:
+        return ""
+    want = os.path.normcase(os.path.normpath(src)).lower()
+    for origin in glob.glob(os.path.join(appdata, "MetaQuotes", "Terminal", "*", "origin.txt")):
+        try:
+            raw = open(origin, "rb").read()
+            txt = raw.decode("utf-16") if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else raw.decode("utf-8", "ignore")
+        except OSError:
+            continue
+        if os.path.normcase(os.path.normpath(txt.strip())).lower() != want:
+            continue
+        cfg = os.path.join(os.path.dirname(origin), "config")
+        os.makedirs(os.path.join(dst, "config"), exist_ok=True)
+        n = 0
+        for pat in ("servers.dat", "*.srv"):
+            for f in glob.glob(os.path.join(cfg, pat)):
+                shutil.copy2(f, os.path.join(dst, "config", os.path.basename(f)))
+                n += 1
+        return f"{n} file dei server copiati"
+    return ""
+
+
 def provision_terminal(name: str, login: int) -> str:
     r"""Copia l'installazione di origine in C:\MT5\<numero conto> (ripiego: cartella MT5 dell'utente), la marca come portable e crea il collegamento sul Desktop.
     Se la cartella esiste già la riusa. Restituisce il percorso di terminal64.exe. L'origine non viene toccata."""
@@ -127,6 +156,10 @@ def provision_terminal(name: str, login: int) -> str:
         dst = os.path.join(base, f"{safe}_{n}")
     if not os.path.isfile(os.path.join(dst, exe)):
         shutil.copytree(src, dst, dirs_exist_ok=True)
+    try:
+        copy_server_list(src, dst)
+    except Exception:
+        pass                                                      # la lista dei server è un aiuto: se manca, si aggiunge il server dal terminale
     with open(os.path.join(dst, "portable.flag"), "w") as f:
         f.write("portable")
     if os.name == "nt":
