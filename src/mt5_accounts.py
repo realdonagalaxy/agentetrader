@@ -96,6 +96,21 @@ def norm_terminal(path: str) -> str:
     return p[:300]
 
 
+def find_terminals() -> list[str]:
+    """Terminali MT5 installati (terminal64.exe) nelle cartelle di installazione abituali di Windows."""
+    import glob
+    if os.environ.get("MT5_SIMULATOR") == "1":
+        return [r"C:\Program Files\MetaTrader 5\terminal64.exe", r"C:\Program Files\ActivTrades Markets MetaTrader 5\terminal64.exe"]
+    roots = [os.environ.get(v) for v in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA", "ProgramW6432")]
+    found = []
+    for r in filter(None, roots):
+        base = os.path.join(r, "Programs") if r == os.environ.get("LOCALAPPDATA") else r
+        for f in glob.glob(os.path.join(base, "*", "terminal64.exe")):
+            if f not in found:
+                found.append(f)
+    return sorted(found)
+
+
 def clean(d: dict) -> dict:
     name, server = str(d.get("name") or "").strip(), str(d.get("server") or "").strip()
     if not name:

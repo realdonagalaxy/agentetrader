@@ -88,6 +88,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/accounts":
                 return self._json({"accounts": ma.list_accounts(), "simulator": os.environ.get("MT5_SIMULATOR") == "1"})
+            if path == "/api/terminals":
+                return self._json({"terminals": ma.find_terminals()})
             if path == "/api/activity":
                 return self._json({"rows": activity()})
             if path == "/api/results":

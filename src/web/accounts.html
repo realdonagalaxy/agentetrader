@@ -148,7 +148,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
     </div>
     <label>Server del broker<input type="text" id="server" required maxlength="80" placeholder="es. ActivTrades-Server"></label>
     <label>Password <span class="hint" id="pwhint">(salvata nel Gestore credenziali di Windows, non nei file)</span><input type="password" id="password" autocomplete="new-password"></label>
-    <label>Percorso del terminale MT5 <span class="hint">(facoltativo; consigliato un terminale per ogni conto)</span><input type="text" id="terminal_path" placeholder="C:\Program Files\MetaTrader 5\terminal64.exe"></label>
+    <label>Percorso del terminale MT5 <span class="hint">(consigliato per ogni conto: clicca il campo per scegliere tra i terminali trovati sul PC)</span><input type="text" id="terminal_path" list="terms" placeholder="C:\Program Files\MetaTrader 5\terminal64.exe"><datalist id="terms"></datalist></label>
     <div class="row2">
       <label>Lotti per operazione<input type="number" id="lots" min="0.01" max="1" step="0.01" value="0.05"></label>
       <label>Nota<input type="text" id="note" maxlength="300"></label>
@@ -281,6 +281,7 @@ function edit(a) {
   for (const k of ["name", "login", "server", "terminal_path", "lots", "note"]) $(k).value = a ? a[k] : (k === "lots" ? 0.05 : "");
   $("password").value = ""; $("password").placeholder = a && a.has_password ? "•••••• (lascia vuoto per non cambiarla)" : "";
   $("enabled").checked = a ? a.enabled : true; $("use_signals").checked = a ? a.use_signals : true;
+  api("/api/terminals").then(j => $("terms").innerHTML = j.terminals.map(t => `<option value="${esc(t)}"></option>`).join("")).catch(() => {});
   $("dlg").showModal(); $("name").focus();
 }
 const form = () => ({name: $("name").value, login: $("login").value, server: $("server").value, password: $("password").value, terminal_path: $("terminal_path").value,
