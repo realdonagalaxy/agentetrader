@@ -33,6 +33,7 @@ DEVIATION = 20
 MAGIC = 530001
 LOG = Path("journal/ordini_mt5.csv")
 PENDING = Path("journal/ordini_aperti.json")
+SCARTI = Path(os.environ.get("JOURNAL_DIR", "journal")) / "scarti.csv"      # uno scarto per ogni segnale eseguito: serve alla calibrazione canale/broker
 HEARTBEAT = Path(os.environ.get("JOURNAL_DIR", "journal")) / "mt5_orders.heartbeat"       # battito: Gestione Conti lo legge per mostrare se l'ascolto è attivo
 NUM = r"([0-9]+(?:[.,][0-9]+)?)"
 
@@ -85,7 +86,7 @@ def filling(mt5, info) -> int:
     return mt5.ORDER_FILLING_IOC if m & 2 else mt5.ORDER_FILLING_FOK if m & 1 else mt5.ORDER_FILLING_RETURN
 
 
-def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS) -> tuple[str, dict | None]:
+def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "") -> tuple[str, dict | None]:
     """Valida e (se non dry) invia l'ordine. Restituisce (testo di risposta, dati della posizione da seguire); solleva ValueError se rifiutato."""
     acc = mt5.account_info()
     if acc is None:
@@ -109,6 +110,10 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS) -> tuple[str,
         ref = tick.bid if buy else tick.ask               # SL e TP scattano sul prezzo di CHIUSURA (BUY: bid, SELL: ask), come il grafico del canale: così lo spread non accorcia lo stop
         sl, tp = (ref - sl_d, ref + tp_d) if buy else (ref + sl_d, ref - tp_d)
         scarto = tick.bid - sig["entry"]                  # differenza di quotazione tra il tuo broker e il canale (entrambi sul bid)
+        try:
+            log_scarto(tag, sig, tick, scarto)
+        except OSError:
+            pass
     else:
         check_levels(sig, tick.bid, tick.ask)
         sl, tp, scarto = sig["sl"], sig["tp1"], 0.0
@@ -118,6 +123,12 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS) -> tuple[str,
     summary = f"{sig['side'].upper()} {sym} {lots} lotti a mercato ~{px} · SL {req['sl']} ({abs(px - req['sl']):.2f} $) · TP1 {req['tp']} ({abs(req['tp'] - px):.2f} $)"
     if relative_levels():
         summary += f" · scarto dal canale {scarto:+.2f} · spread {tick.ask - tick.bid:.2f}"
+        hist = [v for _, v in read_scarti()[:-1]]                       # esclude quello appena registrato
+        if len(hist) >= 5:
+            import statistics as st
+            m = st.median(hist)
+            if abs(scarto - m) > 3.0:
+                summary += f" · ⚠ scarto insolito (tipico {m:+.2f})"
     if dry:
         return f"[PROVA, nessun ordine inviato] {summary}", None
     res = mt5.order_send(req)
@@ -187,6 +198,62 @@ def say(bot, text: str, reply_to: int | None = None) -> None:
         bot._call("sendMessage", chat_id=bot.chat_id, text=text, **kw)
     except Exception as e:
         print("Invio Telegram fallito:", str(e)[:200], flush=True)
+
+
+def log_scarto(tag: str, sig: dict, tick, scarto: float) -> None:
+    SCARTI.parent.mkdir(exist_ok=True)
+    new = not SCARTI.exists()
+    with SCARTI.open("a", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        if new:
+            w.writerow(["quando_utc", "conto", "lato", "entry_canale", "bid", "ask", "spread", "scarto"])
+        w.writerow([datetime.now(timezone.utc).isoformat(timespec="seconds"), tag, sig["side"], sig["entry"], tick.bid, tick.ask, round(tick.ask - tick.bid, 5), round(scarto, 3)])
+
+
+def read_scarti() -> list[tuple[str, float]]:
+    """(conto, scarto) dai segnali registrati: journal/scarti.csv più, se presenti, gli scarti scritti nei vecchi messaggi di journal/ordini_mt5.csv."""
+    import re
+    out, seen = [], set()
+    if SCARTI.exists():
+        with SCARTI.open(encoding="utf-8", newline="") as f:
+            for r in csv.DictReader(f):
+                try:
+                    out.append((r["conto"], float(r["scarto"])))
+                    seen.add(r["quando_utc"][:16])
+                except (KeyError, ValueError):
+                    pass
+    if LOG.exists():
+        with LOG.open(encoding="utf-8", newline="") as f:
+            for r in csv.DictReader(f):
+                m = re.search(r"scarto (?:dal canale|del tuo broker dal canale) ([+-]?\d+\.\d+)", r.get("esito", ""))
+                if m and r.get("quando_utc", "")[:16] not in seen:
+                    out.append(("(storico)", float(m[1])))
+    return out
+
+
+def calibra() -> None:
+    """Riepilogo degli scarti tra l'Entry del canale (Vantage) e il prezzo del tuo broker nel momento in cui il segnale viene eseguito."""
+    import statistics as st
+    rows = read_scarti()
+    if not rows:
+        print("Ancora nessuno scarto registrato: serve almeno un segnale eseguito. Dopo ogni segnale lo scarto viene salvato in journal/scarti.csv.")
+        return
+    allv = [v for _, v in rows]
+    print(f"Scarti registrati: {len(allv)}\n")
+    for tag in sorted({t for t, _ in rows}):
+        v = [x for t, x in rows if t == tag]
+        med = st.median(v)
+        sd = st.pstdev(v) if len(v) > 1 else 0.0
+        print(f"{tag or '(terminale singolo)':28s} n={len(v):3d}  mediana {med:+7.2f}  media {st.mean(v):+7.2f}  dev.st. {sd:5.2f}  min {min(v):+7.2f}  max {max(v):+7.2f}")
+    med, sd = st.median(allv), (st.pstdev(allv) if len(allv) > 1 else 0.0)
+    print(f"\nScarto tipico: {med:+.2f} $ (variabilità {sd:.2f} $). Ultimi 10: " + " ".join(f"{x:+.2f}" for x in allv[-10:]))
+    if len(allv) < 10:
+        print("Pochi dati (meno di 10 segnali): la stima non è affidabile, continua a raccogliere.")
+    elif sd > 2.0:
+        print("Lo scarto cambia molto da un segnale all'altro: non è una differenza fissa tra i broker (conta il ritardo tra messaggio ed esecuzione e i movimenti veloci). Ragionare per distanze, come fa il programma, è la scelta giusta.")
+    else:
+        print("Lo scarto è stabile: i due broker differiscono di un valore quasi costante. Per le distanze di SL e TP non serve correggerlo; serve solo a riconoscere segnali anomali.")
+    print("Nota: lo scarto include anche il ritardo tra l'invio del messaggio e l'esecuzione, quindi sovrastima la differenza vera tra i broker.")
 
 
 def log(row: list) -> None:
@@ -341,7 +408,7 @@ def main(dry: bool) -> None:
                     try:
                         if acc:
                             with ma.session(acc) as mt:
-                                res, trk = execute(mt, sig, dry, acc["lots"])
+                                res, trk = execute(mt, sig, dry, acc["lots"], acc["login"] and str(acc["login"]))
                         else:
                             if legacy is None:
                                 from src.mt5_feed import connect
@@ -366,7 +433,8 @@ def main(dry: bool) -> None:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true", help="valida ma non invia ordini")
+    ap.add_argument("--calibra", action="store_true", help="riepilogo degli scarti tra il prezzo del canale e quello del tuo broker")
     ap.add_argument("--check", action="store_true", help="diagnosi dei conti e del collegamento a MT5")
     ap.add_argument("--suggest", action="store_true", help="stampa un messaggio di prova coerente con il prezzo attuale")
     a = ap.parse_args()
-    check() if a.check else suggest() if a.suggest else main(a.dry)
+    calibra() if a.calibra else check() if a.check else suggest() if a.suggest else main(a.dry)
