@@ -29,6 +29,26 @@ class Server(ThreadingHTTPServer):
     allow_reuse_address = False
 
 
+def telegram_status() -> dict:
+    """Stato di Telegram: il token del bot risponde (getMe), la chat è configurata, il programma dei segnali è in ascolto (battito recente)."""
+    import time
+    from src.telegram_bot import TelegramBot
+    out = {"bot": None, "bot_error": None, "chat": bool(os.environ.get("TELEGRAM_CHAT_ID")), "listener_age": None}
+    try:
+        if not os.environ.get("TELEGRAM_BOT_TOKEN"):
+            raise RuntimeError("TELEGRAM_BOT_TOKEN mancante in config.env")
+        me = TelegramBot()._call("getMe")
+        out["bot"] = "@" + (me.get("username") or me.get("first_name") or "bot")
+    except Exception as e:
+        out["bot_error"] = str(e)[:200]
+    hb = ma.DATA_DIR / "mt5_orders.heartbeat"
+    try:
+        out["listener_age"] = round(time.time() - float(hb.read_text()))
+    except (OSError, ValueError):
+        pass
+    return out
+
+
 def activity(n: int = 60) -> list[dict]:
     p = ma.DATA_DIR / "ordini_mt5.csv"
     if not p.exists():
@@ -88,6 +108,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/accounts":
                 return self._json({"accounts": ma.list_accounts(), "simulator": os.environ.get("MT5_SIMULATOR") == "1"})
+            if path == "/api/telegram":
+                return self._json(telegram_status())
             if path == "/api/activity":
                 return self._json({"rows": activity()})
             if path == "/api/results":
@@ -112,6 +134,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/accounts" and method == "POST":
                 aid = ma.save_account(self._data())
                 return self._json({"id": aid, "terminal_path": ma.get_account(aid)["terminal_path"]}, 201)
+            if path == "/api/telegram/test" and method == "POST":
+                from src.telegram_bot import TelegramBot
+                TelegramBot().send("✅ Gestione Conti: prova di collegamento a Telegram")
+                return self._json({"sent": True})
             if path == "/api/import-current" and method == "POST":
                 return self._json(ma.import_connected(str(self._data().get("terminal_path") or "")), 201)
             if path == "/api/test" and method == "POST":

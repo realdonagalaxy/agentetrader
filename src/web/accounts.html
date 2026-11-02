@@ -107,6 +107,12 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
   <div class="banner" id="sim" hidden>Modalità SIMULATORE: conti, prezzi e operazioni sono finti. Serve solo a provare l'interfaccia.</div>
   <div class="banner" id="warn" hidden></div>
   <div class="kpis" id="kpis"></div>
+  <div class="panel"><h2>Telegram</h2>
+    <div class="body" style="grid-template-columns:minmax(0,1fr) auto;align-items:center">
+      <div id="tgst" class="sub" style="font-size:13px;color:var(--ink)">Controllo…</div>
+      <button class="btn sec" id="tgtest">Invia messaggio di prova</button>
+    </div>
+  </div>
   <div class="panel">
     <h2>Conti</h2>
     <div class="tw"><table>
@@ -287,6 +293,25 @@ const form = () => ({name: editing ? (accounts.find(x => x.id === editing) || {}
 $("add").onclick = () => edit(null);
 $("cancel").onclick = () => $("dlg").close();
 $("refresh").onclick = refresh;
+async function tgCheck() {
+  const el = $("tgst");
+  try {
+    const t = await api("/api/telegram");
+    const b = t.bot ? `<span class="badge b-ok">Bot ${esc(t.bot)} risponde</span>` : `<span class="badge b-err">Bot non raggiungibile</span> <span class="err">${esc(t.bot_error)}</span>`;
+    const c = t.chat ? `<span class="badge b-ok">Chat configurata</span>` : `<span class="badge b-err">Chat non configurata</span>`;
+    const l = t.listener_age === null ? `<span class="badge b-off">Ascolto segnali non attivo</span> <span class="sub">avvia python -m src.mt5_orders</span>`
+      : t.listener_age < 60 ? `<span class="badge b-ok">Ascolto segnali attivo</span> <span class="sub">ultimo controllo ${t.listener_age} s fa</span>`
+      : `<span class="badge b-err">Ascolto segnali fermo</span> <span class="sub">ultimo controllo ${Math.round(t.listener_age / 60)} min fa</span>`;
+    el.innerHTML = [b, c, l].join(" &nbsp; ");
+  } catch (e) { el.textContent = e.message; }
+}
+$("tgtest").onclick = async () => {
+  $("tgtest").disabled = true;
+  try { await api("/api/telegram/test", "POST", {}); toast("Messaggio di prova inviato: controlla Telegram", 6000); }
+  catch (e) { toast("Invio non riuscito: " + e.message, 8000); }
+  $("tgtest").disabled = false; tgCheck();
+};
+tgCheck(); setInterval(() => { if (!document.hidden) tgCheck(); }, 20000);
 $("imp").onclick = async () => {
   $("imp").disabled = true;
   try { const r = await api("/api/import-current", "POST", {}); toast(`Aggiunto: ${r.name}${r.demo ? "" : " (conto REALE: solo lettura, non usato per i segnali)"}`, 6000); await refresh(); }

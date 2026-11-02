@@ -33,6 +33,7 @@ DEVIATION = 20
 MAGIC = 530001
 LOG = Path("journal/ordini_mt5.csv")
 PENDING = Path("journal/ordini_aperti.json")
+HEARTBEAT = Path(os.environ.get("JOURNAL_DIR", "journal")) / "mt5_orders.heartbeat"       # battito: Gestione Conti lo legge per mostrare se l'ascolto è attivo
 NUM = r"([0-9]+(?:[.,][0-9]+)?)"
 
 
@@ -271,6 +272,11 @@ def main(dry: bool) -> None:
     print(f"In ascolto su Telegram ({'PROVA' if dry else 'ordini su DEMO'}; {where}). Ctrl+C per fermare.", flush=True)
     say(bot, f"🟢 Pronto: invia il segnale ({'solo prova' if dry else 'apro su conti demo'}; {where}; solo TP1).")
     while True:
+        try:
+            HEARTBEAT.parent.mkdir(exist_ok=True)
+            HEARTBEAT.write_text(str(time.time()))
+        except OSError:
+            pass
         try:
             if legacy is None and any(not t.get("account") for t in pending.values()):
                 from src.mt5_feed import connect
