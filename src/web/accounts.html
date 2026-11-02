@@ -107,6 +107,13 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
   <div class="banner" id="sim" hidden>Modalità SIMULATORE: conti, prezzi e operazioni sono finti. Serve solo a provare l'interfaccia.</div>
   <div class="banner" id="warn" hidden></div>
   <div class="kpis" id="kpis"></div>
+  <div class="panel"><h2>Terminale MT5</h2>
+    <div class="body" style="grid-template-columns:minmax(0,1fr) auto;align-items:end">
+      <label>Tutti i conti usano lo stesso terminale <span class="hint" id="tmhint"></span><input type="text" id="tmall" list="terms" placeholder="C:\Program Files\MetaTrader 5\terminal64.exe"></label>
+      <button class="btn" id="tmapply">Applica a tutti i conti</button>
+    </div>
+    <div class="sub" style="padding:0 20px 14px">Con un solo terminale il software cambia login a ogni operazione: ogni conto deve avere la password salvata («Modifica» → Password) e il server esatto. Il terminale generico di MetaQuotes è il più adatto per più broker.</div>
+  </div><datalist id="terms"></datalist>
   <div class="panel">
     <h2>Conti</h2>
     <div class="tw"><table>
@@ -148,7 +155,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
     </div>
     <label>Server del broker<input type="text" id="server" required maxlength="80" placeholder="es. ActivTrades-Server"></label>
     <label>Password <span class="hint" id="pwhint">(salvata nel Gestore credenziali di Windows, non nei file)</span><input type="password" id="password" autocomplete="new-password"></label>
-    <label>Percorso del terminale MT5 <span class="hint">(consigliato per ogni conto: clicca il campo per scegliere tra i terminali trovati sul PC)</span><input type="text" id="terminal_path" list="terms" placeholder="C:\Program Files\MetaTrader 5\terminal64.exe"><datalist id="terms"></datalist></label>
+    <label>Percorso del terminale MT5 <span class="hint">(consigliato per ogni conto: clicca il campo per scegliere tra i terminali trovati sul PC)</span><input type="text" id="terminal_path" list="terms" placeholder="C:\Program Files\MetaTrader 5\terminal64.exe"></label>
     <div class="row2">
       <label>Lotti per operazione<input type="number" id="lots" min="0.01" max="1" step="0.01" value="0.05"></label>
       <label>Nota<input type="text" id="note" maxlength="300"></label>
@@ -199,7 +206,7 @@ function render() {
     const pl = ok ? `<span class="${cls(s.profit)}">${money(s.profit, s.currency)}</span>` : "—";
     let h = `<tr class="acc${on ? "" : " off"}" data-id="${a.id}"><td><div class="name" title="${esc(a.name)}">${esc((s && s.company) || a.broker || a.name)}</div><div class="sub num">${esc(a.login)}</div></td><td>${typ}</td><td>${state}</td>
       <td class="r num">${ok ? money(s.balance, s.currency) : "—"}</td><td class="r num">${ok ? money(s.equity, s.currency) : "—"}</td><td class="r num">${pl}</td><td class="r num">${n}</td>
-      <td>${a.use_signals && on ? `<span class="badge b-sig">${a.lots} lotti</span>` : a.use_signals ? `<span class="badge b-off">Sospeso</span>` : `<span class="badge b-off">No</span>`}</td>
+      <td>${a.use_signals && on && !(s && s.connected && !s.demo) ? `<span class="badge b-sig">${a.lots} lotti</span>` : a.use_signals && !(s && s.connected && !s.demo) ? `<span class="badge b-off">Sospeso</span>` : `<span class="badge b-off">No</span>`}</td>
       <td><label class="sw" title="${on ? "Conto attivo: disattivalo per fermare monitoraggio e segnali" : "Conto disattivato: attivalo per monitorarlo e usarlo per i segnali"}"><input type="checkbox" role="switch" data-act="toggle" ${on ? "checked" : ""} aria-label="Attiva o disattiva ${esc(a.name)}"><span></span></label></td>
       <td><div class="actions"><button class="btn sm sec" data-act="edit">Modifica</button><button class="btn sm del" data-act="del">Elimina</button></div></td></tr>`;
     if (open.has(a.id) && ok) h += detail(a, s);
@@ -229,13 +236,17 @@ function kpis() {
     <div class="kpi"><div class="l">Posizioni aperte</div><div class="v">${npos}</div></div>`;
 }
 function warn() {
+  const ps = [...new Set(accounts.map(a => a.terminal_path || ""))];
+  if (document.activeElement !== $("tmall")) $("tmall").value = ps.length === 1 ? ps[0] : "";
+  $("tmhint").textContent = ps.length > 1 ? "(ora i conti hanno terminali diversi)" : "";
   const act = accounts.filter(a => a.enabled), w = $("warn");
   const paths = act.map(a => a.terminal_path || "");
   const dup = new Set(paths).size < paths.length;
   const nopw = act.filter(a => !a.has_password);
   const msg = [];
-  if (act.length > 1 && dup) msg.push("Più conti usano lo stesso terminale MT5 (o nessun percorso): il software cambia login a ogni operazione, quindi è più lento. Con un terminale separato per conto (campo «Percorso del terminale») è più veloce e sicuro.");
-  if (act.length > 1 && nopw.length) msg.push("Senza password salvata un conto funziona solo se il terminale è già collegato a quel conto: " + nopw.map(a => a.name).join(", ") + ".");
+  if (act.length > 1 && nopw.length) msg.push("Con un solo terminale serve la password salvata di OGNI conto, altrimenti non si riesce a passare da un conto all'altro. Manca per: " + nopw.map(a => a.name).join(", ") + " («Modifica» → Password).");
+  const paths2 = new Set(act.map(a => a.terminal_path || ""));
+  if (act.length > 1 && paths2.size > 1) msg.push("I conti usano terminali diversi (o nessun percorso). Se vuoi un terminale unico, scegline uno nel riquadro «Terminale MT5» e premi «Applica a tutti i conti».");
   w.hidden = !msg.length; w.innerHTML = msg.map(esc).join("<br>");
 }
 async function refresh() {
@@ -289,6 +300,13 @@ const form = () => ({name: $("name").value, login: $("login").value, server: $("
 $("add").onclick = () => edit(null);
 $("cancel").onclick = () => $("dlg").close();
 $("refresh").onclick = refresh;
+$("tmapply").onclick = async () => {
+  $("tmapply").disabled = true;
+  try { const r = await api("/api/terminal-all", "POST", {path: $("tmall").value}); toast(`Terminale impostato su ${r.updated} conti`); await refresh(); }
+  catch (e) { toast(e.message, 7000); }
+  $("tmapply").disabled = false;
+};
+api("/api/terminals").then(j => $("terms").innerHTML = j.terminals.map(t => `<option value="${esc(t)}"></option>`).join("")).catch(() => {});
 $("imp").onclick = async () => {
   $("imp").disabled = true;
   try { const r = await api("/api/import-current", "POST", {}); toast(`Aggiunto: ${r.name}${r.demo ? "" : " (conto REALE: solo lettura, non usato per i segnali)"}`, 6000); await refresh(); }

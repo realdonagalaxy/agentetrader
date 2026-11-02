@@ -192,6 +192,16 @@ def set_enabled(aid: int, enabled: bool) -> None:
     con.close()
 
 
+def set_terminal_all(path: str) -> int:
+    """Imposta lo stesso terminale MT5 per tutti i conti (modalità «terminale unico»). Restituisce quanti conti sono stati aggiornati."""
+    p = norm_terminal(path)
+    con = db()
+    n = con.execute("UPDATE accounts SET terminal_path=?", (p,)).rowcount
+    con.commit()
+    con.close()
+    return n
+
+
 def delete_account(aid: int) -> None:
     a = get_account(aid)
     con = db()
