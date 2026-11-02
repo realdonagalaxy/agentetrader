@@ -49,6 +49,53 @@ def telegram_status() -> dict:
     return out
 
 
+def _pid_file():
+    return ma.DATA_DIR / "mt5_orders.pid"
+
+
+def listener_running() -> bool:
+    """Il programma dei segnali è in esecuzione se il suo battito è recente."""
+    import time
+    try:
+        return time.time() - float((ma.DATA_DIR / "mt5_orders.heartbeat").read_text()) < 30
+    except (OSError, ValueError):
+        return False
+
+
+def listener_start() -> int:
+    """Avvia `python -m src.mt5_orders` in background (stesso Python di questa app). Output in journal/mt5_orders.log."""
+    import subprocess
+    import sys
+    if listener_running():
+        raise ValueError("L'ascolto dei segnali è già attivo.")
+    log = open(ma.DATA_DIR / "mt5_orders.log", "a", encoding="utf-8")
+    flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)) if os.name == "nt" else 0
+    p = subprocess.Popen([sys.executable, "-u", "-m", "src.mt5_orders"], cwd=str(ma.ROOT), stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, creationflags=flags)
+    _pid_file().write_text(str(p.pid))
+    return p.pid
+
+
+def listener_stop() -> None:
+    import signal
+    import subprocess
+    try:
+        pid = int(_pid_file().read_text())
+    except (OSError, ValueError):
+        raise ValueError("Non so quale programma fermare: se l'hai avviato tu dal Prompt, fermalo da lì con Ctrl+C.")
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"], capture_output=True)
+    else:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    try:
+        _pid_file().unlink()
+        (ma.DATA_DIR / "mt5_orders.heartbeat").unlink()
+    except OSError:
+        pass
+
+
 def activity(n: int = 60) -> list[dict]:
     p = ma.DATA_DIR / "ordini_mt5.csv"
     if not p.exists():
@@ -134,6 +181,14 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/accounts" and method == "POST":
                 aid = ma.save_account(self._data())
                 return self._json({"id": aid, "terminal_path": ma.get_account(aid)["terminal_path"]}, 201)
+            if path == "/api/listener" and method == "POST":
+                act = self._data().get("action")
+                if act == "start":
+                    return self._json({"started": listener_start()})
+                if act == "stop":
+                    listener_stop()
+                    return self._json({"stopped": True})
+                raise ValueError("azione non valida")
             if path == "/api/telegram/enabled" and method == "POST":
                 ma.set_setting("telegram_enabled", bool(self._data().get("enabled")))
                 return self._json({"enabled": bool(ma.get_setting("telegram_enabled", True))})

@@ -275,8 +275,12 @@ def main(dry: bool) -> None:
     bot = TelegramBot()
     legacy = None
     allowed = str(bot.chat_id)
-    last = bot._call("getUpdates", offset=-1)                     # scarta ciò che è arrivato prima dell'avvio
-    offset = last[-1]["update_id"] + 1 if last else 0
+    try:
+        last = bot._call("getUpdates", offset=-1)                 # scarta ciò che è arrivato prima dell'avvio
+        offset = last[-1]["update_id"] + 1 if last else 0
+    except Exception as e:                                        # un problema di rete all'avvio non deve fermare il programma
+        print("Telegram non raggiungibile all'avvio, riprovo:", str(e)[:150], flush=True)
+        offset = 0
     pending = load_pending()
     accs = active_accounts()
     where = f"{len(accs)} conti dall'app" if accs else f"terminale singolo, lotto {LOTS}"
