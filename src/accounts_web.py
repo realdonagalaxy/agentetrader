@@ -1,4 +1,4 @@
-"""Gestione e monitoraggio dei conti MetaTrader 5 come applicazione web LOCALE (127.0.0.1, solo questo computer).
+"""Gestione Conti: gestione e monitoraggio dei conti MetaTrader 5 come applicazione web LOCALE (127.0.0.1, solo questo computer).
 
 Avvio:  python -m src.accounts_web        (si apre il browser, di solito su http://127.0.0.1:47951)
 Funzioni: aggiungi / modifica / elimina conti; vedi saldo, equity, profitto aperto e posizioni di ciascun conto; chiudi singole posizioni o tutte (solo conti DEMO).
@@ -159,7 +159,7 @@ def main():
     if srv is None:
         sys.exit("Nessuna porta libera: usa --port con un altro numero.")
     url = f"http://127.0.0.1:{srv.server_address[1]}"
-    print(f"Conti MT5 su {url}  (Ctrl+C per chiudere)\nArchivio: {ma.DB_PATH}", flush=True)
+    print(f"Gestione Conti su {url}  (Ctrl+C per chiudere)\nArchivio: {ma.DB_PATH}", flush=True)
     if not a.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
