@@ -212,6 +212,19 @@ def delete_account(aid: int) -> None:
 
 
 # ---------- connessione a MT5 ----------
+def explain(mt5, prefix: str = "MT5 non si collega") -> str:
+    """Messaggio d'errore di MT5 con la spiegazione dei casi più comuni."""
+    err = mt5.last_error()
+    code = err[0] if isinstance(err, tuple) and err else None
+    hint = {-6: "Accesso rifiutato dal broker: login, password o NOME DEL SERVER non corrispondono. Controlla il server (identico a quello della finestra di accesso di MT5, maiuscole e spazi compresi), "
+                "la password (dopo averla cambiata va risalvata in «Modifica») e che il conto sia ancora attivo.",
+            -10003: "Il terminale MT5 indicato non si avvia: controlla il percorso di terminal64.exe.",
+            -10005: "MT5 non risponde in tempo: chiudi i terminali MT5 e riprova.",
+            -10004: "Nessun collegamento con il terminale: aprilo e attendi che sia pronto.",
+            -2: "Parametri non validi: controlla login, password e server."}.get(code, "")
+    return f"{prefix}: {err}. {hint}".strip()
+
+
 def _mt5():
     if os.environ.get("MT5_SIMULATOR") == "1":
         from src import mt5_sim
@@ -288,7 +301,7 @@ def session(acc: dict):
         mt5.shutdown()                                              # parte sempre da uno stato pulito: nessun collegamento rimasto da un altro conto
         kw["timeout"] = 25000                                       # ms: un conto che non risponde non blocca l'app per oltre 25 secondi
         if not mt5.initialize(**kw):
-            raise RuntimeError(f"MT5 non si collega: {mt5.last_error()}. Il terminale è aperto? Login, password e server sono giusti?")
+            raise RuntimeError(explain(mt5))
         try:
             _check_terminal(mt5, acc)
             info = mt5.account_info()
@@ -347,7 +360,7 @@ def _test_with_password(c: dict, pw: str) -> dict:
             if c["terminal_path"]:
                 kw["path"] = c["terminal_path"]
             if not mt5.initialize(**kw):
-                return {"connected": False, "error": f"MT5 non si collega: {mt5.last_error()}"}
+                return {"connected": False, "error": explain(mt5)}
             try:
                 _check_terminal(mt5, c)
                 i = mt5.account_info()
