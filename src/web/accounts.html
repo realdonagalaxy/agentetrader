@@ -115,6 +115,13 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
         <button class="btn" id="lsbtn">Avvia ascolto segnali</button></div>
     </div>
   </div>
+  <div class="panel"><h2>Copia dei trade</h2>
+    <div class="body" style="grid-template-columns:minmax(0,1fr) auto;align-items:center">
+      <div id="cpst" class="sub" style="font-size:13px;color:var(--ink)">Controllo…</div>
+      <button class="btn" id="cpbtn">Avvia copia</button>
+    </div>
+    <div class="sub" style="padding:0 20px 14px">Le operazioni che apri e chiudi sul conto sorgente (Vantage) vengono copiate sui conti demo di destinazione. Il sorgente è solo letto, non riceve mai ordini. Si copiano solo i trade aperti dopo l'avvio.</div>
+  </div>
   <div class="panel">
     <h2>Conti</h2>
     <div class="tw"><table>
@@ -162,7 +169,8 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
       <label>Nota<input type="text" id="note" maxlength="300"></label>
     </div>
     <label class="chk"><input type="checkbox" id="enabled" checked><span>Conto attivo (viene monitorato)</span></label>
-    <label class="chk"><input type="checkbox" id="use_signals" checked><span>Usa per i segnali Telegram (apre le operazioni; solo se il conto è demo)</span></label>
+    <label class="chk"><input type="checkbox" id="is_source"><span>Conto sorgente (Vantage): i trade che apri e chiudi qui vengono copiati sugli altri conti. Il conto viene solo letto, anche se è reale.</span></label>
+    <label class="chk"><input type="checkbox" id="use_signals" checked><span>Conto di destinazione (segnali Telegram e copia dei trade; solo se il conto è demo)</span></label>
   </div>
   <div class="foot"><span class="msg" id="tmsg"></span>
     <button type="button" class="btn sec" id="test">Prova connessione</button>
@@ -207,7 +215,7 @@ function render() {
     const pl = ok ? `<span class="${cls(s.profit)}">${money(s.profit, s.currency)}</span>` : "—";
     let h = `<tr class="acc${on ? "" : " off"}" data-id="${a.id}"><td><div class="name num" title="${esc(((s && s.company) || a.broker || a.name) + (a.terminal_path ? " · Terminale: " + a.terminal_path : ""))}">${esc(a.login)}</div></td><td>${typ}</td><td>${state}</td>
       <td class="r num">${ok ? money(s.balance, s.currency) : "—"}</td><td class="r num">${ok ? money(s.equity, s.currency) : "—"}</td><td class="r num">${pl}</td><td class="r num">${n}</td>
-      <td>${a.use_signals && on && !(s && s.connected && !s.demo) ? `<span class="badge b-sig">${a.lots} lotti</span>` : a.use_signals && !(s && s.connected && !s.demo) ? `<span class="badge b-off">Sospeso</span>` : `<span class="badge b-off">No</span>`}</td>
+      <td>${a.is_source ? `<span class="badge b-demo" title="Il suo trading viene copiato sugli altri conti">Sorgente</span>` : a.use_signals && on && !(s && s.connected && !s.demo) ? `<span class="badge b-sig">${a.lots} lotti</span>` : a.use_signals && !(s && s.connected && !s.demo) ? `<span class="badge b-off">Sospeso</span>` : `<span class="badge b-off">No</span>`}</td>
       <td><label class="sw" title="${on ? "Conto attivo: disattivalo per fermare monitoraggio e segnali" : "Conto disattivato: attivalo per monitorarlo e usarlo per i segnali"}"><input type="checkbox" role="switch" data-act="toggle" ${on ? "checked" : ""} aria-label="Attiva o disattiva il conto ${esc(a.login)}"><span></span></label></td>
       <td><div class="actions"><button class="btn sm sec" data-act="edit">Modifica</button><button class="btn sm del" data-act="del">Elimina</button></div></td></tr>`;
     if (open.has(a.id) && ok) h += detail(a, s);
@@ -287,12 +295,14 @@ function edit(a) {
   for (const k of ["login", "server", "lots", "note"]) $(k).value = a ? a[k] : (k === "lots" ? 0.05 : "");
   $("password").value = ""; $("password").placeholder = a && a.has_password ? "•••••• (lascia vuoto per non cambiarla)" : "";
   $("enabled").checked = a ? a.enabled : true; $("use_signals").checked = a ? a.use_signals : true;
+  $("is_source").checked = a ? !!a.is_source : false; $("use_signals").disabled = $("is_source").checked;
   $("tpl").hidden = !a; $("terminal_path").value = a ? (a.terminal_path || "Terminale predefinito di MT5") : "";
   $("dlg").showModal(); $("login").focus();
 }
 const form = () => ({name: editing ? (accounts.find(x => x.id === editing) || {}).name || "" : "", login: $("login").value, server: $("server").value, password: $("password").value, terminal_path: editing ? (accounts.find(x => x.id === editing) || {}).terminal_path || "" : "",
-  lots: $("lots").value, note: $("note").value, create_terminal: !editing, enabled: $("enabled").checked, use_signals: $("use_signals").checked});
+  lots: $("lots").value, note: $("note").value, create_terminal: !editing, enabled: $("enabled").checked, use_signals: $("use_signals").checked, is_source: $("is_source").checked});
 $("add").onclick = () => edit(null);
+$("is_source").onchange = () => { $("use_signals").disabled = $("is_source").checked; if ($("is_source").checked) $("use_signals").checked = false; };
 $("cancel").onclick = () => $("dlg").close();
 $("refresh").onclick = refresh;
 async function tgCheck() {
@@ -317,6 +327,23 @@ $("tgtest").onclick = async () => {
   catch (e) { toast("Invio non riuscito: " + e.message, 8000); }
   $("tgtest").disabled = false; tgCheck();
 };
+async function cpCheck() {
+  try {
+    const c = await api("/api/copier"), run = c.age !== null && c.age < 30;
+    $("cpbtn").textContent = run ? "Ferma copia" : "Avvia copia"; $("cpbtn").className = "btn" + (run ? " sec" : "");
+    const st = run ? `<span class="badge b-ok">Copia attiva</span> <span class="sub">ultimo giro ${c.age} s fa</span>` : c.age !== null ? `<span class="badge b-err">Copia ferma</span>` : `<span class="badge b-off">Copia non attiva</span>`;
+    const src = c.source ? `Sorgente <b class="num">${esc(c.source)}</b>` : `<span class="badge b-err">Nessun conto sorgente</span>`;
+    const dst = c.targets.length ? `Destinazioni: <b class="num">${c.targets.map(esc).join(", ")}</b>` : `<span class="badge b-err">Nessuna destinazione demo attiva</span>`;
+    $("cpst").innerHTML = [st, src, dst].join(" &nbsp; ");
+  } catch (e) { $("cpst").textContent = e.message; }
+}
+$("cpbtn").onclick = async () => {
+  const stop = $("cpbtn").textContent.startsWith("Ferma"); $("cpbtn").disabled = true;
+  try { await api("/api/copier", "POST", {action: stop ? "stop" : "start"}); toast(stop ? "Copia fermata" : "Copia avviata: copia solo i trade aperti da ora", 6000); }
+  catch (e) { toast(e.message, 8000); }
+  setTimeout(() => { $("cpbtn").disabled = false; cpCheck(); }, stop ? 500 : 5000);
+};
+cpCheck(); setInterval(() => { if (!document.hidden) cpCheck(); }, 15000);
 $("lsbtn").onclick = async () => {
   const stop = $("lsbtn").textContent.startsWith("Ferma"); $("lsbtn").disabled = true;
   try { await api("/api/listener", "POST", {action: stop ? "stop" : "start"}); toast(stop ? "Ascolto segnali fermato" : "Ascolto segnali avviato: tra qualche secondo lo stato diventa «attivo»", 6000); }

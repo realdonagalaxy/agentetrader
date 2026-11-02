@@ -49,37 +49,33 @@ def telegram_status() -> dict:
     return out
 
 
-def _pid_file():
-    return ma.DATA_DIR / "mt5_orders.pid"
-
-
-def listener_running() -> bool:
-    """Il programma dei segnali è in esecuzione se il suo battito è recente."""
+def _alive(heartbeat: str, secs: int = 30) -> bool:
     import time
     try:
-        return time.time() - float((ma.DATA_DIR / "mt5_orders.heartbeat").read_text()) < 30
+        return time.time() - float((ma.DATA_DIR / heartbeat).read_text()) < secs
     except (OSError, ValueError):
         return False
 
 
-def listener_start() -> int:
-    """Avvia `python -m src.mt5_orders` in background (stesso Python di questa app). Output in journal/mt5_orders.log."""
+def _proc_start(module: str, name: str) -> int:
+    """Avvia `python -m <module>` in background (stesso Python di questa app). Output in journal/<name>.log, pid in journal/<name>.pid."""
     import subprocess
     import sys
-    if listener_running():
-        raise ValueError("L'ascolto dei segnali è già attivo.")
-    log = open(ma.DATA_DIR / "mt5_orders.log", "a", encoding="utf-8")
+    if _alive(f"{name}.heartbeat"):
+        raise ValueError("È già attivo.")
+    ma.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    log = open(ma.DATA_DIR / f"{name}.log", "a", encoding="utf-8")
     flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)) if os.name == "nt" else 0
-    p = subprocess.Popen([sys.executable, "-u", "-m", "src.mt5_orders"], cwd=str(ma.ROOT), stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, creationflags=flags)
-    _pid_file().write_text(str(p.pid))
+    p = subprocess.Popen([sys.executable, "-u", "-m", module], cwd=str(ma.ROOT), stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, creationflags=flags)
+    (ma.DATA_DIR / f"{name}.pid").write_text(str(p.pid))
     return p.pid
 
 
-def listener_stop() -> None:
+def _proc_stop(name: str) -> None:
     import signal
     import subprocess
     try:
-        pid = int(_pid_file().read_text())
+        pid = int((ma.DATA_DIR / f"{name}.pid").read_text())
     except (OSError, ValueError):
         raise ValueError("Non so quale programma fermare: se l'hai avviato tu dal Prompt, fermalo da lì con Ctrl+C.")
     if os.name == "nt":
@@ -89,11 +85,23 @@ def listener_stop() -> None:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
-    try:
-        _pid_file().unlink()
-        (ma.DATA_DIR / "mt5_orders.heartbeat").unlink()
-    except OSError:
-        pass
+    for f in (f"{name}.pid", f"{name}.heartbeat"):
+        try:
+            (ma.DATA_DIR / f).unlink()
+        except OSError:
+            pass
+
+
+def listener_running() -> bool:
+    return _alive("mt5_orders.heartbeat")
+
+
+def listener_start() -> int:
+    return _proc_start("src.mt5_orders", "mt5_orders")
+
+
+def listener_stop() -> None:
+    _proc_stop("mt5_orders")
 
 
 def activity(n: int = 60) -> list[dict]:
@@ -157,6 +165,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"accounts": ma.list_accounts(), "simulator": os.environ.get("MT5_SIMULATOR") == "1"})
             if path == "/api/telegram":
                 return self._json(telegram_status())
+            if path == "/api/copier":
+                import time
+                try:
+                    age = round(time.time() - float((ma.DATA_DIR / "mt5_copier.heartbeat").read_text()))
+                except (OSError, ValueError):
+                    age = None
+                accs = ma.list_accounts()
+                return self._json({"age": age, "source": next((a["login"] for a in accs if a["is_source"]), None),
+                                   "targets": [a["login"] for a in accs if a["enabled"] and a["use_signals"] and not a["is_source"] and a.get("kind") != "real"]})
             if path == "/api/activity":
                 return self._json({"rows": activity()})
             if path == "/api/results":
@@ -187,6 +204,16 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"started": listener_start()})
                 if act == "stop":
                     listener_stop()
+                    return self._json({"stopped": True})
+                raise ValueError("azione non valida")
+            if path == "/api/copier" and method == "POST":
+                act = self._data().get("action")
+                if act == "start":
+                    if not any(a["is_source"] and a["enabled"] for a in ma.list_accounts()):
+                        raise ValueError("Manca il conto sorgente: aggiungi il conto Vantage con la spunta «Conto sorgente».")
+                    return self._json({"started": _proc_start("src.copier", "mt5_copier")})
+                if act == "stop":
+                    _proc_stop("mt5_copier")
                     return self._json({"stopped": True})
                 raise ValueError("azione non valida")
             if path == "/api/telegram/enabled" and method == "POST":

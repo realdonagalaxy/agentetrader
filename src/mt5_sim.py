@@ -132,6 +132,11 @@ def order_send(req):
         if pos is None:
             return N(retcode=10013, comment="Invalid request", price=0, order=0)
         price = tick.bid if pos.type == ORDER_TYPE_BUY else tick.ask
+        if req.get("volume") and req["volume"] < pos.volume - 1e-9:     # chiusura parziale
+            part = round(((price - pos.price_open) if pos.type == ORDER_TYPE_BUY else (pos.price_open - price)) * req["volume"] * 100, 2)
+            _BAL[pos.login] = _BAL.get(pos.login, 10000.0) + part
+            pos.volume = round(pos.volume - req["volume"], 2)
+            return N(retcode=TRADE_RETCODE_DONE, comment="Done", price=price, order=pos.ticket)
         pos.price_current = price
         pos.profit = round(((price - pos.price_open) if pos.type == ORDER_TYPE_BUY else (pos.price_open - price)) * pos.volume * 100, 2)
         _close(pos, price, DEAL_REASON_CLIENT)
