@@ -117,9 +117,8 @@ def source_terminal() -> str:
 
 
 def provision_terminal(name: str, login: int) -> str:
-    r"""Copia l'installazione di origine in C:\MT5\<nome conto> (ripiego: cartella MT5 dell'utente), la marca come portable e crea il collegamento sul Desktop.
+    r"""Copia l'installazione di origine in C:\MT5\<numero conto> (ripiego: cartella MT5 dell'utente), la marca come portable e crea il collegamento sul Desktop.
     Se la cartella esiste già la riusa. Restituisce il percorso di terminal64.exe. L'origine non viene toccata."""
-    import re
     import shutil
     exe, src = "terminal64.exe", source_terminal()
     if not os.path.isfile(os.path.join(src, exe)):
@@ -135,10 +134,12 @@ def provision_terminal(name: str, login: int) -> str:
             continue
     if base is None:
         raise ValueError("Non riesco a creare la cartella C:\\MT5 (permessi?): avvia Gestione Conti come amministratore oppure indica a mano il percorso del terminale.")
-    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", name).strip("_") or f"conto_{login}"
+    safe = str(login)                                             # la cartella porta il NUMERO del conto
     dst = os.path.join(base, safe)
-    if os.path.exists(dst):                                       # cartella già occupata (da un altro conto con lo stesso nome): ne uso una col numero di conto, mai condivisa
-        dst = os.path.join(base, f"{safe}_{login}")
+    n = 1
+    while os.path.exists(dst) and not os.path.isfile(os.path.join(dst, "portable.flag")):   # cartella occupata da altro (non nostra): la evito
+        n += 1
+        dst = os.path.join(base, f"{safe}_{n}")
     if not os.path.isfile(os.path.join(dst, exe)):
         shutil.copytree(src, dst, dirs_exist_ok=True)
     with open(os.path.join(dst, "portable.flag"), "w") as f:
