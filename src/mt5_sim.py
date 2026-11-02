@@ -107,20 +107,43 @@ def positions_get(**kw):
     return tuple(p for p in _state["positions"].values() if p.login == _state["login"])
 
 
-def history_deals_get(*a, position=None, **kw):
-    if a:                                                              # intervallo di date: trade di esempio generati
+_fake = {}
+
+
+def _fake_trades(login):
+    """Operazioni chiuse inventate (solo simulatore): apertura e chiusura con prezzi, verso e motivo (TP, SL o chiusura a mano)."""
+    if login not in _fake:
         import random
-        rnd = random.Random(_state["login"] or 1)
-        out, now = [], int(time.time())
-        for i in range(70):
-            tc = now - int(rnd.random() * 120 * 86400)
-            pl = round(rnd.gauss(4, 28), 2)
+        rnd, now, out = random.Random(login or 1), int(time.time()), []
+        for i in range(90):
+            tc = now - int(rnd.random() * 100 * 86400)
+            ty, reason = rnd.randint(0, 1), rnd.choice((DEAL_REASON_TP, DEAL_REASON_TP, DEAL_REASON_SL, DEAL_REASON_CLIENT))
+            p0 = round(3900 + rnd.random() * 100, 2)
+            mv = {DEAL_REASON_TP: 5.0, DEAL_REASON_SL: -15.0}.get(reason, rnd.gauss(0, 4))
+            p1 = round(p0 + (mv if ty == 0 else -mv), 2)
             pid = 7000000 + i
-            out.append(N(ticket=pid * 2, position_id=pid, time=tc - 3000, type=rnd.randint(0, 1), entry=DEAL_ENTRY_IN, profit=0.0, commission=-0.35, swap=0.0, fee=0.0, symbol="GOLD", _asdict=lambda: {}))
-            out.append(N(ticket=pid * 2 + 1, position_id=pid, time=tc, type=rnd.randint(0, 1), entry=DEAL_ENTRY_OUT, profit=pl, commission=-0.35, swap=round(-rnd.random(), 2), fee=0.0, symbol="GOLD", _asdict=lambda: {}))
-        for x in out:
-            x._asdict = (lambda y=x: {k: v for k, v in vars(y).items() if k != "_asdict"})
-        return tuple(x for x in out if x.time >= a[0].timestamp())
+            out.append((pid, tc - 3000, tc, ty, p0, p1, round(mv * 5, 2), reason))
+        _fake[login] = out
+    return _fake[login]
+
+
+def _deals_of(t):
+    pid, to, tc, ty, p0, p1, pl, reason = t
+    return [N(ticket=pid * 2, position_id=pid, time=to, type=ty, entry=DEAL_ENTRY_IN, reason=DEAL_REASON_CLIENT, price=p0, profit=0.0, commission=-0.35, swap=0.0, fee=0.0, symbol="GOLD"),
+            N(ticket=pid * 2 + 1, position_id=pid, time=tc, type=1 - ty, entry=DEAL_ENTRY_OUT, reason=reason, price=p1, profit=pl, commission=-0.35, swap=0.0, fee=0.0, symbol="GOLD")]
+
+
+def history_deals_get(*a, position=None, **kw):
+    if a:                                                              # intervallo di date
+        t0 = a[0].timestamp() if hasattr(a[0], "timestamp") else a[0]
+        t1 = a[1].timestamp() if hasattr(a[1], "timestamp") else a[1]
+        for t in _fake_trades(_state["login"]):
+            for d in _deals_of(t):
+                d._asdict = (lambda y=d: {k: v for k, v in vars(y).items() if k != "_asdict"})
+        return tuple(d for t in _fake_trades(_state["login"]) for d in _deals_of(t) if t0 <= d.time < t1)
+    for t in _fake_trades(_state["login"]):
+        if t[0] == position:
+            return tuple(_deals_of(t))
     return tuple(_state["deals"].get(position, ()))
 
 

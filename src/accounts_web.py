@@ -113,19 +113,6 @@ def activity(n: int = 60) -> list[dict]:
     return rows[-n:][::-1]
 
 
-def results(df, currency: str | None, source: str) -> dict:
-    """Riepilogo per settimana e per mese di un elenco di trade chiusi (time, profit, commission, swap)."""
-    from src.mt5_weekly import aggregate
-    if df.empty:
-        return {"source": source, "currency": currency, "weeks": [], "months": [], "total": {"trade": 0, "netto": 0, "vinti": 0}}
-    def rows(g):
-        return [{"inizio": str(i), **{k: (int(v) if k in ("trade", "vinti", "persi") else float(v)) for k, v in r.items()}} for i, r in g.iterrows()]
-    w, m = aggregate(df, "W"), aggregate(df, "M")
-    return {"source": source, "currency": currency, "weeks": rows(w), "months": rows(m),
-            "total": {"trade": int(w.trade.sum()), "vinti": int(w.vinti.sum()), "persi": int(w.persi.sum()), "netto": round(float(w.netto.sum()), 2),
-                      "profitto": round(float(w.profitto.sum()), 2), "perdita": round(float(w.perdita.sum()), 2)}}
-
-
 class Handler(BaseHTTPRequestHandler):
     server_version = "AccountsWeb/1.0"
 
@@ -176,11 +163,12 @@ class Handler(BaseHTTPRequestHandler):
                                    "targets": [a["login"] for a in accs if a["enabled"] and a["use_signals"] and not a["is_source"] and a.get("kind") != "real"]})
             if path == "/api/activity":
                 return self._json({"rows": activity()})
-            if path == "/api/results":
+            if path == "/api/calendar":
                 q = parse_qs(urlparse(self.path).query)
-                start = (q.get("from") or [f"{datetime.now().year}-01-01"])[0]
-                df, cur = ma.history(ma.get_account(int((q.get("account") or ["0"])[0])), start)
-                return self._json(results(df, cur, "MT5"))
+                month = (q.get("month") or [datetime.now().strftime("%Y-%m")])[0]
+                if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+                    raise ValueError("mese non valido (formato AAAA-MM)")
+                return self._json(ma.calendar_month(ma.get_account(int((q.get("account") or ["0"])[0])), month))
             m = re.fullmatch(r"/api/accounts/(\d+)/status", path)
             if m:
                 return self._json(ma.snapshot(ma.get_account(int(m[1]))))

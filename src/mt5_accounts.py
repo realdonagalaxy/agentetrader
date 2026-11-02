@@ -495,26 +495,45 @@ if __name__ == "__main__":
             sys.exit(str(e))
 
 
-def history(acc: dict, start: str):
-    """Trade CHIUSI del conto dal giorno `start` (YYYY-MM-DD): una riga per posizione con profitto, commissioni e swap sommati su tutti i suoi deal.
-    L'orario è quello del server del broker (come la settimana/mese mostrati da MT5). Restituisce (DataFrame, valuta)."""
-    import pandas as pd
-    from datetime import datetime, timedelta
-    t0 = datetime.strptime(start, "%Y-%m-%d")
-    t1 = datetime.now() + timedelta(days=2)
+def calendar_month(acc: dict, month: str) -> dict:
+    """Operazioni CHIUSE del conto nel mese (YYYY-MM), raggruppate per giorno di chiusura (orario del server del broker):
+    numero di TP, di SL, di altre chiusure (a mano, copia...), somma dei PIPS e profitto netto. TP/SL = motivo di chiusura registrato da MT5.
+    Pips: (prezzo di chiusura - prezzo di apertura) nel verso dell'operazione; oro 1 pip = 0,10, altri strumenti 10 punti."""
+    from datetime import datetime, timedelta, timezone
+    y, m = (int(x) for x in month.split("-"))
+    t0, t1 = datetime(y, m, 1), datetime(y + (m == 12), m % 12 + 1, 1)
+    day_of = lambda ts: datetime.fromtimestamp(ts, tz=timezone.utc)
     with session(acc) as mt5:
         cur = mt5.account_info().currency
-        deals = mt5.history_deals_get(t0, t1)
+        deals = mt5.history_deals_get(t0 - timedelta(days=1), t1 + timedelta(days=1))
         if deals is None:
             raise RuntimeError(f"MT5 non restituisce la cronologia: {mt5.last_error()}. In MT5 apri la scheda Cronologia (Ctrl+T) e scegli «Tutta la cronologia», poi riprova.")
-        if not deals:
-            return pd.DataFrame(columns=["time", "simbolo", "profit", "commission", "swap"]), cur
-        d = pd.DataFrame([x._asdict() for x in deals])
-        d = d[d["type"].isin([0, 1])]                                      # solo operazioni di mercato (esclude depositi, prelievi, bonus)
-        d["fee"] = d["fee"] if "fee" in d else 0.0
-        d["commission"] = d["commission"] + d["fee"]
-        out = d[d["entry"].isin([1, 2, 3])]                                # deal di chiusura: danno l'orario
-        agg = d.groupby("position_id").agg(profit=("profit", "sum"), commission=("commission", "sum"), swap=("swap", "sum"), simbolo=("symbol", "first"))
-        t = out.groupby("position_id")["time"].max()
-        r = agg.loc[t.index].assign(time=pd.to_datetime(t, unit="s"))
-        return r.reset_index(drop=True)[["time", "simbolo", "profit", "commission", "swap"]], cur
+        days, opens, psize = {}, {}, {}
+        for d in deals:
+            if d.entry not in (1, 2, 3) or d.type not in (0, 1):
+                continue
+            when = day_of(d.time).replace(tzinfo=None)
+            if not t0 <= when < t1:
+                continue
+            if d.position_id not in opens:
+                ins = [x for x in (mt5.history_deals_get(position=d.position_id) or ()) if x.entry == 0]
+                opens[d.position_id] = ins[0] if ins else None
+            o = opens[d.position_id]
+            if o is None:                                          # apertura non trovata nella cronologia: non si può calcolare
+                continue
+            if d.symbol not in psize:
+                if "XAU" in d.symbol.upper() or "GOLD" in d.symbol.upper():
+                    psize[d.symbol] = 0.10
+                else:
+                    info = mt5.symbol_info(d.symbol)
+                    psize[d.symbol] = (info.point * 10) if info else 0.0001
+            pips = ((d.price - o.price) if o.type == 0 else (o.price - d.price)) / psize[d.symbol]
+            c = days.setdefault(when.strftime("%Y-%m-%d"), {"tp": 0, "sl": 0, "altre": 0, "pips": 0.0, "trade": 0, "netto": 0.0})
+            c["tp" if d.reason == mt5.DEAL_REASON_TP else "sl" if d.reason == mt5.DEAL_REASON_SL else "altre"] += 1
+            c["pips"] += pips
+            c["trade"] += 1
+            c["netto"] += d.profit + d.commission + d.swap + getattr(d, "fee", 0.0)
+    for c in days.values():
+        c["pips"], c["netto"] = round(c["pips"], 1), round(c["netto"], 2)
+    tot = {k: round(sum(c[k] for c in days.values()), 2) for k in ("tp", "sl", "altre", "pips", "trade", "netto")}
+    return {"month": month, "currency": cur, "days": days, "total": tot}
