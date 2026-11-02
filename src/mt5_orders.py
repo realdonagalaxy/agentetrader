@@ -204,7 +204,35 @@ def suggest() -> None:
 def active_accounts() -> list[dict]:
     """Conti dell'archivio (src.mt5_accounts) abilitati e usati per i segnali; riletti a ogni giro, quindi le modifiche dall'app si applicano subito."""
     from src import mt5_accounts as ma
-    return [a for a in ma.list_accounts() if a["enabled"] and a["use_signals"]]
+    # I conti già riconosciuti come REALI non vengono nemmeno contattati: collegarsi a loro cambierebbe il login del terminale e potrebbe lasciare fuori il demo.
+    return [a for a in ma.list_accounts() if a["enabled"] and a["use_signals"] and a.get("kind") != "real"]
+
+
+def check() -> None:
+    """Diagnosi: per ogni conto dell'app dice se è usato per i segnali e se MT5 si collega davvero (login, tipo, simbolo)."""
+    from dotenv import load_dotenv
+    load_dotenv("config.env")
+    from src import mt5_accounts as ma
+    accs = ma.list_accounts()
+    if not accs:
+        print("Nessun conto nell'app: i segnali usano il terminale singolo (modalità precedente).")
+    for a in accs:
+        why = []
+        if not a["enabled"]:
+            why.append("DISATTIVATO (interruttore Attivo)")
+        if not a["use_signals"]:
+            why.append("«Usa per i segnali» è spento")
+        if a.get("kind") == "real":
+            why.append("è un conto REALE: non viene usato")
+        print(f"\n[{a['name']}] login {a['login']} · {a['server']} · lotti {a['lots']} · password salvata: {'sì' if a['has_password'] else 'NO'} · terminale: {a['terminal_path'] or '(predefinito)'}")
+        print("  Segnali:", "NON riceve (" + "; ".join(why) + ")" if why else "riceve i segnali")
+        try:
+            with ma.session(a) as m:
+                sym = broker_symbol("XAUUSD")
+                info = m.symbol_info(sym)
+                print(f"  MT5: collegato · {'DEMO' if ma.is_demo(m) else 'REALE'} · simbolo {sym}: {'trovato' if info else 'NON TROVATO (controlla MT5_SYMBOL in config.env)'} · posizioni aperte {len(m.positions_get() or [])}")
+        except Exception as e:
+            print("  MT5: ERRORE:", str(e)[:250])
 
 
 def follow_closures(pending: dict, bot, legacy) -> None:
@@ -304,6 +332,7 @@ def main(dry: bool) -> None:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true", help="valida ma non invia ordini")
+    ap.add_argument("--check", action="store_true", help="diagnosi dei conti e del collegamento a MT5")
     ap.add_argument("--suggest", action="store_true", help="stampa un messaggio di prova coerente con il prezzo attuale")
     a = ap.parse_args()
-    suggest() if a.suggest else main(a.dry)
+    check() if a.check else suggest() if a.suggest else main(a.dry)

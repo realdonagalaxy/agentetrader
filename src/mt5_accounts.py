@@ -30,6 +30,10 @@ def db() -> sqlite3.Connection:
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
     con.execute(SCHEMA)
+    try:
+        con.execute("ALTER TABLE accounts ADD COLUMN kind TEXT DEFAULT ''")      # 'demo' / 'real' / '' (non ancora letto)
+    except sqlite3.OperationalError:
+        pass
     return con
 
 
@@ -243,11 +247,19 @@ def snapshot(acc: dict) -> dict:
     try:
         with session(acc) as mt5:
             i = mt5.account_info()
+            _remember_kind(acc["id"], is_demo(mt5)) if acc.get("id") else None
             return {"connected": True, "demo": is_demo(mt5), "currency": i.currency, "balance": i.balance, "equity": i.equity, "margin": i.margin,
                     "free_margin": i.margin_free, "profit": i.profit, "leverage": i.leverage, "broker_name": i.name,
                     "positions": [_pos(p) for p in (mt5.positions_get() or [])], "at": int(time.time())}
     except Exception as e:
         return {"connected": False, "error": str(e)[:300]}
+
+
+def _remember_kind(aid: int, demo: bool) -> None:
+    con = db()
+    con.execute("UPDATE accounts SET kind=? WHERE id=?", ("demo" if demo else "real", aid))
+    con.commit()
+    con.close()
 
 
 def test_connection(d: dict) -> dict:
@@ -331,6 +343,7 @@ def import_connected(terminal_path: str = "") -> dict:
         raise ValueError(f"Il conto {login} ({server}) è già nell'elenco.")
     aid = save_account({"name": name, "login": login, "server": server, "terminal_path": terminal_path, "lots": 0.05, "enabled": True, "use_signals": demo,
                         "note": "importato dal terminale MT5"})
+    _remember_kind(aid, demo)
     return {"id": aid, "name": name, "login": login, "server": server, "demo": demo}
 
 
