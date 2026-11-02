@@ -58,6 +58,10 @@ def db() -> sqlite3.Connection:
     except sqlite3.OperationalError:
         pass
     try:
+        con.execute("ALTER TABLE accounts ADD COLUMN is_feed INTEGER DEFAULT 0")  # conto di riferimento: fornisce i prezzi del canale (Vantage), non apre operazioni
+    except sqlite3.OperationalError:
+        pass
+    try:
         con.execute("ALTER TABLE accounts ADD COLUMN broker TEXT DEFAULT ''")    # nome del broker / prop firm come lo comunica MT5 (account_info.company)
     except sqlite3.OperationalError:
         pass
@@ -147,12 +151,13 @@ def clean(d: dict) -> dict:
     if not 0.01 <= lots <= MAX_LOTS:
         raise ValueError(f"i lotti devono stare tra 0,01 e {MAX_LOTS:g}")
     return {"name": name[:60], "login": login, "server": server[:80], "terminal_path": norm_terminal(str(d.get("terminal_path") or "")),
-            "lots": round(lots, 2), "enabled": 1 if d.get("enabled", True) else 0, "use_signals": 1 if d.get("use_signals", True) else 0, "note": str(d.get("note") or "")[:300]}
+            "lots": round(lots, 2), "enabled": 1 if d.get("enabled", True) else 0, "use_signals": 0 if d.get("is_feed") else (1 if d.get("use_signals", True) else 0),
+            "is_feed": 1 if d.get("is_feed") else 0, "note": str(d.get("note") or "")[:300]}
 
 
 def out(r: sqlite3.Row) -> dict:
     d = dict(r)
-    d["enabled"], d["use_signals"] = bool(d["enabled"]), bool(d["use_signals"])
+    d["enabled"], d["use_signals"], d["is_feed"] = bool(d["enabled"]), bool(d["use_signals"]), bool(d.get("is_feed"))
     d["has_password"] = bool(get_password(d))
     return d
 
@@ -185,9 +190,12 @@ def save_account(d: dict, aid: int | None = None) -> int:
             con.close()
             raise ValueError("conto non trovato")
     dup = con.execute("SELECT id FROM accounts WHERE login=? AND server=? AND id IS NOT ?", (c["login"], c["server"], aid)).fetchone()
+    other_feed = con.execute("SELECT login FROM accounts WHERE is_feed=1 AND id IS NOT ?", (aid,)).fetchone() if c["is_feed"] else None
     con.close()
     if dup:
         raise ValueError("esiste già un conto con questo login e questo server")
+    if other_feed:
+        raise ValueError(f"c'è già un conto di riferimento per i prezzi ({other_feed['login']}): ne serve uno solo. Toglilo da quel conto prima.")
     changed = old is None or bool(pw) or (old["login"], old["server"]) != (c["login"], c["server"])
     first = None
     if changed:
@@ -204,14 +212,14 @@ def save_account(d: dict, aid: int | None = None) -> int:
         set_password(c["login"], c["server"], pw)
     con = db()
     if old is None:
-        cur = con.execute("INSERT INTO accounts (name,login,server,terminal_path,lots,enabled,use_signals,note,created_at) VALUES (?,?,?,?,?,?,?,?,datetime('now'))",
-                          (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["note"]))
+        cur = con.execute("INSERT INTO accounts (name,login,server,terminal_path,lots,enabled,use_signals,is_feed,note,created_at) VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))",
+                          (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["is_feed"], c["note"]))
         aid = cur.lastrowid
     else:
         if (old["login"], old["server"]) != (c["login"], c["server"]):
             del_password(old["login"], old["server"])                  # la vecchia password non vale più
-        con.execute("UPDATE accounts SET name=?,login=?,server=?,terminal_path=?,lots=?,enabled=?,use_signals=?,note=? WHERE id=?",
-                    (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["note"], aid))
+        con.execute("UPDATE accounts SET name=?,login=?,server=?,terminal_path=?,lots=?,enabled=?,use_signals=?,is_feed=?,note=? WHERE id=?",
+                    (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["is_feed"], c["note"], aid))
     if first:                                                          # tipo e società li conosciamo già dal primo collegamento
         con.execute("UPDATE accounts SET kind=?, broker=COALESCE(NULLIF(?, ''), broker) WHERE id=?",
                     ("demo" if first.get("demo") else "real", first.get("company", ""), aid))
@@ -422,6 +430,23 @@ def _close(mt5, p) -> str:
     if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
         raise ValueError(f"chiusura rifiutata dal broker: {getattr(res, 'retcode', None)} {getattr(res, 'comment', mt5.last_error())}")
     return f"chiusa {p.symbol} #{p.ticket} a {res.price}"
+
+
+def close_with_result(acc: dict, ticket: int) -> dict:
+    """Chiude una posizione al prezzo di mercato e restituisce {'price': prezzo di chiusura, 'profit': profitto}. Solo conti demo; ValueError se la posizione non c'è più."""
+    with session(acc) as mt5:
+        if not is_demo(mt5):
+            raise ValueError("conto REALE: nessuna chiusura dal software")
+        pos = [p for p in (mt5.positions_get() or []) if int(p.ticket) == int(ticket)]
+        if not pos:
+            raise ValueError("posizione non trovata (forse già chiusa)")
+        p = pos[0]
+        profit = p.profit + getattr(p, "swap", 0.0)
+        _close(mt5, p)
+        deals = mt5.history_deals_get(position=p.ticket) or []
+        out = [d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT]
+        price = out[-1].price if out else mt5.symbol_info_tick(p.symbol).bid
+        return {"price": price, "profit": profit if not out else out[-1].profit}
 
 
 def close_positions(acc: dict, tickets: list[int] | None = None) -> list[str]:
