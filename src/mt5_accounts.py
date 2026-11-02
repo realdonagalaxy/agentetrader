@@ -142,14 +142,13 @@ def provision_terminal(name: str, login: int) -> str:
 
 def clean(d: dict) -> dict:
     name, server = str(d.get("name") or "").strip(), str(d.get("server") or "").strip()
-    if not name:
-        raise ValueError("il nome è obbligatorio")
     try:
         login = int(str(d.get("login")).strip())
     except ValueError:
         raise ValueError("il numero di conto (login) deve essere un numero intero")
     if login <= 0:
         raise ValueError("il numero di conto (login) non è valido")
+    name = name or str(login)                                        # il nome non si chiede più: se manca vale il numero di conto
     if not server:
         raise ValueError("il server del broker è obbligatorio (es. ActivTrades-Server)")
     try:
