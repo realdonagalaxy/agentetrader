@@ -177,7 +177,9 @@ const money = (v, cur) => { try { return new Intl.NumberFormat("it-IT", {style: 
 const cls = v => v > 0 ? "gain" : v < 0 ? "loss" : "flat";
 function toast(t, ms = 3500) { const e = $("toast"); e.textContent = t; e.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => e.style.display = "none", ms); }
 async function api(path, method = "GET", body) {
-  const r = await fetch(path, {method, headers: method === "GET" ? {} : H, body: body ? JSON.stringify(body) : undefined});
+  let r;
+  try { r = await fetch(path, {method, headers: method === "GET" ? {} : H, body: body ? JSON.stringify(body) : undefined}); }
+  catch (e) { throw new Error("Gestione Conti non risponde. Guarda la finestra del Prompt dove gira il programma: se si è chiusa o mostra un errore, riavvialo (python -m src.accounts_web) e copiami il messaggio."); }
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || ("Errore " + r.status));
   return j;

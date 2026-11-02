@@ -18,7 +18,7 @@ _state = {"login": None, "positions": {}, "deals": {}, "next": 5000000000, "real
 _BAL = {}
 
 
-def initialize(path=None, login=None, password=None, server=None, **kw):
+def initialize(path=None, login=None, password=None, server=None, timeout=None, **kw):
     _state["login"] = login or _state["login"] or 1001
     return True
 

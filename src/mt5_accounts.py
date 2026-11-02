@@ -221,8 +221,9 @@ def session(acc: dict):
         pw = get_password(acc)
         if pw or os.environ.get("MT5_SIMULATOR") == "1":
             kw.update(login=int(acc["login"]), password=pw or "", server=acc["server"])
+        kw["timeout"] = 25000                                       # ms: un conto che non risponde non blocca l'app per oltre 25 secondi
         if not mt5.initialize(**kw):
-            raise RuntimeError(f"MT5 non si collega: {mt5.last_error()}. Il terminale è aperto?")
+            raise RuntimeError(f"MT5 non si collega: {mt5.last_error()}. Il terminale è aperto? Login, password e server sono giusti?")
         try:
             info = mt5.account_info()
             if info is None or int(info.login) != int(acc["login"]):
@@ -276,7 +277,7 @@ def _test_with_password(c: dict, pw: str) -> dict:
     try:
         with _thread_lock, _file_lock():
             mt5 = _mt5()
-            kw = {"login": c["login"], "password": pw, "server": c["server"]}
+            kw = {"login": c["login"], "password": pw, "server": c["server"], "timeout": 25000}
             if c["terminal_path"]:
                 kw["path"] = c["terminal_path"]
             if not mt5.initialize(**kw):

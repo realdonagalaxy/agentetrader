@@ -100,6 +100,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(ma.snapshot(ma.get_account(int(m[1]))))
         except ValueError as e:
             return self._json({"error": str(e)}, 404)
+        except Exception as e:                                      # mai lasciare la richiesta senza risposta
+            return self._json({"error": f"{type(e).__name__}: {str(e)[:250]}"}, 500)
         self._send(404, b"non trovato", "text/plain")
 
     def _write(self, method: str):
