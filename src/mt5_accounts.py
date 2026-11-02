@@ -77,6 +77,25 @@ def del_password(login: int, server: str) -> None:
 
 
 # ---------- archivio ----------
+def _pm(p: str):
+    """Modulo dei percorsi adatto al testo: i percorsi con backslash (Windows) si trattano come Windows anche se il programma gira altrove (prove)."""
+    import ntpath
+    import posixpath
+    return ntpath if "\\" in p or (len(p) > 1 and p[1] == ":") else posixpath
+
+
+def norm_terminal(path: str) -> str:
+    """Percorso del terminale: se indichi la cartella aggiungo terminale64.exe; su Windows verifico che il file esista."""
+    p = path.strip().strip('"')
+    if not p:
+        return ""
+    if p.lower().endswith(".exe") is False:
+        p = _pm(p).join(p, "terminal64.exe")
+    if os.name == "nt" and os.environ.get("MT5_SIMULATOR") != "1" and not os.path.isfile(p):
+        raise ValueError(f"Il file del terminale non esiste: {p}. Indica il percorso completo di terminal64.exe (tasto destro sull'icona del terminale → Proprietà → Destinazione).")
+    return p[:300]
+
+
 def clean(d: dict) -> dict:
     name, server = str(d.get("name") or "").strip(), str(d.get("server") or "").strip()
     if not name:
@@ -95,7 +114,7 @@ def clean(d: dict) -> dict:
         raise ValueError("i lotti devono essere un numero")
     if not 0.01 <= lots <= MAX_LOTS:
         raise ValueError(f"i lotti devono stare tra 0,01 e {MAX_LOTS:g}")
-    return {"name": name[:60], "login": login, "server": server[:80], "terminal_path": str(d.get("terminal_path") or "").strip().strip('"')[:300],
+    return {"name": name[:60], "login": login, "server": server[:80], "terminal_path": norm_terminal(str(d.get("terminal_path") or "")),
             "lots": round(lots, 2), "enabled": 1 if d.get("enabled", True) else 0, "use_signals": 1 if d.get("use_signals", True) else 0, "note": str(d.get("note") or "")[:300]}
 
 
@@ -214,6 +233,22 @@ def _file_lock(timeout: float = 40.0):
             f.close()
 
 
+def _same_dir(a: str, b: str) -> bool:
+    n = lambda x: _pm(x).normcase(_pm(x).normpath(x)).rstrip("\\/").lower()
+    return n(a) == n(b)
+
+
+def _check_terminal(mt5, acc: dict) -> None:
+    """Se per il conto è indicato un terminale, verifica che sia proprio quello a cui MT5 si è collegato (altrimenti si rischia di leggere o operare sul conto sbagliato)."""
+    want = acc.get("terminal_path")
+    if not want:
+        return
+    ti = mt5.terminal_info()
+    got = getattr(ti, "path", "") if ti else ""
+    if got and not _same_dir(_pm(want).dirname(want), got):
+        raise RuntimeError(f"Si è aperto il terminale «{got}» invece di «{_pm(want).dirname(want)}». Chiudi tutti i terminali MT5, apri solo quello giusto e riprova.")
+
+
 @contextmanager
 def session(acc: dict):
     """Collega MT5 al conto indicato, verifica il login e restituisce il modulo mt5; alla fine scollega. Un'operazione alla volta."""
@@ -225,10 +260,12 @@ def session(acc: dict):
         pw = get_password(acc)
         if pw or os.environ.get("MT5_SIMULATOR") == "1":
             kw.update(login=int(acc["login"]), password=pw or "", server=acc["server"])
+        mt5.shutdown()                                              # parte sempre da uno stato pulito: nessun collegamento rimasto da un altro conto
         kw["timeout"] = 25000                                       # ms: un conto che non risponde non blocca l'app per oltre 25 secondi
         if not mt5.initialize(**kw):
             raise RuntimeError(f"MT5 non si collega: {mt5.last_error()}. Il terminale è aperto? Login, password e server sono giusti?")
         try:
+            _check_terminal(mt5, acc)
             info = mt5.account_info()
             if info is None or int(info.login) != int(acc["login"]):
                 got = getattr(info, "login", None)
@@ -287,6 +324,7 @@ def _test_with_password(c: dict, pw: str) -> dict:
             if not mt5.initialize(**kw):
                 return {"connected": False, "error": f"MT5 non si collega: {mt5.last_error()}"}
             try:
+                _check_terminal(mt5, c)
                 i = mt5.account_info()
                 if i is None or int(i.login) != c["login"]:
                     return {"connected": False, "error": f"Collegato al conto {getattr(i, 'login', None)} invece di {c['login']}"}

@@ -18,7 +18,12 @@ _state = {"login": None, "positions": {}, "deals": {}, "next": 5000000000, "real
 _BAL = {}
 
 
+def terminal_info():
+    return N(path=_state.get("path") or "C:\\Program Files\\MetaTrader 5")
+
+
 def initialize(path=None, login=None, password=None, server=None, timeout=None, **kw):
+    _state["path"] = (path or "").rsplit("\\", 1)[0] if path else None
     _state["login"] = login or _state["login"] or 1001
     return True
 
