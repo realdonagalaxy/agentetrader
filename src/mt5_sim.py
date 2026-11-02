@@ -47,7 +47,7 @@ def account_info():
     _tick_positions()
     pos = [p for p in _state["positions"].values() if p.login == lg]
     pr = sum(p.profit for p in pos)
-    return N(login=lg, name="Conto simulato", server="Simulatore", currency="EUR", leverage=500, balance=bal, equity=bal + pr, margin=100.0 * len(pos),
+    return N(login=lg, name="Conto simulato", server="Simulatore", company="FundedNext Ltd" if lg in _state["real"] else "Broker Simulato Ltd", currency="EUR", leverage=500, balance=bal, equity=bal + pr, margin=100.0 * len(pos),
              margin_free=bal + pr - 100.0 * len(pos), profit=pr, trade_mode=ACCOUNT_TRADE_MODE_REAL if lg in _state["real"] else ACCOUNT_TRADE_MODE_DEMO)
 
 
