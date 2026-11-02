@@ -96,81 +96,48 @@ def norm_terminal(path: str) -> str:
     return p[:300]
 
 
-def source_terminal() -> str:
-    """Installazione di MT5 da cui si copiano i terminali portable dei nuovi conti (MT5_SOURCE in config.env per cambiarla)."""
-    return os.environ.get("MT5_SOURCE") or r"C:\Program Files\MetaTrader 5"
-
-
-def copy_server_list(src: str, dst: str) -> str:
-    """Copia nella cartella portable la lista dei server che il terminale di origine conosce (servers.dat e file .srv). MT5 la tiene in %APPDATA%\\MetaQuotes\\Terminal\\<codice>\\config,
-    non nella cartella di installazione: senza di essa la copia non conosce i server dei broker. La cartella dati giusta si riconosce da origin.txt, che contiene il percorso dell'installazione.
-    Restituisce una nota su cosa è stato copiato (vuota se non trovato)."""
+def installed_terminals() -> list[str]:
+    """Terminali MT5 installati (terminal64.exe) nelle cartelle abituali di Windows. MT5_TERMINALS (separati da ;) per elencarli a mano."""
     import glob
-    import shutil
-    appdata = os.environ.get("APPDATA")
-    if not appdata:
-        return ""
-    want = os.path.normcase(os.path.normpath(src)).lower()
-    for origin in glob.glob(os.path.join(appdata, "MetaQuotes", "Terminal", "*", "origin.txt")):
-        try:
-            raw = open(origin, "rb").read()
-            txt = raw.decode("utf-16") if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else raw.decode("utf-8", "ignore")
-        except OSError:
-            continue
-        if os.path.normcase(os.path.normpath(txt.strip())).lower() != want:
-            continue
-        cfg = os.path.join(os.path.dirname(origin), "config")
-        os.makedirs(os.path.join(dst, "config"), exist_ok=True)
-        n = 0
-        for pat in ("servers.dat", "*.srv"):
-            for f in glob.glob(os.path.join(cfg, pat)):
-                shutil.copy2(f, os.path.join(dst, "config", os.path.basename(f)))
-                n += 1
-        return f"{n} file dei server copiati"
-    return ""
+    env = os.environ.get("MT5_TERMINALS")
+    if env:
+        return [x for x in env.split(";") if x]
+    roots = [os.environ.get(v) for v in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)")]
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        roots.append(os.path.join(local, "Programs"))
+    found = []
+    for r in filter(None, roots):
+        for f in glob.glob(os.path.join(r, "*", "terminal64.exe")):
+            if f not in found:
+                found.append(f)
+    return sorted(found)
 
 
-def provision_terminal(name: str, login: int) -> str:
-    r"""Copia l'installazione di origine in C:\MT5\<numero conto> (ripiego: cartella MT5 dell'utente), la marca come portable e crea il collegamento sul Desktop.
-    Se la cartella esiste già la riusa. Restituisce il percorso di terminal64.exe. L'origine non viene toccata."""
-    import shutil
-    exe, src = "terminal64.exe", source_terminal()
-    if not os.path.isfile(os.path.join(src, exe)):
-        raise ValueError(f"Non trovo l'installazione di MT5 da copiare: {os.path.join(src, exe)}. Togli la spunta «Crea un terminale dedicato» e indica a mano il percorso, "
-                         "oppure imposta MT5_SOURCE in config.env con la cartella del terminale da copiare.")
-    base = None
-    for cand in (os.environ.get("MT5_BASE") or r"C:\MT5", os.path.join(os.path.expanduser("~"), "MT5")):
-        try:
-            os.makedirs(cand, exist_ok=True)
-            base = cand
-            break
-        except OSError:
-            continue
-    if base is None:
-        raise ValueError("Non riesco a creare la cartella C:\\MT5 (permessi?): avvia Gestione Conti come amministratore oppure indica a mano il percorso del terminale.")
-    safe = str(login)                                             # la cartella porta il NUMERO del conto
-    dst = os.path.join(base, safe)
-    n = 1
-    while os.path.exists(dst) and not os.path.isfile(os.path.join(dst, "portable.flag")):   # cartella occupata da altro (non nostra): la evito
-        n += 1
-        dst = os.path.join(base, f"{safe}_{n}")
-    if not os.path.isfile(os.path.join(dst, exe)):
-        shutil.copytree(src, dst, dirs_exist_ok=True)
-    try:
-        copy_server_list(src, dst)
-    except Exception:
-        pass                                                      # la lista dei server è un aiuto: se manca, si aggiunge il server dal terminale
-    with open(os.path.join(dst, "portable.flag"), "w") as f:
-        f.write("portable")
-    if os.name == "nt":
-        try:
-            import subprocess
-            ps = ("$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop')+'\\MT5 " + safe + ".lnk');"
-                  f"$s.TargetPath='{os.path.join(dst, exe)}';$s.Arguments='/portable';$s.WorkingDirectory='{dst}';$s.Save()")
-            subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, timeout=30)
-        except Exception:
-            pass                                                  # il collegamento è solo una comodità
-    return os.path.join(dst, exe)
+def detect_terminal(login: int, password: str, server: str) -> str:
+    """Prova ogni terminale installato con le credenziali date e restituisce il percorso del primo che accede al conto. Solleva ValueError con l'esito di ognuno se nessuno ci riesce."""
+    terms = installed_terminals()
+    if not terms:
+        raise ValueError("Non trovo nessun terminale MT5 installato (cerco terminal64.exe in Program Files). Installa MT5 del tuo broker e riprova.")
+    notes = []
+    with _thread_lock, _file_lock(timeout=120):
+        mt5 = _mt5()
+        for t in terms:
+            mt5.shutdown()
+            ok = mt5.initialize(path=t, login=int(login), password=password, server=server, timeout=int(os.environ.get("MT5_DETECT_TIMEOUT_MS") or 30000))
+            if ok:
+                try:
+                    i = mt5.account_info()
+                    if i is not None and int(i.login) == int(login):
+                        return t
+                    notes.append(f"{t}: collegato a un altro conto")
+                finally:
+                    mt5.shutdown()
+            else:
+                err = mt5.last_error()
+                notes.append(f"{t}: {err[1] if isinstance(err, tuple) and len(err) > 1 else err}")
+                mt5.shutdown()
+    raise ValueError("Nessun terminale MT5 installato riesce ad accedere con questi dati (login, password, server). Esito per terminale:\n- " + "\n- ".join(notes))
 
 
 def clean(d: dict) -> dict:
@@ -224,12 +191,12 @@ def save_account(d: dict, aid: int | None = None) -> int:
     if dup:
         con.close()
         raise ValueError("esiste già un conto con questo login e questo server")
-    if aid is None and d.get("create_terminal") and not c["terminal_path"]:
-        try:
-            c["terminal_path"] = provision_terminal(c["name"], c["login"])
-        except Exception as e:
-            con.close()
-            raise ValueError(str(e)) from e
+    if aid is None and d.get("create_terminal") and not c["terminal_path"]:      # nuovo conto: individua da solo il terminale installato che accede al conto
+        con.close()
+        if not pw:
+            raise ValueError("Scrivi la password: serve per riconoscere quale terminale MT5 installato si collega al conto.")
+        c["terminal_path"] = detect_terminal(c["login"], pw, c["server"])
+        con = db()
     if pw:
         set_password(c["login"], c["server"], pw)
     if aid is None:
@@ -269,13 +236,6 @@ def delete_account(aid: int) -> None:
 
 
 # ---------- connessione a MT5 ----------
-def is_portable(terminal_path: str) -> bool:
-    """Il terminale è portable se nella sua cartella c'è il marcatore portable.flag (lo crea Gestione Conti quando prepara il terminale di un nuovo conto)."""
-    if not terminal_path:
-        return False
-    return os.path.isfile(os.path.join(_pm(terminal_path).dirname(terminal_path), "portable.flag"))
-
-
 def explain(mt5, prefix: str = "MT5 non si collega") -> str:
     """Messaggio d'errore di MT5 con la spiegazione dei casi più comuni."""
     err = mt5.last_error()
@@ -360,8 +320,6 @@ def session(acc: dict):
         kw = {}
         if acc.get("terminal_path"):
             kw["path"] = acc["terminal_path"]
-            if is_portable(acc["terminal_path"]):
-                kw["portable"] = True                              # stessa modalità con cui apri il terminale a mano: niente istanze doppie
         pw = get_password(acc)
         if pw or os.environ.get("MT5_SIMULATOR") == "1":
             kw.update(login=int(acc["login"]), password=pw or "", server=acc["server"])
@@ -430,8 +388,6 @@ def _test_with_password(c: dict, pw: str) -> dict:
             kw = {"login": c["login"], "password": pw, "server": c["server"], "timeout": int(os.environ.get("MT5_TIMEOUT_MS") or 60000)}
             if c["terminal_path"]:
                 kw["path"] = c["terminal_path"]
-                if is_portable(c["terminal_path"]):
-                    kw["portable"] = True
             ok = mt5.initialize(**kw)
             if not ok and mt5.last_error()[0] == -10005:
                 mt5.shutdown()
