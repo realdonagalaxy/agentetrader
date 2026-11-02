@@ -1,9 +1,11 @@
 @echo off
 setlocal
 title Installazione terminali MT5 portable
-REM Crea terminali MT5 PORTABLE separati, uno per conto, copiando le installazioni che hai gia.
-REM Le installazioni originali NON vengono toccate. Se la cartella di destinazione esiste gia, viene saltata.
-REM Se i tuoi percorsi sono diversi, modifica le due righe  call :copia NOME "CARTELLA ORIGINALE"  qui sotto.
+REM Crea terminali MT5 PORTABLE separati, uno per conto, copiando SEMPRE la stessa installazione di origine.
+REM L'installazione originale NON viene toccata. Se la cartella di destinazione esiste gia, viene saltata.
+REM Uso:  installa_terminali.bat                      crea FundedNext e ActivTrades
+REM       installa_terminali.bat Nome1 Nome2 Nome3    crea i terminali con i nomi indicati (uno per conto)
+set SORGENTE=C:\Program Files\MetaTrader 5
 set BASE=C:\MT5
 set LOG=%~dp0installa_terminali.log
 echo Inizio %date% %time% > "%LOG%"
@@ -22,8 +24,9 @@ if not exist "%BASE%" (
   exit /b 1
 )
 
-call :copia FundedNext "C:\Program Files\MetaTrader 5"
-call :copia ActivTrades "C:\Program Files\ActivTrades Markets MetaTrader 5"
+set NOMI=%*
+if "%NOMI%"=="" set NOMI=FundedNext ActivTrades
+for %%N in (%NOMI%) do call :copia %%N "%SORGENTE%"
 
 echo.
 echo ================= FINE =================
