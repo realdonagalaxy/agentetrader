@@ -250,7 +250,8 @@ def explain(mt5, prefix: str = "MT5 non si collega") -> str:
     hint = {-6: "Accesso rifiutato dal broker: login, password o NOME DEL SERVER non corrispondono. Controlla il server (identico a quello della finestra di accesso di MT5, maiuscole e spazi compresi), "
                 "la password (dopo averla cambiata va risalvata in «Modifica») e che il conto sia ancora attivo.",
             -10003: "Il terminale MT5 indicato non si avvia: controlla il percorso di terminal64.exe.",
-            -10005: "MT5 non risponde in tempo: chiudi i terminali MT5 e riprova.",
+            -10005: "MT5 non risponde in tempo. Se il terminale è appena stato creato, aprilo una volta a mano dal collegamento sul Desktop (MT5 NumeroConto), chiudi eventuali finestre di accesso o di apertura conto e aspetta che sia pronto; poi chiudilo e riprova. "
+                    "Controlla anche che non sia aperto «come amministratore» (programma e terminale devono avere gli stessi permessi).",
             -10004: "Nessun collegamento con il terminale: aprilo e attendi che sia pronto.",
             -2: "Parametri non validi: controlla login, password e server."}.get(code, "")
     return f"{prefix}: {err}. {hint}".strip()
@@ -332,8 +333,12 @@ def session(acc: dict):
         if pw or os.environ.get("MT5_SIMULATOR") == "1":
             kw.update(login=int(acc["login"]), password=pw or "", server=acc["server"])
         mt5.shutdown()                                              # parte sempre da uno stato pulito: nessun collegamento rimasto da un altro conto
-        kw["timeout"] = 25000                                       # ms: un conto che non risponde non blocca l'app per oltre 25 secondi
-        if not mt5.initialize(**kw):
+        kw["timeout"] = int(os.environ.get("MT5_TIMEOUT_MS") or 60000)   # un terminale appena copiato impiega di più al primo avvio
+        ok = mt5.initialize(**kw)
+        if not ok and mt5.last_error()[0] == -10005:                # IPC timeout: il terminale ora è avviato, un secondo tentativo di norma riesce
+            mt5.shutdown()
+            ok = mt5.initialize(**kw)
+        if not ok:
             raise RuntimeError(explain(mt5))
         try:
             _check_terminal(mt5, acc)
@@ -389,12 +394,16 @@ def _test_with_password(c: dict, pw: str) -> dict:
     try:
         with _thread_lock, _file_lock():
             mt5 = _mt5()
-            kw = {"login": c["login"], "password": pw, "server": c["server"], "timeout": 25000}
+            kw = {"login": c["login"], "password": pw, "server": c["server"], "timeout": int(os.environ.get("MT5_TIMEOUT_MS") or 60000)}
             if c["terminal_path"]:
                 kw["path"] = c["terminal_path"]
                 if is_portable(c["terminal_path"]):
                     kw["portable"] = True
-            if not mt5.initialize(**kw):
+            ok = mt5.initialize(**kw)
+            if not ok and mt5.last_error()[0] == -10005:
+                mt5.shutdown()
+                ok = mt5.initialize(**kw)
+            if not ok:
                 return {"connected": False, "error": explain(mt5)}
             try:
                 _check_terminal(mt5, c)
