@@ -149,36 +149,47 @@ def get_account(aid: int) -> dict:
 
 
 def save_account(d: dict, aid: int | None = None) -> int:
+    """Registra o aggiorna un conto SOLO dopo che MT5 si è collegato davvero con questi dati (login, password, server). Se l'accesso fallisce non viene scritto nulla:
+    né il record, né la password nel Gestore credenziali. Una modifica che non tocca login, server o password (lotti, nota, interruttori) non richiede l'accesso."""
     c, pw = clean(d), str(d.get("password") or "")
     con = db()
+    old = None
+    if aid is not None:
+        old = con.execute("SELECT login, server, terminal_path FROM accounts WHERE id=?", (aid,)).fetchone()
+        if old is None:
+            con.close()
+            raise ValueError("conto non trovato")
     dup = con.execute("SELECT id FROM accounts WHERE login=? AND server=? AND id IS NOT ?", (c["login"], c["server"], aid)).fetchone()
+    con.close()
     if dup:
-        con.close()
         raise ValueError("esiste già un conto con questo login e questo server")
-    if aid is None and not c["terminal_path"]:                    # nuovo conto: tutti usano lo stesso MT5 originale; ci accedo ora, così il conto entra nel suo elenco
-        con.close()
+    changed = old is None or bool(pw) or (old["login"], old["server"]) != (c["login"], c["server"])
+    first = None
+    if changed:
         if not pw:
-            raise ValueError("Scrivi la password: serve per accedere al conto nel terminale MT5.")
-        c["terminal_path"] = default_terminal()
-        r = _test_with_password(c, pw)
-        if not r.get("connected"):
-            raise ValueError(r.get("error") or "Accesso al conto non riuscito.")
-        con = db()
+            raise ValueError("Scrivi la password: il conto viene registrato solo dopo che MT5 si è collegato con questi dati." if old is None
+                             else "Hai cambiato login o server: riscrivi anche la password, per verificare il collegamento.")
+        if old is None and not c["terminal_path"]:
+            c["terminal_path"] = default_terminal()                    # tutti i conti usano lo stesso MT5 originale
+        first = _test_with_password(c, pw)
+        if not first.get("connected"):
+            raise ValueError(first.get("error") or "MT5 non si è collegato al conto: non è stato registrato nulla.")
+    # da qui MT5 si è collegato: ora (e solo ora) si scrive
     if pw:
         set_password(c["login"], c["server"], pw)
-    if aid is None:
+    con = db()
+    if old is None:
         cur = con.execute("INSERT INTO accounts (name,login,server,terminal_path,lots,enabled,use_signals,note,created_at) VALUES (?,?,?,?,?,?,?,?,datetime('now'))",
                           (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["note"]))
         aid = cur.lastrowid
     else:
-        old = con.execute("SELECT login, server FROM accounts WHERE id=?", (aid,)).fetchone()
-        if old is None:
-            con.close()
-            raise ValueError("conto non trovato")
-        if (old["login"], old["server"]) != (c["login"], c["server"]) and not pw:        # cambiato login/server: la vecchia password non vale più
-            del_password(old["login"], old["server"])
+        if (old["login"], old["server"]) != (c["login"], c["server"]):
+            del_password(old["login"], old["server"])                  # la vecchia password non vale più
         con.execute("UPDATE accounts SET name=?,login=?,server=?,terminal_path=?,lots=?,enabled=?,use_signals=?,note=? WHERE id=?",
                     (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["note"], aid))
+    if first:                                                          # tipo e società li conosciamo già dal primo collegamento
+        con.execute("UPDATE accounts SET kind=?, broker=COALESCE(NULLIF(?, ''), broker) WHERE id=?",
+                    ("demo" if first.get("demo") else "real", first.get("company", ""), aid))
     con.commit()
     con.close()
     return aid
@@ -366,7 +377,8 @@ def _test_with_password(c: dict, pw: str) -> dict:
                 i = mt5.account_info()
                 if i is None or int(i.login) != c["login"]:
                     return {"connected": False, "error": f"Collegato al conto {getattr(i, 'login', None)} invece di {c['login']}"}
-                return {"connected": True, "demo": is_demo(mt5), "currency": i.currency, "balance": i.balance, "equity": i.equity, "positions": []}
+                return {"connected": True, "demo": is_demo(mt5), "currency": i.currency, "balance": i.balance, "equity": i.equity, "positions": [],
+                        "company": (getattr(i, "company", "") or "").strip()}
             finally:
                 mt5.shutdown()
     except Exception as e:
