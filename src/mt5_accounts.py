@@ -25,6 +25,29 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS accounts (
 _thread_lock = threading.RLock()
 
 
+SETTINGS_PATH = DATA_DIR / "impostazioni.json"
+
+
+def get_setting(key: str, default=None):
+    """Impostazioni semplici dell'app (journal/impostazioni.json), condivise con il programma dei segnali."""
+    import json
+    try:
+        return json.loads(SETTINGS_PATH.read_text(encoding="utf-8")).get(key, default)
+    except (OSError, ValueError):
+        return default
+
+
+def set_setting(key: str, value) -> None:
+    import json
+    try:
+        d = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        d = {}
+    d[key] = value
+    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SETTINGS_PATH.write_text(json.dumps(d), encoding="utf-8")
+
+
 def db() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(DB_PATH)

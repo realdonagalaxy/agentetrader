@@ -110,7 +110,8 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
   <div class="panel"><h2>Telegram</h2>
     <div class="body" style="grid-template-columns:minmax(0,1fr) auto;align-items:center">
       <div id="tgst" class="sub" style="font-size:13px;color:var(--ink)">Controllo…</div>
-      <button class="btn sec" id="tgtest">Invia messaggio di prova</button>
+      <div class="actions" style="align-items:center"><label class="sw" title="Attiva o disattiva Telegram: spento, il programma non legge i segnali e non invia messaggi"><input type="checkbox" role="switch" id="tgon" aria-label="Attiva o disattiva Telegram"><span></span></label>
+        <button class="btn sec" id="tgtest">Invia messaggio di prova</button></div>
     </div>
   </div>
   <div class="panel">
@@ -297,6 +298,8 @@ async function tgCheck() {
   const el = $("tgst");
   try {
     const t = await api("/api/telegram");
+    $("tgon").checked = t.enabled; $("tgtest").disabled = !t.enabled;
+    if (!t.enabled) { el.innerHTML = `<span class="badge b-off">Telegram disattivato</span> <span class="sub">il programma dei segnali non legge né invia messaggi</span>`; return; }
     const b = t.bot ? `<span class="badge b-ok">Bot ${esc(t.bot)} risponde</span>` : `<span class="badge b-err">Bot non raggiungibile</span> <span class="err">${esc(t.bot_error)}</span>`;
     const c = t.chat ? `<span class="badge b-ok">Chat configurata</span>` : `<span class="badge b-err">Chat non configurata</span>`;
     const l = t.listener_age === null ? `<span class="badge b-off">Ascolto segnali non attivo</span> <span class="sub">avvia python -m src.mt5_orders</span>`
@@ -310,6 +313,12 @@ $("tgtest").onclick = async () => {
   try { await api("/api/telegram/test", "POST", {}); toast("Messaggio di prova inviato: controlla Telegram", 6000); }
   catch (e) { toast("Invio non riuscito: " + e.message, 8000); }
   $("tgtest").disabled = false; tgCheck();
+};
+$("tgon").onchange = async () => {
+  const on = $("tgon").checked; $("tgon").disabled = true;
+  try { await api("/api/telegram/enabled", "POST", {enabled: on}); toast(on ? "Telegram attivato" : "Telegram disattivato: nessun segnale letto, nessun messaggio inviato", 6000); }
+  catch (e) { $("tgon").checked = !on; toast(e.message); }
+  $("tgon").disabled = false; tgCheck();
 };
 tgCheck(); setInterval(() => { if (!document.hidden) tgCheck(); }, 20000);
 $("imp").onclick = async () => {

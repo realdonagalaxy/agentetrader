@@ -33,7 +33,7 @@ def telegram_status() -> dict:
     """Stato di Telegram: il token del bot risponde (getMe), la chat è configurata, il programma dei segnali è in ascolto (battito recente)."""
     import time
     from src.telegram_bot import TelegramBot
-    out = {"bot": None, "bot_error": None, "chat": bool(os.environ.get("TELEGRAM_CHAT_ID")), "listener_age": None}
+    out = {"enabled": bool(ma.get_setting("telegram_enabled", True)), "bot": None, "bot_error": None, "chat": bool(os.environ.get("TELEGRAM_CHAT_ID")), "listener_age": None}
     try:
         if not os.environ.get("TELEGRAM_BOT_TOKEN"):
             raise RuntimeError("TELEGRAM_BOT_TOKEN mancante in config.env")
@@ -134,7 +134,12 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/accounts" and method == "POST":
                 aid = ma.save_account(self._data())
                 return self._json({"id": aid, "terminal_path": ma.get_account(aid)["terminal_path"]}, 201)
+            if path == "/api/telegram/enabled" and method == "POST":
+                ma.set_setting("telegram_enabled", bool(self._data().get("enabled")))
+                return self._json({"enabled": bool(ma.get_setting("telegram_enabled", True))})
             if path == "/api/telegram/test" and method == "POST":
+                if not ma.get_setting("telegram_enabled", True):
+                    raise ValueError("Telegram è disattivato: accendi l'interruttore e riprova.")
                 from src.telegram_bot import TelegramBot
                 TelegramBot().send("✅ Gestione Conti: prova di collegamento a Telegram")
                 return self._json({"sent": True})

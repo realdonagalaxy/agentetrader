@@ -169,8 +169,19 @@ def load_pending() -> dict:
         return {}
 
 
+def telegram_on() -> bool:
+    """Interruttore «Telegram» di Gestione Conti: spento = il programma non legge i messaggi e non ne invia."""
+    try:
+        from src import mt5_accounts as ma
+        return bool(ma.get_setting("telegram_enabled", True))
+    except Exception:
+        return True
+
+
 def say(bot, text: str, reply_to: int | None = None) -> None:
-    """Risposta in testo semplice (i '<' dei messaggi di rifiuto rompono il formato HTML); un errore di invio non ferma il programma."""
+    """Risposta in testo semplice (i '<' dei messaggi di rifiuto rompono il formato HTML); un errore di invio non ferma il programma. Con Telegram spento non invia nulla."""
+    if not telegram_on():
+        return
     kw = {"reply_to_message_id": reply_to} if reply_to else {}
     try:
         bot._call("sendMessage", chat_id=bot.chat_id, text=text, **kw)
@@ -271,12 +282,25 @@ def main(dry: bool) -> None:
     where = f"{len(accs)} conti dall'app" if accs else f"terminale singolo, lotto {LOTS}"
     print(f"In ascolto su Telegram ({'PROVA' if dry else 'ordini su DEMO'}; {where}). Ctrl+C per fermare.", flush=True)
     say(bot, f"🟢 Pronto: invia il segnale ({'solo prova' if dry else 'apro su conti demo'}; {where}; solo TP1).")
+    was_off = False
     while True:
         try:
             HEARTBEAT.parent.mkdir(exist_ok=True)
             HEARTBEAT.write_text(str(time.time()))
         except OSError:
             pass
+        if not telegram_on():                                       # interruttore spento: né lettura né invio; le chiusure restano in attesa
+            was_off = True
+            time.sleep(2)
+            continue
+        if was_off:                                                 # riacceso: i messaggi arrivati mentre era spento si scartano (non si eseguono segnali vecchi)
+            was_off = False
+            try:
+                last = bot._call("getUpdates", offset=-1)
+                offset = last[-1]["update_id"] + 1 if last else offset
+            except Exception:
+                pass
+            print("Telegram riacceso.", flush=True)
         try:
             if legacy is None and any(not t.get("account") for t in pending.values()):
                 from src.mt5_feed import connect
