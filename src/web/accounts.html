@@ -197,7 +197,7 @@ function render() {
     const typ = ok ? (s.demo ? `<span class="badge b-demo">DEMO</span>` : `<span class="badge b-real">REALE · sola lettura</span>`) : `<span class="sub">—</span>`;
     const n = ok ? s.positions.length : "—";
     const pl = ok ? `<span class="${cls(s.profit)}">${money(s.profit, s.currency)}</span>` : "—";
-    let h = `<tr class="acc${on ? "" : " off"}" data-id="${a.id}"><td><div class="name" title="${esc(a.name)}">${esc((s && s.company) || a.broker || a.name)}</div><div class="sub num" title="${esc(a.terminal_path ? "Terminale: " + a.terminal_path : "Terminale predefinito")}">${esc(a.login)}</div></td><td>${typ}</td><td>${state}</td>
+    let h = `<tr class="acc${on ? "" : " off"}" data-id="${a.id}"><td><div class="name num" title="${esc(((s && s.company) || a.broker || a.name) + (a.terminal_path ? " · Terminale: " + a.terminal_path : ""))}">${esc(a.login)}</div></td><td>${typ}</td><td>${state}</td>
       <td class="r num">${ok ? money(s.balance, s.currency) : "—"}</td><td class="r num">${ok ? money(s.equity, s.currency) : "—"}</td><td class="r num">${pl}</td><td class="r num">${n}</td>
       <td>${a.use_signals && on && !(s && s.connected && !s.demo) ? `<span class="badge b-sig">${a.lots} lotti</span>` : a.use_signals && !(s && s.connected && !s.demo) ? `<span class="badge b-off">Sospeso</span>` : `<span class="badge b-off">No</span>`}</td>
       <td><label class="sw" title="${on ? "Conto attivo: disattivalo per fermare monitoraggio e segnali" : "Conto disattivato: attivalo per monitorarlo e usarlo per i segnali"}"><input type="checkbox" role="switch" data-act="toggle" ${on ? "checked" : ""} aria-label="Attiva o disattiva ${esc(a.name)}"><span></span></label></td>
