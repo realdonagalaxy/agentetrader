@@ -13,7 +13,6 @@ TRADE_RETCODE_DONE = 10009
 DEAL_ENTRY_IN, DEAL_ENTRY_OUT = 0, 1
 DEAL_REASON_CLIENT, DEAL_REASON_SL, DEAL_REASON_TP = 0, 4, 5
 TIMEFRAME_M5 = 5
-COPY_TICKS_ALL = -1
 
 _state = {"login": None, "positions": {}, "deals": {}, "next": 5000000000, "real": {9990001}}
 _BAL = {}
@@ -66,10 +65,6 @@ def _px():
 
 def symbol_select(sym, on=True):
     return sym in ("GOLD", "XAUUSD")
-
-
-def copy_ticks_range(sym, d0, d1, flags):
-    return ()                                                          # il simulatore non ha cronologia dei tick: restano solo i tick correnti
 
 
 def symbols_get(*a, **kw):

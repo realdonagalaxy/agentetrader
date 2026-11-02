@@ -26,8 +26,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 LOTS = 0.05
-MIRROR_SL_FACTOR = 1.5          # SL di sicurezza su ActivTrades = distanza dello SL del canale x 1.5 (solo se il programma si ferma: la chiusura vera segue Vantage)
-MIRROR_POLL_S = 5               # ogni quanti secondi si controlla il prezzo di Vantage
 MAX_SLIP_PRICE = 3.0
 MAX_POSITIONS = 3
 MAX_AGE_S = 120
@@ -88,7 +86,7 @@ def filling(mt5, info) -> int:
     return mt5.ORDER_FILLING_IOC if m & 2 else mt5.ORDER_FILLING_FOK if m & 1 else mt5.ORDER_FILLING_RETURN
 
 
-def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "", mirror: bool = False) -> tuple[str, dict | None]:
+def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "") -> tuple[str, dict | None]:
     """Valida e (se non dry) invia l'ordine. Restituisce (testo di risposta, dati della posizione da seguire); solleva ValueError se rifiutato."""
     acc = mt5.account_info()
     if acc is None:
@@ -111,9 +109,6 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
         sl_d, tp_d = abs(sig["entry"] - sig["sl"]), abs(sig["tp1"] - sig["entry"])
         ref = tick.bid if buy else tick.ask               # SL e TP scattano sul prezzo di CHIUSURA (BUY: bid, SELL: ask), come il grafico del canale: così lo spread non accorcia lo stop
         sl, tp = (ref - sl_d, ref + tp_d) if buy else (ref + sl_d, ref - tp_d)
-        if mirror:                                        # la chiusura segue Vantage: su ActivTrades niente TP e solo uno stop di sicurezza più largo
-            sl = ref - sl_d * MIRROR_SL_FACTOR if buy else ref + sl_d * MIRROR_SL_FACTOR
-            tp = 0.0
         scarto = tick.bid - sig["entry"]                  # differenza di quotazione tra il tuo broker e il canale (entrambi sul bid)
         try:
             log_scarto(tag, sig, tick, scarto)
@@ -125,10 +120,7 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
     req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": lots, "type": mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL,
            "price": px, "sl": round(sl, d), "tp": round(tp, d), "deviation": DEVIATION, "magic": MAGIC,
            "comment": "tg-signal", "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling(mt5, info)}
-    if mirror:
-        summary = f"{sig['side'].upper()} {sym} {lots} lotti a mercato ~{px} · chiusura che segue Vantage (SL {sig['sl']} · TP1 {sig['tp1']}) · stop di sicurezza {req['sl']}"
-    else:
-        summary = f"{sig['side'].upper()} {sym} {lots} lotti a mercato ~{px} · SL {req['sl']} ({abs(px - req['sl']):.2f} $) · TP1 {req['tp']} ({abs(req['tp'] - px):.2f} $)"
+    summary = f"{sig['side'].upper()} {sym} {lots} lotti a mercato ~{px} · SL {req['sl']} ({abs(px - req['sl']):.2f} $) · TP1 {req['tp']} ({abs(req['tp'] - px):.2f} $)"
     if relative_levels():
         summary += f" · scarto dal canale {scarto:+.2f} · spread {tick.ask - tick.bid:.2f}"
         hist = [v for _, v in read_scarti()[:-1]]                       # esclude quello appena registrato
@@ -143,8 +135,7 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
     if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
         raise ValueError(f"ordine rifiutato dal broker: {getattr(res, 'retcode', None)} {getattr(res, 'comment', mt5.last_error())}")
     return (f"✅ Aperto: {summary} · prezzo eseguito {res.price} · ticket {res.order}",
-            {"position": int(res.order), "symbol": sym, "side": sig["side"], "open": float(res.price), "tp": req["tp"],
-             **({"mirror": {"side": sig["side"], "sl": sig["sl"], "tp1": sig["tp1"], "t0": time.time()}} if mirror else {})})
+            {"position": int(res.order), "symbol": sym, "side": sig["side"], "open": float(res.price), "tp": req["tp"]})
 
 
 def pips(sym: str, a: float, b: float) -> float:
@@ -155,92 +146,6 @@ def pips(sym: str, a: float, b: float) -> float:
 def mt5_point(sym: str) -> float:
     import MetaTrader5 as mt5
     return mt5.symbol_info(sym).point
-
-
-def first_hit(side: str, sl: float, tp: float, ticks) -> str | None:
-    """Primo livello toccato dal prezzo di Vantage, tick per tick. BUY: TP se bid >= TP, SL se bid <= SL. SELL: TP se ask <= TP, SL se ask >= SL (come scatta un vero ordine). Stesso tick: SL."""
-    for bid, ask in ticks:
-        if side == "buy":
-            if bid <= sl:
-                return "sl"
-            if bid >= tp:
-                return "tp"
-        else:
-            if ask >= sl:
-                return "sl"
-            if ask <= tp:
-                return "tp"
-    return None
-
-
-def feed_account() -> dict | None:
-    from src import mt5_accounts as ma
-    return next((a for a in ma.list_accounts() if a["enabled"] and a.get("is_feed")), None)
-
-
-def _feed_ticks(m, sym: str, t0: float):
-    """Tick di Vantage dal momento dell'ingresso a ora (se la cronologia non è disponibile resta solo il tick corrente) più l'offset dell'ora del server."""
-    tk = m.symbol_info_tick(sym)
-    ticks, off = [], None
-    env = os.environ.get("MT5_UTC_OFFSET_HOURS")
-    off = int(round(float(env) * 3600)) if env not in (None, "") else int(round((tk.time - time.time()) / 1800) * 1800)
-    plausibile = abs(off) <= 14 * 3600 and abs(tk.time - time.time() - off) <= 120          # solo con mercato aperto e orario coerente
-    if plausibile:
-        try:
-            d0 = datetime.fromtimestamp(max(t0 + off, tk.time - 24 * 3600), tz=timezone.utc)
-            d1 = datetime.fromtimestamp(tk.time + 60, tz=timezone.utc)
-            raw = m.copy_ticks_range(sym, d0, d1, m.COPY_TICKS_ALL)
-            ticks = [(float(r["bid"]), float(r["ask"])) for r in raw] if raw is not None else []
-        except Exception:
-            ticks = []
-    ticks.append((float(tk.bid), float(tk.ask)))
-    return ticks
-
-
-def mirror_step(pending: dict, bot) -> None:
-    """Per ogni posizione che segue Vantage: legge il prezzo di Vantage e, se ha toccato il TP1 o lo SL del canale, chiude la posizione su ActivTrades e risponde sul canale."""
-    from src import mt5_accounts as ma
-    items = [(k, t) for k, t in pending.items() if t.get("mirror") and t.get("account")]
-    if not items:
-        return
-    feed = feed_account()
-    if feed is None:
-        return
-    hits = {}
-    try:
-        with ma.session(feed) as m:
-            from src.price_compare import find_symbol
-            sym = find_symbol(m, "XAUUSD")
-            if not sym:
-                print("Conto di riferimento: nessuno strumento oro trovato.", flush=True)
-                return
-            m.symbol_select(sym, True)
-            for k, t in items:
-                mir = t["mirror"]
-                h = first_hit(mir["side"], mir["sl"], mir["tp1"], _feed_ticks(m, sym, mir["t0"]))
-                if h:
-                    hits[k] = h
-    except Exception as e:
-        print("Conto di riferimento:", str(e)[:200], flush=True)
-        return
-    for k, h in hits.items():
-        t = pending.get(k)
-        try:
-            acc = ma.get_account(t["account"])
-            r = ma.close_with_result(acc, t["position"])
-        except ValueError:                                           # già chiusa (stop di sicurezza o a mano) o conto cancellato: smetto di seguirla
-            pending.pop(k, None)
-            save_pending(pending)
-            continue
-        except Exception as e:
-            print(f"Chiusura {k} non riuscita (riprovo): {str(e)[:150]}", flush=True)
-            continue
-        sign = 1 if t["side"] == "buy" else -1
-        n = pips(t["symbol"], r["price"], t["open"]) * (1 if (r["price"] - t["open"]) * sign >= 0 else -1)
-        say(bot, f"✅ TP1 {n:+.0f} pips" if h == "tp" else f"❌ SL HIT {n:+.0f} pips", t["msg_id"])
-        log([datetime.now(timezone.utc).isoformat(timespec="seconds"), f"chiusura (segue Vantage) {k}", f"{'TP1' if h == 'tp' else 'SL'} · prezzo {r['price']} · {n:+.0f} pips · profitto {r['profit']}"])
-        pending.pop(k, None)
-        save_pending(pending)
 
 
 def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
@@ -449,19 +354,12 @@ def main(dry: bool) -> None:
     print(f"In ascolto su Telegram ({'PROVA' if dry else 'ordini su DEMO'}; {where}). Ctrl+C per fermare.", flush=True)
     say(bot, f"🟢 Pronto: invia il segnale ({'solo prova' if dry else 'apro su conti demo'}; {where}; solo TP1).")
     was_off = False
-    last_mirror = 0.0
     while True:
         try:
             HEARTBEAT.parent.mkdir(exist_ok=True)
             HEARTBEAT.write_text(str(time.time()))
         except OSError:
             pass
-        if time.time() - last_mirror >= MIRROR_POLL_S:
-            last_mirror = time.time()
-            try:
-                mirror_step(pending, bot)                           # le chiusure che seguono Vantage non dipendono dall'interruttore Telegram (si spengono solo i messaggi)
-            except Exception as e:
-                print("Controllo Vantage:", str(e)[:150], flush=True)
         if not telegram_on():                                       # interruttore spento: né lettura né invio; le chiusure restano in attesa
             was_off = True
             time.sleep(2)
@@ -505,13 +403,12 @@ def main(dry: bool) -> None:
             else:
                 lines = []
                 targets = active_accounts() or [None]
-                mirror = feed_account() is not None and targets != [None]
                 for acc in targets:
                     tag = f"[{acc['name']}] " if acc else ""
                     try:
                         if acc:
                             with ma.session(acc) as mt:
-                                res, trk = execute(mt, sig, dry, acc["lots"], str(acc["login"]), mirror)
+                                res, trk = execute(mt, sig, dry, acc["lots"], acc["login"] and str(acc["login"]))
                         else:
                             if legacy is None:
                                 from src.mt5_feed import connect
