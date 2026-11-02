@@ -144,9 +144,10 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
   <div class="body">
     <div class="row2">
       <label>Numero di conto (login)<input type="text" id="login" inputmode="numeric" required placeholder="es. 51234567"></label>
-      <label>Server del broker<input type="text" id="server" required maxlength="80" placeholder="es. ActivTrades-Server"></label>
+      <label>Password<input type="password" id="password" autocomplete="new-password"></label>
     </div>
-    <label>Password <span class="hint" id="pwhint">(salvata nel Gestore credenziali di Windows, non nei file; serve per accedere al conto in MT5)</span><input type="password" id="password" autocomplete="new-password"></label>
+    <label>Server del broker<input type="text" id="server" required maxlength="80" placeholder="es. ActivTrades-Server"></label>
+    <div class="sub" style="margin-top:-6px">La password serve per accedere al conto in MT5 e viene salvata nel Gestore credenziali di Windows, non nei file.</div>
     <label id="tpl">Terminale MT5 <span class="hint">(lo stesso MT5 per tutti i conti)</span><input type="text" id="terminal_path" readonly></label>
     <div class="row2">
       <label>Lotti per operazione<input type="number" id="lots" min="0.01" max="1" step="0.01" value="0.05"></label>

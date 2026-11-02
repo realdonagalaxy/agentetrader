@@ -61,6 +61,8 @@ def get_password(acc: dict) -> str | None:
 
 
 def set_password(login: int, server: str, password: str) -> None:
+    if os.environ.get("MT5_SIMULATOR") == "1":
+        return                                                        # il simulatore non usa il Gestore credenziali
     kr = _keyring()
     if kr is None:
         raise ValueError("Per salvare la password serve la libreria keyring: esegui  .venv\\Scripts\\pip install keyring  e riprova (oppure lascia vuota la password e tieni il terminale già collegato).")
