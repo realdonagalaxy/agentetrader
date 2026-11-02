@@ -96,48 +96,12 @@ def norm_terminal(path: str) -> str:
     return p[:300]
 
 
-def installed_terminals() -> list[str]:
-    """Terminali MT5 installati (terminal64.exe) nelle cartelle abituali di Windows. MT5_TERMINALS (separati da ;) per elencarli a mano."""
-    import glob
-    env = os.environ.get("MT5_TERMINALS")
-    if env:
-        return [x for x in env.split(";") if x]
-    roots = [os.environ.get(v) for v in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)")]
-    local = os.environ.get("LOCALAPPDATA")
-    if local:
-        roots.append(os.path.join(local, "Programs"))
-    found = []
-    for r in filter(None, roots):
-        for f in glob.glob(os.path.join(r, "*", "terminal64.exe")):
-            if f not in found:
-                found.append(f)
-    return sorted(found)
-
-
-def detect_terminal(login: int, password: str, server: str) -> str:
-    """Prova ogni terminale installato con le credenziali date e restituisce il percorso del primo che accede al conto. Solleva ValueError con l'esito di ognuno se nessuno ci riesce."""
-    terms = installed_terminals()
-    if not terms:
-        raise ValueError("Non trovo nessun terminale MT5 installato (cerco terminal64.exe in Program Files). Installa MT5 del tuo broker e riprova.")
-    notes = []
-    with _thread_lock, _file_lock(timeout=120):
-        mt5 = _mt5()
-        for t in terms:
-            mt5.shutdown()
-            ok = mt5.initialize(path=t, login=int(login), password=password, server=server, timeout=int(os.environ.get("MT5_DETECT_TIMEOUT_MS") or 30000))
-            if ok:
-                try:
-                    i = mt5.account_info()
-                    if i is not None and int(i.login) == int(login):
-                        return t
-                    notes.append(f"{t}: collegato a un altro conto")
-                finally:
-                    mt5.shutdown()
-            else:
-                err = mt5.last_error()
-                notes.append(f"{t}: {err[1] if isinstance(err, tuple) and len(err) > 1 else err}")
-                mt5.shutdown()
-    raise ValueError("Nessun terminale MT5 installato riesce ad accedere con questi dati (login, password, server). Esito per terminale:\n- " + "\n- ".join(notes))
+def default_terminal() -> str:
+    """Il terminale MT5 originale usato da TUTTI i conti: MT5_PATH in config.env, altrimenti C:\\Program Files\\MetaTrader 5\\terminal64.exe."""
+    p = os.environ.get("MT5_PATH") or r"C:\Program Files\MetaTrader 5\terminal64.exe"
+    if os.name == "nt" and os.environ.get("MT5_SIMULATOR") != "1" and not os.path.isfile(p):
+        raise ValueError(f"Non trovo il terminale MT5: {p}. Se è installato altrove, scrivi in config.env la riga  MT5_PATH=percorso completo di terminal64.exe")
+    return p
 
 
 def clean(d: dict) -> dict:
@@ -191,11 +155,14 @@ def save_account(d: dict, aid: int | None = None) -> int:
     if dup:
         con.close()
         raise ValueError("esiste già un conto con questo login e questo server")
-    if aid is None and d.get("create_terminal") and not c["terminal_path"]:      # nuovo conto: individua da solo il terminale installato che accede al conto
+    if aid is None and not c["terminal_path"]:                    # nuovo conto: tutti usano lo stesso MT5 originale; ci accedo ora, così il conto entra nel suo elenco
         con.close()
         if not pw:
-            raise ValueError("Scrivi la password: serve per riconoscere quale terminale MT5 installato si collega al conto.")
-        c["terminal_path"] = detect_terminal(c["login"], pw, c["server"])
+            raise ValueError("Scrivi la password: serve per accedere al conto nel terminale MT5.")
+        c["terminal_path"] = default_terminal()
+        r = _test_with_password(c, pw)
+        if not r.get("connected"):
+            raise ValueError(r.get("error") or "Accesso al conto non riuscito.")
         con = db()
     if pw:
         set_password(c["login"], c["server"], pw)

@@ -146,8 +146,8 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
       <label>Numero di conto (login)<input type="text" id="login" inputmode="numeric" required placeholder="es. 51234567"></label>
       <label>Server del broker<input type="text" id="server" required maxlength="80" placeholder="es. ActivTrades-Server"></label>
     </div>
-    <label>Password <span class="hint" id="pwhint">(salvata nel Gestore credenziali di Windows, non nei file; serve per riconoscere il terminale MT5)</span><input type="password" id="password" autocomplete="new-password"></label>
-    <label id="tpl">Terminale MT5 <span class="hint">(rilevato automaticamente, non modificabile)</span><input type="text" id="terminal_path" readonly></label>
+    <label>Password <span class="hint" id="pwhint">(salvata nel Gestore credenziali di Windows, non nei file; serve per accedere al conto in MT5)</span><input type="password" id="password" autocomplete="new-password"></label>
+    <label id="tpl">Terminale MT5 <span class="hint">(lo stesso MT5 per tutti i conti)</span><input type="text" id="terminal_path" readonly></label>
     <div class="row2">
       <label>Lotti per operazione<input type="number" id="lots" min="0.01" max="1" step="0.01" value="0.05"></label>
       <label>Nota<input type="text" id="note" maxlength="300"></label>
@@ -302,9 +302,9 @@ $("test").onclick = async () => {
 $("f").addEventListener("submit", async e => {
   e.preventDefault(); $("save").disabled = true;
   const mk = !editing;
-  if (mk) { $("tmsg").className = "msg"; $("tmsg").textContent = "Cerco il terminale MT5 che si collega al conto: può richiedere un minuto…"; }
+  if (mk) { $("tmsg").className = "msg"; $("tmsg").textContent = "Accedo al conto nel terminale MT5: può richiedere un minuto…"; }
   try { const r = await api(editing ? "/api/accounts/" + editing : "/api/accounts", editing ? "PUT" : "POST", form()); $("dlg").close();
-    toast(mk && r.terminal_path ? "Conto salvato. Terminale MT5 rilevato: " + r.terminal_path : "Conto salvato", mk ? 12000 : 3500); refresh(); }
+    toast(mk && r.terminal_path ? "Conto salvato. Terminale MT5: " + r.terminal_path : "Conto salvato", mk ? 12000 : 3500); refresh(); }
   catch (er) { $("tmsg").className = "msg loss"; $("tmsg").textContent = er.message; }
   $("save").disabled = false;
 });
