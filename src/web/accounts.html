@@ -107,13 +107,6 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
   <div class="banner" id="sim" hidden>Modalità SIMULATORE: conti, prezzi e operazioni sono finti. Serve solo a provare l'interfaccia.</div>
   <div class="banner" id="warn" hidden></div>
   <div class="kpis" id="kpis"></div>
-  <div class="panel"><h2>Terminale MT5</h2>
-    <div class="body" style="grid-template-columns:minmax(0,1fr) auto;align-items:end">
-      <label>Tutti i conti usano lo stesso terminale <span class="hint" id="tmhint"></span><input type="text" id="tmall" list="terms" placeholder="C:\Program Files\MetaTrader 5\terminal64.exe"></label>
-      <button class="btn" id="tmapply">Applica a tutti i conti</button>
-    </div>
-    <div class="sub" style="padding:0 20px 14px">Con un solo terminale il software cambia login a ogni operazione: ogni conto deve avere la password salvata («Modifica» → Password) e il server esatto. Il terminale generico di MetaQuotes è il più adatto per più broker.</div>
-  </div><datalist id="terms"></datalist>
   <div class="panel">
     <h2>Conti</h2>
     <div class="tw"><table>
@@ -155,12 +148,11 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
     </div>
     <label>Server del broker<input type="text" id="server" required maxlength="80" placeholder="es. ActivTrades-Server"></label>
     <label>Password <span class="hint" id="pwhint">(salvata nel Gestore credenziali di Windows, non nei file)</span><input type="password" id="password" autocomplete="new-password"></label>
-    <label>Percorso del terminale MT5 <span class="hint">(consigliato per ogni conto: clicca il campo per scegliere tra i terminali trovati sul PC)</span><input type="text" id="terminal_path" list="terms" placeholder="C:\Program Files\MetaTrader 5\terminal64.exe"></label>
+    <label id="tpl">Terminale MT5 <span class="hint">(creato automaticamente, non modificabile)</span><input type="text" id="terminal_path" readonly></label>
     <div class="row2">
       <label>Lotti per operazione<input type="number" id="lots" min="0.01" max="1" step="0.01" value="0.05"></label>
       <label>Nota<input type="text" id="note" maxlength="300"></label>
     </div>
-    <label class="chk" id="mkl"><input type="checkbox" id="mkterm" checked><span>Crea un terminale MT5 dedicato (copia portable in C:\MT5\NumeroConto) e usalo per questo conto. Se hai già scritto un percorso sopra, viene usato quello.</span></label>
     <label class="chk"><input type="checkbox" id="enabled" checked><span>Conto attivo (viene monitorato)</span></label>
     <label class="chk"><input type="checkbox" id="use_signals" checked><span>Usa per i segnali Telegram (apre le operazioni; solo se il conto è demo)</span></label>
   </div>
@@ -237,17 +229,11 @@ function kpis() {
     <div class="kpi"><div class="l">Posizioni aperte</div><div class="v">${npos}</div></div>`;
 }
 function warn() {
-  const ps = [...new Set(accounts.map(a => a.terminal_path || ""))];
-  if (document.activeElement !== $("tmall")) $("tmall").value = ps.length === 1 ? ps[0] : "";
-  $("tmhint").textContent = ps.length > 1 ? "(ora i conti hanno terminali diversi)" : "";
+
   const act = accounts.filter(a => a.enabled), w = $("warn");
-  const paths = act.map(a => a.terminal_path || "");
-  const dup = new Set(paths).size < paths.length;
   const nopw = act.filter(a => !a.has_password);
   const msg = [];
-  if (act.length > 1 && nopw.length) msg.push("Con un solo terminale serve la password salvata di OGNI conto, altrimenti non si riesce a passare da un conto all'altro. Manca per: " + nopw.map(a => a.name).join(", ") + " («Modifica» → Password).");
-  const paths2 = new Set(act.map(a => a.terminal_path || ""));
-  if (act.length > 1 && paths2.size > 1) msg.push("I conti usano terminali diversi (o nessun percorso). Se vuoi un terminale unico, scegline uno nel riquadro «Terminale MT5» e premi «Applica a tutti i conti».");
+  if (nopw.length) msg.push("Password non salvata per: " + nopw.map(a => a.name).join(", ") + ". Senza password il programma non può accedere al conto nel suo terminale («Modifica» → Password).");
   w.hidden = !msg.length; w.innerHTML = msg.map(esc).join("<br>");
 }
 async function refresh() {
@@ -290,25 +276,17 @@ $("rows").addEventListener("click", async e => {
 function openAcc(btn) { let r = btn.closest("tr.det").previousElementSibling; return +r.dataset.id; }
 function edit(a) {
   editing = a ? a.id : null; $("dtitle").textContent = a ? "Modifica conto" : "Nuovo conto"; $("tmsg").textContent = "";
-  for (const k of ["name", "login", "server", "terminal_path", "lots", "note"]) $(k).value = a ? a[k] : (k === "lots" ? 0.05 : "");
+  for (const k of ["name", "login", "server", "lots", "note"]) $(k).value = a ? a[k] : (k === "lots" ? 0.05 : "");
   $("password").value = ""; $("password").placeholder = a && a.has_password ? "•••••• (lascia vuoto per non cambiarla)" : "";
   $("enabled").checked = a ? a.enabled : true; $("use_signals").checked = a ? a.use_signals : true;
-  $("mkl").hidden = !!a; $("mkterm").checked = !a;
-  api("/api/terminals").then(j => $("terms").innerHTML = j.terminals.map(t => `<option value="${esc(t)}"></option>`).join("")).catch(() => {});
+  $("tpl").hidden = !a; $("terminal_path").value = a ? (a.terminal_path || "Terminale predefinito di MT5") : "";
   $("dlg").showModal(); $("name").focus();
 }
-const form = () => ({name: $("name").value, login: $("login").value, server: $("server").value, password: $("password").value, terminal_path: $("terminal_path").value,
-  lots: $("lots").value, note: $("note").value, create_terminal: !editing && $("mkterm").checked, enabled: $("enabled").checked, use_signals: $("use_signals").checked});
+const form = () => ({name: $("name").value, login: $("login").value, server: $("server").value, password: $("password").value, terminal_path: editing ? (accounts.find(x => x.id === editing) || {}).terminal_path || "" : "",
+  lots: $("lots").value, note: $("note").value, create_terminal: !editing, enabled: $("enabled").checked, use_signals: $("use_signals").checked});
 $("add").onclick = () => edit(null);
 $("cancel").onclick = () => $("dlg").close();
 $("refresh").onclick = refresh;
-$("tmapply").onclick = async () => {
-  $("tmapply").disabled = true;
-  try { const r = await api("/api/terminal-all", "POST", {path: $("tmall").value}); toast(`Terminale impostato su ${r.updated} conti`); await refresh(); }
-  catch (e) { toast(e.message, 7000); }
-  $("tmapply").disabled = false;
-};
-api("/api/terminals").then(j => $("terms").innerHTML = j.terminals.map(t => `<option value="${esc(t)}"></option>`).join("")).catch(() => {});
 $("imp").onclick = async () => {
   $("imp").disabled = true;
   try { const r = await api("/api/import-current", "POST", {}); toast(`Aggiunto: ${r.name}${r.demo ? "" : " (conto REALE: solo lettura, non usato per i segnali)"}`, 6000); await refresh(); }
@@ -324,7 +302,7 @@ $("test").onclick = async () => {
 };
 $("f").addEventListener("submit", async e => {
   e.preventDefault(); $("save").disabled = true;
-  const mk = !editing && $("mkterm").checked && !$("terminal_path").value.trim();
+  const mk = !editing;
   if (mk) { $("tmsg").className = "msg"; $("tmsg").textContent = "Creo il terminale dedicato (copia dei file di MT5): può richiedere un minuto…"; }
   try { const r = await api(editing ? "/api/accounts/" + editing : "/api/accounts", editing ? "PUT" : "POST", form()); $("dlg").close();
     toast(mk && r.terminal_path ? "Conto salvato. Terminale creato: " + r.terminal_path : "Conto salvato", mk ? 12000 : 3500); refresh(); }

@@ -88,8 +88,6 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/accounts":
                 return self._json({"accounts": ma.list_accounts(), "simulator": os.environ.get("MT5_SIMULATOR") == "1"})
-            if path == "/api/terminals":
-                return self._json({"terminals": ma.find_terminals()})
             if path == "/api/activity":
                 return self._json({"rows": activity()})
             if path == "/api/results":
@@ -114,8 +112,6 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/accounts" and method == "POST":
                 aid = ma.save_account(self._data())
                 return self._json({"id": aid, "terminal_path": ma.get_account(aid)["terminal_path"]}, 201)
-            if path == "/api/terminal-all" and method == "POST":
-                return self._json({"updated": ma.set_terminal_all(str(self._data().get("path") or ""))})
             if path == "/api/import-current" and method == "POST":
                 return self._json(ma.import_connected(str(self._data().get("terminal_path") or "")), 201)
             if path == "/api/test" and method == "POST":

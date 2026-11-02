@@ -23,7 +23,9 @@ def terminal_info():
 
 
 def initialize(path=None, login=None, password=None, server=None, timeout=None, **kw):
-    _state["path"] = (path or "").rsplit("\\", 1)[0] if path else None
+    import ntpath
+    import posixpath
+    _state["path"] = (ntpath if "\\" in (path or "") else posixpath).dirname(path) if path else None
     _state["login"] = login or _state["login"] or 1001
     return True
 

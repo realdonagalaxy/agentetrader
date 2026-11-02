@@ -96,21 +96,6 @@ def norm_terminal(path: str) -> str:
     return p[:300]
 
 
-def find_terminals() -> list[str]:
-    """Terminali MT5 installati (terminal64.exe) nelle cartelle di installazione abituali di Windows."""
-    import glob
-    if os.environ.get("MT5_SIMULATOR") == "1":
-        return [r"C:\Program Files\MetaTrader 5\terminal64.exe", r"C:\Program Files\ActivTrades Markets MetaTrader 5\terminal64.exe"]
-    roots = [os.environ.get(v) for v in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA", "ProgramW6432")]
-    found = []
-    for r in filter(None, roots):
-        base = os.path.join(r, "Programs") if r == os.environ.get("LOCALAPPDATA") else r
-        for f in glob.glob(os.path.join(base, "*", "terminal64.exe")):
-            if f not in found:
-                found.append(f)
-    return sorted(found)
-
-
 def source_terminal() -> str:
     """Installazione di MT5 da cui si copiano i terminali portable dei nuovi conti (MT5_SOURCE in config.env per cambiarla)."""
     return os.environ.get("MT5_SOURCE") or r"C:\Program Files\MetaTrader 5"
@@ -240,16 +225,6 @@ def set_enabled(aid: int, enabled: bool) -> None:
     con.execute("UPDATE accounts SET enabled=? WHERE id=?", (1 if enabled else 0, aid))
     con.commit()
     con.close()
-
-
-def set_terminal_all(path: str) -> int:
-    """Imposta lo stesso terminale MT5 per tutti i conti (modalità «terminale unico»). Restituisce quanti conti sono stati aggiornati."""
-    p = norm_terminal(path)
-    con = db()
-    n = con.execute("UPDATE accounts SET terminal_path=?", (p,)).rowcount
-    con.commit()
-    con.close()
-    return n
 
 
 def delete_account(aid: int) -> None:
@@ -491,7 +466,20 @@ def import_connected(terminal_path: str = "") -> dict:
 
 if __name__ == "__main__":
     import sys
-    if "--import-current" in sys.argv:
+    if "--delete-all" in sys.argv:
+        accs = list_accounts()
+        if not accs:
+            sys.exit("Nessun conto da cancellare.")
+        print("Verranno cancellati dall'archivio (e le loro password dal Gestore credenziali):")
+        for a in accs:
+            print(f"  - {a['name']} ({a['login']}, {a['server']})")
+        print("Le posizioni aperte su MT5 e le cartelle dei terminali in C:\\MT5 NON vengono toccate.")
+        if input("Scrivi SI per confermare: ").strip().upper() != "SI":
+            sys.exit("Annullato.")
+        for a in accs:
+            delete_account(a["id"])
+        print(f"Cancellati {len(accs)} conti.")
+    elif "--import-current" in sys.argv:
         try:
             print("Aggiunto:", import_connected())
         except ValueError as e:
