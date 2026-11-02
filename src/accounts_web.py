@@ -112,7 +112,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             if path == "/api/accounts" and method == "POST":
-                return self._json({"id": ma.save_account(self._data())}, 201)
+                aid = ma.save_account(self._data())
+                return self._json({"id": aid, "terminal_path": ma.get_account(aid)["terminal_path"]}, 201)
             if path == "/api/terminal-all" and method == "POST":
                 return self._json({"updated": ma.set_terminal_all(str(self._data().get("path") or ""))})
             if path == "/api/import-current" and method == "POST":

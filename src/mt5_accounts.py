@@ -111,6 +111,49 @@ def find_terminals() -> list[str]:
     return sorted(found)
 
 
+def source_terminal() -> str:
+    """Installazione di MT5 da cui si copiano i terminali portable dei nuovi conti (MT5_SOURCE in config.env per cambiarla)."""
+    return os.environ.get("MT5_SOURCE") or r"C:\Program Files\MetaTrader 5"
+
+
+def provision_terminal(name: str, login: int) -> str:
+    r"""Copia l'installazione di origine in C:\MT5\<nome conto> (ripiego: cartella MT5 dell'utente), la marca come portable e crea il collegamento sul Desktop.
+    Se la cartella esiste già la riusa. Restituisce il percorso di terminal64.exe. L'origine non viene toccata."""
+    import re
+    import shutil
+    exe, src = "terminal64.exe", source_terminal()
+    if not os.path.isfile(os.path.join(src, exe)):
+        raise ValueError(f"Non trovo l'installazione di MT5 da copiare: {os.path.join(src, exe)}. Togli la spunta «Crea un terminale dedicato» e indica a mano il percorso, "
+                         "oppure imposta MT5_SOURCE in config.env con la cartella del terminale da copiare.")
+    base = None
+    for cand in (os.environ.get("MT5_BASE") or r"C:\MT5", os.path.join(os.path.expanduser("~"), "MT5")):
+        try:
+            os.makedirs(cand, exist_ok=True)
+            base = cand
+            break
+        except OSError:
+            continue
+    if base is None:
+        raise ValueError("Non riesco a creare la cartella C:\\MT5 (permessi?): avvia Gestione Conti come amministratore oppure indica a mano il percorso del terminale.")
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", name).strip("_") or f"conto_{login}"
+    dst = os.path.join(base, safe)
+    if os.path.exists(dst):                                       # cartella già occupata (da un altro conto con lo stesso nome): ne uso una col numero di conto, mai condivisa
+        dst = os.path.join(base, f"{safe}_{login}")
+    if not os.path.isfile(os.path.join(dst, exe)):
+        shutil.copytree(src, dst, dirs_exist_ok=True)
+    with open(os.path.join(dst, "portable.flag"), "w") as f:
+        f.write("portable")
+    if os.name == "nt":
+        try:
+            import subprocess
+            ps = ("$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop')+'\\MT5 " + safe + ".lnk');"
+                  f"$s.TargetPath='{os.path.join(dst, exe)}';$s.Arguments='/portable';$s.WorkingDirectory='{dst}';$s.Save()")
+            subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, timeout=30)
+        except Exception:
+            pass                                                  # il collegamento è solo una comodità
+    return os.path.join(dst, exe)
+
+
 def clean(d: dict) -> dict:
     name, server = str(d.get("name") or "").strip(), str(d.get("server") or "").strip()
     if not name:
@@ -163,6 +206,12 @@ def save_account(d: dict, aid: int | None = None) -> int:
     if dup:
         con.close()
         raise ValueError("esiste già un conto con questo login e questo server")
+    if aid is None and d.get("create_terminal") and not c["terminal_path"]:
+        try:
+            c["terminal_path"] = provision_terminal(c["name"], c["login"])
+        except Exception as e:
+            con.close()
+            raise ValueError(str(e)) from e
     if pw:
         set_password(c["login"], c["server"], pw)
     if aid is None:
@@ -213,7 +262,7 @@ def delete_account(aid: int) -> None:
 
 # ---------- connessione a MT5 ----------
 def is_portable(terminal_path: str) -> bool:
-    """Il terminale è portable se nella sua cartella c'è il marcatore portable.flag (lo crea installa_terminali.bat)."""
+    """Il terminale è portable se nella sua cartella c'è il marcatore portable.flag (lo crea Gestione Conti quando prepara il terminale di un nuovo conto)."""
     if not terminal_path:
         return False
     return os.path.isfile(os.path.join(_pm(terminal_path).dirname(terminal_path), "portable.flag"))
