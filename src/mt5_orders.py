@@ -9,6 +9,7 @@ Formato del messaggio (decisione utente 30/10/2026):
     ✅ TP3: 4012        (ignorato)
 Regole: lotto fisso LOTS (0.05); ordine A MERCATO (l'Entry del messaggio serve solo a controllare che il prezzo non si sia allontanato più di MAX_SLIP_PRICE);
 SL e TP1 impostati sull'ordine; TP2/TP3 ignorati. Il simbolo XAUUSD viene tradotto in MT5_SYMBOL (es. GOLD).
+Filtro sullo spread: non apre se lo spread supera MAX_SPREAD (1,00 $) o MAX_SPREAD_PCT (20%) della distanza del TP1.
 Sicurezze: accetta messaggi solo dalla chat TELEGRAM_CHAT_ID; ignora i messaggi arrivati prima dell'avvio e quelli più vecchi di MAX_AGE_S;
 rifiuta se il conto NON è demo (non c'è modo di forzare: il live richiede una modifica esplicita del codice, da concordare), se manca SL/TP1, se SL/TP sono dal lato sbagliato,
 se ci sono già MAX_POSITIONS posizioni aperte con il magic number di questo programma, o se il prezzo è lontano dall'Entry. Quando una posizione aperta da qui si chiude a TP, risponde al messaggio del segnale, pulito: '✅ TP1 +N pips' o '❌ SL HIT -N pips' (oro: 1 pip = 0,10). Ogni esito viene risposto su Telegram e registrato in journal/ordini_mt5.csv.
@@ -28,6 +29,8 @@ from pathlib import Path
 LOTS = 0.05
 MAX_SLIP_PRICE = 3.0
 MAX_POSITIONS = 3
+MAX_SPREAD = float(os.environ.get("MAX_SPREAD") or 1.00)            # $: oltre questo spread non si apre (rollover, notizie). Cambiabile in config.env
+MAX_SPREAD_PCT = float(os.environ.get("MAX_SPREAD_PCT") or 0.20)    # frazione della distanza del TP1: lo spread non deve mangiarne più di così
 MAX_AGE_S = 120
 DEVIATION = 20
 MAGIC = 530001
@@ -101,6 +104,10 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
     if len(mine) >= MAX_POSITIONS:
         raise ValueError(f"già {len(mine)} posizioni aperte da questo programma (massimo {MAX_POSITIONS})")
     tick = mt5.symbol_info_tick(sym)
+    spread, tp_dist = tick.ask - tick.bid, abs(sig["tp1"] - sig["entry"])
+    limit = min(MAX_SPREAD, MAX_SPREAD_PCT * tp_dist) if tp_dist > 0 else MAX_SPREAD
+    if spread > limit + 1e-9:                                        # filtro sullo spread: con spread alto il costo mangia il TP
+        raise ValueError(f"spread troppo alto: {spread:.2f} $ (limite {limit:.2f} $: massimo {MAX_SPREAD:.2f} $ e {MAX_SPREAD_PCT:.0%} del TP1 di {tp_dist:.2f} $). Non apro.")
     buy = sig["side"] == "buy"
     px = tick.ask if buy else tick.bid
     d = info.digits
