@@ -487,45 +487,118 @@ if __name__ == "__main__":
             sys.exit(str(e))
 
 
+def _closed_trades(mt5, t0, t1) -> list[dict]:
+    """Operazioni chiuse con data di chiusura in [t0, t1) (datetime naive, orario del server): una riga per ogni deal di chiusura con apertura, chiusura, motivo (tp/sl/altra),
+    pips (oro 1 pip = 0,10, altri strumenti 10 punti) e netto. Una chiusura parziale è una riga a parte."""
+    from datetime import timedelta, timezone
+    from datetime import datetime
+    deals = mt5.history_deals_get(t0 - timedelta(days=1), t1 + timedelta(days=1))
+    if deals is None:
+        raise RuntimeError(f"MT5 non restituisce la cronologia: {mt5.last_error()}. In MT5 apri la scheda Cronologia (Ctrl+T) e scegli «Tutta la cronologia», poi riprova.")
+    out, opens, psize = [], {}, {}
+    for d in deals:
+        if d.entry not in (1, 2, 3) or d.type not in (0, 1):
+            continue
+        when = datetime.fromtimestamp(d.time, tz=timezone.utc).replace(tzinfo=None)
+        if not t0 <= when < t1:
+            continue
+        if d.position_id not in opens:
+            ins = [x for x in (mt5.history_deals_get(position=d.position_id) or ()) if x.entry == 0]
+            opens[d.position_id] = ins[0] if ins else None
+        o = opens[d.position_id]
+        if o is None:                                              # apertura non trovata nella cronologia: non si può calcolare
+            continue
+        if d.symbol not in psize:
+            if "XAU" in d.symbol.upper() or "GOLD" in d.symbol.upper():
+                psize[d.symbol] = 0.10
+            else:
+                info = mt5.symbol_info(d.symbol)
+                psize[d.symbol] = (info.point * 10) if info else 0.0001
+        out.append({"day": when.strftime("%Y-%m-%d"), "position": int(d.position_id), "deal": int(d.ticket), "symbol": d.symbol, "side": "buy" if o.type == 0 else "sell",
+                    "volume": getattr(d, "volume", None), "open_time": int(o.time), "open_price": o.price, "close_time": int(d.time), "close_price": d.price,
+                    "reason": "tp" if d.reason == mt5.DEAL_REASON_TP else "sl" if d.reason == mt5.DEAL_REASON_SL else "altra",
+                    "pips": round(((d.price - o.price) if o.type == 0 else (o.price - d.price)) / psize[d.symbol], 1),
+                    "net": round(d.profit + d.commission + d.swap + getattr(d, "fee", 0.0), 2)})
+    return sorted(out, key=lambda r: r["close_time"])
+
+
 def calendar_month(acc: dict, month: str) -> dict:
     """Operazioni CHIUSE del conto nel mese (YYYY-MM), raggruppate per giorno di chiusura (orario del server del broker):
-    numero di TP, di SL, di altre chiusure (a mano, copia...), somma dei PIPS e profitto netto. TP/SL = motivo di chiusura registrato da MT5.
-    Pips: (prezzo di chiusura - prezzo di apertura) nel verso dell'operazione; oro 1 pip = 0,10, altri strumenti 10 punti."""
-    from datetime import datetime, timedelta, timezone
+    numero di TP, di SL, di altre chiusure (a mano, copia...), somma dei PIPS e profitto netto. TP/SL = motivo di chiusura registrato da MT5."""
+    from datetime import datetime
     y, m = (int(x) for x in month.split("-"))
     t0, t1 = datetime(y, m, 1), datetime(y + (m == 12), m % 12 + 1, 1)
-    day_of = lambda ts: datetime.fromtimestamp(ts, tz=timezone.utc)
     with session(acc) as mt5:
         cur = mt5.account_info().currency
-        deals = mt5.history_deals_get(t0 - timedelta(days=1), t1 + timedelta(days=1))
-        if deals is None:
-            raise RuntimeError(f"MT5 non restituisce la cronologia: {mt5.last_error()}. In MT5 apri la scheda Cronologia (Ctrl+T) e scegli «Tutta la cronologia», poi riprova.")
-        days, opens, psize = {}, {}, {}
-        for d in deals:
-            if d.entry not in (1, 2, 3) or d.type not in (0, 1):
-                continue
-            when = day_of(d.time).replace(tzinfo=None)
-            if not t0 <= when < t1:
-                continue
-            if d.position_id not in opens:
-                ins = [x for x in (mt5.history_deals_get(position=d.position_id) or ()) if x.entry == 0]
-                opens[d.position_id] = ins[0] if ins else None
-            o = opens[d.position_id]
-            if o is None:                                          # apertura non trovata nella cronologia: non si può calcolare
-                continue
-            if d.symbol not in psize:
-                if "XAU" in d.symbol.upper() or "GOLD" in d.symbol.upper():
-                    psize[d.symbol] = 0.10
-                else:
-                    info = mt5.symbol_info(d.symbol)
-                    psize[d.symbol] = (info.point * 10) if info else 0.0001
-            pips = ((d.price - o.price) if o.type == 0 else (o.price - d.price)) / psize[d.symbol]
-            c = days.setdefault(when.strftime("%Y-%m-%d"), {"tp": 0, "sl": 0, "altre": 0, "pips": 0.0, "trade": 0, "netto": 0.0})
-            c["tp" if d.reason == mt5.DEAL_REASON_TP else "sl" if d.reason == mt5.DEAL_REASON_SL else "altre"] += 1
-            c["pips"] += pips
-            c["trade"] += 1
-            c["netto"] += d.profit + d.commission + d.swap + getattr(d, "fee", 0.0)
+        trades = _closed_trades(mt5, t0, t1)
+    days = {}
+    for r in trades:
+        c = days.setdefault(r["day"], {"tp": 0, "sl": 0, "altre": 0, "pips": 0.0, "trade": 0, "netto": 0.0})
+        c["tp" if r["reason"] == "tp" else "sl" if r["reason"] == "sl" else "altre"] += 1
+        c["pips"] += r["pips"]
+        c["trade"] += 1
+        c["netto"] += r["net"]
     for c in days.values():
         c["pips"], c["netto"] = round(c["pips"], 1), round(c["netto"], 2)
     tot = {k: round(sum(c[k] for c in days.values()), 2) for k in ("tp", "sl", "altre", "pips", "trade", "netto")}
     return {"month": month, "currency": cur, "days": days, "total": tot}
+
+
+def day_trades(acc: dict, day: str) -> dict:
+    """Le operazioni chiuse in un giorno (YYYY-MM-DD), una per riga, per il dettaglio del calendario."""
+    from datetime import datetime, timedelta
+    t0 = datetime.strptime(day, "%Y-%m-%d")
+    with session(acc) as mt5:
+        cur = mt5.account_info().currency
+        trades = _closed_trades(mt5, t0, t0 + timedelta(days=1))
+    return {"date": day, "currency": cur, "trades": trades}
+
+
+def chart_path(login, position: int, deal: int):
+    d = DATA_DIR / "grafici"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{login}_{position}_{deal}.png"
+
+
+def render_history_chart(mt5, symbol: str, side: str, open_price: float, open_time: int, close_price: float, close_time: int, sl, tp, label: str) -> bytes | None:
+    """Grafico di un'operazione chiusa (candele del periodo con Entry, SL, TP e chiusura). None se MT5 non ha le candele. Tempi: orario del server (epoch)."""
+    from datetime import datetime, timezone
+    from src import trade_chart
+    minutes = (close_time - open_time) / 60
+    tf, secs = (mt5.TIMEFRAME_M1, 60) if minutes <= 180 else (mt5.TIMEFRAME_M5, 300) if minutes <= 900 else (mt5.TIMEFRAME_M15, 900)
+    d0 = datetime.fromtimestamp(open_time - 30 * secs, tz=timezone.utc)
+    d1 = datetime.fromtimestamp(close_time + 15 * secs, tz=timezone.utc)
+    rates = mt5.copy_rates_range(symbol, tf, d0, d1)
+    if rates is None or len(rates) < 5:
+        return None
+    candles = [(int(r["time"]), float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"])) for r in rates]
+    info = mt5.symbol_info(symbol)
+    return trade_chart.render(candles, open_price, sl or None, tp or None, close_price, side, symbol, label, getattr(info, "digits", 2), open_time, close_time)
+
+
+def trade_chart_png(acc: dict, position: int, deal: int) -> bytes:
+    """Grafico di un'operazione già chiusa, preso dalla cronologia di MT5 (livelli di SL e TP = quelli dell'ordine di apertura). Salvato in journal/grafici: le volte dopo è immediato."""
+    f = chart_path(acc["login"], position, deal)
+    if f.exists():
+        return f.read_bytes()
+    with session(acc) as mt5:
+        deals = list(mt5.history_deals_get(position=position) or ())
+        ins = [x for x in deals if x.entry == 0]
+        outs = [x for x in deals if int(x.ticket) == int(deal)]
+        if not ins or not outs:
+            raise ValueError("operazione non trovata nella cronologia di MT5")
+        o, d = ins[0], outs[0]
+        orders = list(mt5.history_orders_get(position=position) or ())
+        sl = next((x.sl for x in orders if getattr(x, "sl", 0)), None)
+        tp = next((x.tp for x in orders if getattr(x, "tp", 0)), None)
+        side = "buy" if o.type == 0 else "sell"
+        info = mt5.symbol_info(d.symbol)
+        pip = 0.10 if ("XAU" in d.symbol.upper() or "GOLD" in d.symbol.upper()) else ((info.point * 10) if info else 0.0001)
+        pips = ((d.price - o.price) if side == "buy" else (o.price - d.price)) / pip
+        what = "TP" if d.reason == mt5.DEAL_REASON_TP else "SL" if d.reason == mt5.DEAL_REASON_SL else "Chiusura"
+        label = f"{what} {pips:+.0f} pips · prezzo {d.price:.{getattr(info, 'digits', 2)}f}"
+        png = render_history_chart(mt5, d.symbol, side, o.price, int(o.time), d.price, int(d.time), sl, tp, label)
+    if png is None:
+        raise ValueError("MT5 non ha le candele di quel periodo: apri un grafico del simbolo in MT5 e scorri indietro, poi riprova")
+    f.write_bytes(png)
+    return png

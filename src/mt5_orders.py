@@ -244,19 +244,10 @@ def say_photo(bot, png: bytes, caption: str, reply_to: int | None = None) -> boo
 
 def trade_screenshot(mt5, t: dict, deals, d, label: str) -> bytes | None:
     """Grafico dell'operazione chiusa (candele di ActivTrades con Entry, SL, TP e chiusura). None se mancano i dati. Orari: server del broker."""
-    from src import trade_chart
+    from src import mt5_accounts as ma
     ins = [x for x in deals if x.entry == mt5.DEAL_ENTRY_IN]
     t_in = ins[0].time if ins else d.time - 300
-    minutes = (d.time - t_in) / 60
-    tf, secs = (mt5.TIMEFRAME_M1, 60) if minutes <= 180 else (mt5.TIMEFRAME_M5, 300) if minutes <= 900 else (mt5.TIMEFRAME_M15, 900)
-    d0 = datetime.fromtimestamp(t_in - 30 * secs, tz=timezone.utc)
-    d1 = datetime.fromtimestamp(d.time + 15 * secs, tz=timezone.utc)
-    rates = mt5.copy_rates_range(t["symbol"], tf, d0, d1)
-    if rates is None or len(rates) < 5:
-        return None
-    candles = [(int(r["time"]), float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"])) for r in rates]
-    info = mt5.symbol_info(t["symbol"])
-    return trade_chart.render(candles, t["open"], t.get("sl"), t.get("tp") or None, d.price, t["side"], t["symbol"], label, getattr(info, "digits", 2), t_in, d.time)
+    return ma.render_history_chart(mt5, t["symbol"], t["side"], t["open"], t_in, d.price, d.time, t.get("sl"), t.get("tp") or None, label)
 
 
 def announce(bot, mt5, t: dict, deals, d, text: str, label: str) -> None:
@@ -266,6 +257,12 @@ def announce(bot, mt5, t: dict, deals, d, text: str, label: str) -> None:
         png = trade_screenshot(mt5, t, deals, d, label)
     except Exception as e:
         print("Screenshot non riuscito:", str(e)[:150], flush=True)
+    if png and t.get("account"):                                       # copia per il calendario di Gestione Conti
+        try:
+            from src import mt5_accounts as ma
+            ma.chart_path(ma.get_account(t["account"])["login"], int(t["position"]), int(d.ticket)).write_bytes(png)
+        except Exception:
+            pass
     if not (png and say_photo(bot, png, text, t["msg_id"])):
         say(bot, text, t["msg_id"])
 

@@ -150,6 +150,14 @@ def _deals_of(t):
             N(ticket=pid * 2 + 1, position_id=pid, time=tc, type=1 - ty, entry=DEAL_ENTRY_OUT, reason=reason, price=p1, profit=pl, commission=-0.35, swap=0.0, fee=0.0, symbol="GOLD")]
 
 
+def history_orders_get(*a, position=None, **kw):
+    for t in _fake_trades(_state["login"]):
+        if t[0] == position:
+            pid, to, tc, ty, p0, p1, pl, reason = t
+            return (N(position_id=pid, time_setup=to, price_open=p0, sl=round(p0 - 15 if ty == 0 else p0 + 15, 2), tp=round(p0 + 5 if ty == 0 else p0 - 5, 2)),)
+    return ()
+
+
 def history_deals_get(*a, position=None, **kw):
     if a:                                                              # intervallo di date
         t0 = a[0].timestamp() if hasattr(a[0], "timestamp") else a[0]

@@ -84,6 +84,17 @@ tr.acc.off .name{opacity:.6}
 .cal .ln{font:12px var(--mono);font-variant-numeric:tabular-nums;display:flex;justify-content:space-between;gap:4px}
 .cal .pp{font:600 14px var(--mono);margin-top:auto;font-variant-numeric:tabular-nums}
 @media (max-width:760px){.cal{gap:3px}.cal .day{min-height:70px;padding:4px}.cal .ln{font-size:10px}.cal .pp{font-size:11px}}
+.cal .day.has{cursor:pointer}
+.cal .day.has:hover{box-shadow:0 0 0 2px var(--accent) inset}
+.cal .day.has:focus-visible{outline:2px solid var(--accent)}
+#daydlg{width:min(860px,calc(100vw - 24px));max-height:92vh;display:none;flex-direction:column}
+#daydlg[open]{display:flex}
+#daybody{padding:14px 18px;overflow-y:auto}
+.tcard{border:1px solid var(--line);border-radius:6px;padding:12px;margin-bottom:14px;background:var(--surface)}
+.thead{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;margin-bottom:10px}
+.thead .num{font-size:13px}
+.shot{min-height:60px;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:12px;border-radius:4px;background:var(--surface2)}
+.shot img{width:100%;height:auto;display:block;border-radius:4px}
 .empty{padding:36px 16px;text-align:center;color:var(--ink3)}
 .actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
 .err{color:var(--loss);font-size:12px;max-width:340px;overflow-wrap:anywhere}
@@ -173,6 +184,9 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
     <button type="button" class="btn sec" id="cancel">Annulla</button>
     <button type="submit" class="btn" id="save">Salva</button></div>
 </form></dialog>
+
+<dialog id="daydlg"><div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)"><h3 id="daytitle" style="border:0;padding:0;margin:0;text-transform:capitalize"></h3><span id="daysum" class="sub" style="margin-left:auto"></span>
+  <button class="btn sm sec" id="dayclose" aria-label="Chiudi">Chiudi</button></div><div id="daybody"></div></dialog>
 
 <dialog id="ask"><form method="dialog">
   <h3 id="atitle">Conferma</h3><div class="body" id="atext"></div>
@@ -381,7 +395,7 @@ function drawCalendar(R) {
     const key = `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`, v = R.days[key];
     const isT = today.getFullYear() === y && today.getMonth() === m && today.getDate() === d;
     const tip = v ? `${v.trade} operazioni chiuse · netto ${money(v.netto, R.currency)}` : "";
-    h += `<div class="day${isT ? " today" : ""}${v ? (v.pips > 0 ? " win" : v.pips < 0 ? " loss" : "") : ""}" title="${esc(tip)}"><div class="dn">${d}</div>` + (v ? `
+    h += `<div class="day${isT ? " today" : ""}${v ? (v.pips > 0 ? " win" : v.pips < 0 ? " loss" : "") + " has" : ""}" ${v ? `data-day="${key}" tabindex="0" role="button"` : ""} title="${esc(tip ? tip + " · clicca per i grafici" : "")}"><div class="dn">${d}</div>` + (v ? `
       <div class="ln"><span class="gain">TP</span><b class="gain">${v.tp}</b></div><div class="ln"><span class="loss">SL</span><b class="loss">${v.sl}</b></div>` +
       (v.altre ? `<div class="ln"><span class="sub">altre</span><b>${v.altre}</b></div>` : "") + `<div class="pp ${cls(v.pips)}">${sgn(v.pips)} pips</div>` : "") + `</div>`;
   }
@@ -389,6 +403,37 @@ function drawCalendar(R) {
   const t = R.total;
   $("ctot").innerHTML = t.trade ? `Mese: <b class="gain">${t.tp} TP</b> · <b class="loss">${t.sl} SL</b>${t.altre ? ` · ${t.altre} altre` : ""} · <b class="${cls(t.pips)}">${sgn(t.pips)} pips</b> · netto <b class="${cls(t.netto)}">${money(t.netto, R.currency)}</b>` : "Nessuna operazione chiusa in questo mese.";
 }
+let dayToken = 0;
+async function openDay(day) {
+  const my = ++dayToken, acc = $("rsrc").value, dlg = $("daydlg");
+  $("daytitle").textContent = new Date(day + "T00:00:00").toLocaleDateString("it-IT", {weekday: "long", day: "numeric", month: "long", year: "numeric"});
+  $("daysum").textContent = ""; $("daybody").innerHTML = `<div class="sub">Leggo le operazioni da MT5…</div>`;
+  if (!dlg.open) dlg.showModal();
+  let j;
+  try { j = await api(`/api/day?account=${acc}&date=${day}`); } catch (e) { $("daybody").innerHTML = `<div class="loss">${esc(e.message)}</div>`; return; }
+  if (my !== dayToken) return;
+  const tm = t => new Date(t * 1000).toISOString().slice(11, 16), px = v => Number(v).toFixed(2);
+  const reasonBadge = r => r === "tp" ? `<span class="badge b-ok">TP</span>` : r === "sl" ? `<span class="badge b-err">SL</span>` : `<span class="badge b-off">chiusura manuale/altra</span>`;
+  $("daysum").innerHTML = `${j.trades.length} operazioni · <b class="${cls(j.trades.reduce((a, t) => a + t.pips, 0))}">${sgn(j.trades.reduce((a, t) => a + t.pips, 0))} pips</b>`;
+  $("daybody").innerHTML = j.trades.map((t, i) => `<div class="tcard"><div class="thead">
+      <span class="badge ${t.side === "buy" ? "b-ok" : "b-err"}">${t.side.toUpperCase()}</span><b>${esc(t.symbol)}</b>${t.volume ? `<span class="num">${t.volume} lotti</span>` : ""}${reasonBadge(t.reason)}
+      <span class="num ${cls(t.pips)}"><b>${sgn(t.pips)} pips</b></span><span class="num ${cls(t.net)}">${money(t.net, j.currency)}</span>
+      <span class="sub num">${tm(t.open_time)} → ${tm(t.close_time)} · ${px(t.open_price)} → ${px(t.close_price)}</span></div>
+      <div class="shot" id="shot${i}">Genero il grafico…</div></div>`).join("") || `<div class="sub">Nessuna operazione.</div>`;
+  for (let i = 0; i < j.trades.length; i++) {                      // un grafico alla volta: MT5 risponde a una richiesta per volta
+    if (my !== dayToken) return;
+    const t = j.trades[i], el = $("shot" + i);
+    try {
+      const r = await fetch(`/api/chart?account=${acc}&position=${t.position}&deal=${t.deal}`);
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || "Grafico non disponibile"); }
+      const url = URL.createObjectURL(await r.blob()); el.innerHTML = `<img alt="Grafico dell'operazione" src="${url}">`;
+    } catch (e) { el.innerHTML = `<span class="loss">${esc(e.message)}</span>`; }
+  }
+}
+$("cal").addEventListener("click", e => { const d = e.target.closest(".day.has"); if (d) openDay(d.dataset.day); });
+$("cal").addEventListener("keydown", e => { if ((e.key === "Enter" || e.key === " ") && e.target.classList.contains("has")) { e.preventDefault(); openDay(e.target.dataset.day); } });
+$("dayclose").onclick = () => { dayToken++; $("daydlg").close(); };
+$("daydlg").addEventListener("close", () => { dayToken++; });
 $("rsrc").onchange = loadCalendar;
 $("cprev").onclick = () => { calMonth.setMonth(calMonth.getMonth() - 1); loadCalendar(); };
 $("cnext").onclick = () => { calMonth.setMonth(calMonth.getMonth() + 1); loadCalendar(); };

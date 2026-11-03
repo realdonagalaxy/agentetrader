@@ -135,6 +135,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"accounts": ma.list_accounts(), "simulator": os.environ.get("MT5_SIMULATOR") == "1"})
             if path == "/api/telegram":
                 return self._json(telegram_status())
+            if path == "/api/day":
+                q = parse_qs(urlparse(self.path).query)
+                day = (q.get("date") or [""])[0]
+                if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+                    raise ValueError("data non valida (formato AAAA-MM-GG)")
+                return self._json(ma.day_trades(ma.get_account(int((q.get("account") or ["0"])[0])), day))
+            if path == "/api/chart":
+                q = parse_qs(urlparse(self.path).query)
+                png = ma.trade_chart_png(ma.get_account(int((q.get("account") or ["0"])[0])), int((q.get("position") or ["0"])[0]), int((q.get("deal") or ["0"])[0]))
+                return self._send(200, png, "image/png")
             if path == "/api/calendar":
                 q = parse_qs(urlparse(self.path).query)
                 month = (q.get("month") or [datetime.now().strftime("%Y-%m")])[0]
