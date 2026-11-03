@@ -48,6 +48,13 @@ HEARTBEAT = Path(os.environ.get("JOURNAL_DIR", "journal")) / "mt5_orders.heartbe
 NUM = r"([0-9]+(?:[.,][0-9]+)?)"
 
 
+def clean_text(text: str) -> str:
+    """Normalizza il testo ricevuto: lettere a larghezza intera -> normali (ＢＵＹ -> BUY), tolti i caratteri invisibili che a volte si copiano insieme al testo."""
+    import unicodedata
+    t = unicodedata.normalize("NFKC", text)
+    return "".join(c for c in t if c not in "\u200b\u200c\u200d\u200e\u200f\u2060\ufeff")
+
+
 def parse_signal(text: str) -> dict:
     """Estrae side, symbol, entry, sl, tp1. Solleva ValueError con il motivo se manca o è ambiguo qualcosa."""
     head = re.search(r"\b(BUY|SELL)\s+([A-Za-z0-9._]+)", text, re.I)
@@ -402,10 +409,11 @@ def main(dry: bool) -> None:
         for u in ups:
             offset = u["update_id"] + 1
             m = u.get("message") or u.get("channel_post") or u.get("edited_message") or u.get("edited_channel_post") or {}
-            text = m.get("text") or m.get("caption") or ""
+            text = clean_text(m.get("text") or m.get("caption") or "")
             cid = str((m.get("chat") or {}).get("id"))
             if cid != allowed or not re.search(r"\b(BUY|SELL)\b", text, re.I):
-                print(f"Ignorato: chat {cid} (attesa {allowed}), contiene BUY/SELL: {bool(re.search(r'BUY|SELL', text, re.I))}, tipo: {[k for k in u if k != 'update_id']}", flush=True)
+                print(f"Ignorato: chat {cid} (attesa {allowed}), contiene BUY/SELL: {bool(re.search(r'BUY|SELL', text, re.I))}, tipo: {[k for k in u if k != 'update_id']}, "
+                      f"campi: {[k for k in m if k not in ('chat', 'date', 'message_id', 'sender_chat')]}, testo: {text[:80]!r}", flush=True)
                 continue
             if time.time() - m.get("date", 0) > MAX_AGE_S:
                 say(bot, "⚠️ Messaggio troppo vecchio (> 2 minuti): ignorato.")
