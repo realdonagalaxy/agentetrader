@@ -187,7 +187,7 @@ def mt5_point(sym: str) -> float:
 
 
 def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
-    """Per ogni posizione seguita già chiusa: se è chiusa a TP risponde al messaggio del segnale, pulito: '✅ TP1 +N pips' o '❌ SL HIT -N pips'; poi la toglie dall'elenco."""
+    """Per ogni posizione seguita già chiusa: se è chiusa a TP risponde al messaggio del segnale, pulito: '✅ TP1 +N pips · prezzo P' o '❌ SL HIT -N pips · prezzo P'; poi la toglie dall'elenco."""
     for key, t in list(pending.items()):
         if only is not None and not only(t):
             continue
@@ -198,10 +198,12 @@ def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
         d = out[-1]
         del pending[key]
         n = pips(t["symbol"], d.price, t["open"])
+        info = mt5.symbol_info(t["symbol"])
+        price = f"{d.price:.{getattr(info, 'digits', 2)}f}"              # prezzo a cui la posizione si è chiusa
         if d.reason == mt5.DEAL_REASON_TP:
-            say(bot, f"✅ TP1 +{n:.0f} pips", t["msg_id"])
+            say(bot, f"✅ TP1 +{n:.0f} pips · prezzo {price}", t["msg_id"])
         elif d.reason == mt5.DEAL_REASON_SL:
-            say(bot, f"❌ SL HIT -{n:.0f} pips", t["msg_id"])
+            say(bot, f"❌ SL HIT -{n:.0f} pips · prezzo {price}", t["msg_id"])
         log([datetime.now(timezone.utc).isoformat(timespec="seconds"), f"chiusura posizione {t['position']}", f"motivo {d.reason} prezzo {d.price} profitto {d.profit}"])
         save_pending(pending)
 
