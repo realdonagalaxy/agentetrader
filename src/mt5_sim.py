@@ -6,6 +6,8 @@ from types import SimpleNamespace as N
 
 ACCOUNT_TRADE_MODE_DEMO, ACCOUNT_TRADE_MODE_REAL = 0, 2
 TRADE_ACTION_DEAL = 1
+TRADE_ACTION_SLTP = 2
+ACCOUNT_MARGIN_MODE_RETAIL_NETTING, ACCOUNT_MARGIN_MODE_RETAIL_HEDGING = 0, 2
 ORDER_TYPE_BUY, ORDER_TYPE_SELL = 0, 1
 ORDER_TIME_GTC = 0
 ORDER_FILLING_FOK, ORDER_FILLING_IOC, ORDER_FILLING_RETURN = 0, 1, 2
@@ -54,7 +56,7 @@ def account_info():
     _tick_positions()
     pos = [p for p in _state["positions"].values() if p.login == lg]
     pr = sum(p.profit for p in pos)
-    return N(login=lg, name="Conto simulato", server="Simulatore", company="FundedNext Ltd" if lg in _state["real"] else "Broker Simulato Ltd", currency="EUR", leverage=500, balance=bal, equity=bal + pr, margin=100.0 * len(pos),
+    return N(login=lg, name="Conto simulato", server="Simulatore", company="FundedNext Ltd" if lg in _state["real"] else "Broker Simulato Ltd", currency="EUR", leverage=500, balance=bal, equity=bal + pr, margin=100.0 * len(pos), margin_mode=ACCOUNT_MARGIN_MODE_RETAIL_NETTING if lg in _state.get("netting", set()) else ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
              margin_free=bal + pr - 100.0 * len(pos), profit=pr, trade_mode=ACCOUNT_TRADE_MODE_REAL if lg in _state["real"] else ACCOUNT_TRADE_MODE_DEMO)
 
 
@@ -149,6 +151,16 @@ def history_deals_get(*a, position=None, **kw):
 
 def order_send(req):
     _tick_positions()
+    if req.get("action") == TRADE_ACTION_SLTP:                         # modifica di SL/TP
+        pos = _state["positions"].get(req["position"])
+        if pos is None:
+            return N(retcode=10013, comment="Invalid request", price=0, order=0)
+        buy = pos.type == ORDER_TYPE_BUY
+        cur = symbol_info_tick(pos.symbol).bid if buy else symbol_info_tick(pos.symbol).ask
+        if req.get("sl") and ((req["sl"] >= cur) if buy else (req["sl"] <= cur)):
+            return N(retcode=10016, comment="Invalid stops", price=0, order=0)
+        pos.sl, pos.tp = req.get("sl", pos.sl), req.get("tp", pos.tp)
+        return N(retcode=TRADE_RETCODE_DONE, comment="Done", price=0, order=pos.ticket)
     tick = symbol_info_tick(req["symbol"])
     if "position" in req:                                            # chiusura
         pos = _state["positions"].get(req["position"])

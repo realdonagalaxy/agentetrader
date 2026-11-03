@@ -36,7 +36,8 @@ for _stream in (sys.stdout, sys.stderr):                           # su Windows 
 
 LOTS = 0.05
 MAX_SLIP_PRICE = 3.0
-MAX_POSITIONS = 3
+MAX_POSITIONS = 6                 # posizioni aperte da questo programma per conto (ogni segnale con TP2 ne apre due)
+PARTIAL_FRACTION = 0.6            # parte di lotti chiusa a TP1 (0,03 su 0,05); il resto va a pareggio e corre verso TP2
 MAX_SPREAD = float(os.environ.get("MAX_SPREAD") or 1.00)            # $: oltre questo spread non si apre (rollover, notizie). Cambiabile in config.env
 MAX_SPREAD_PCT = float(os.environ.get("MAX_SPREAD_PCT") or 0.20)    # frazione della distanza del TP1: lo spread non deve mangiarne più di così
 MAX_AGE_S = 120
@@ -73,6 +74,9 @@ def parse_signal(text: str) -> dict:
         if len(found) != 1:
             raise ValueError(f"{key.upper()} {'mancante' if not found else 'presente più volte'}")
         out[key] = float(found[0].replace(",", "."))
+    tp2 = re.findall(r"TP\s*2\s*[:=]?\s*" + NUM, text, re.I)
+    if len(tp2) == 1:
+        out["tp2"] = float(tp2[0].replace(",", "."))
     if not head:
         if out["sl"] > out["entry"] > out["tp1"]:
             out.update(side="sell", symbol="XAUUSD", inferred=True)
@@ -80,6 +84,8 @@ def parse_signal(text: str) -> dict:
             out.update(side="buy", symbol="XAUUSD", inferred=True)
         else:
             raise ValueError("manca la riga BUY/SELL e i livelli non permettono di dedurre la direzione (SL, Entry e TP1 non sono in ordine)")
+    if "tp2" in out and not ((out["tp2"] > out["tp1"]) if out["side"] == "buy" else (out["tp2"] < out["tp1"])):
+        raise ValueError(f"TP2 non coerente con la direzione {out['side'].upper()} (TP1 {out['tp1']}, TP2 {out['tp2']})")
     return out
 
 
@@ -117,8 +123,8 @@ def filling(mt5, info) -> int:
     return mt5.ORDER_FILLING_IOC if m & 2 else mt5.ORDER_FILLING_FOK if m & 1 else mt5.ORDER_FILLING_RETURN
 
 
-def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "") -> tuple[str, dict | None]:
-    """Valida e (se non dry) invia l'ordine. Restituisce (testo di risposta, dati della posizione da seguire); solleva ValueError se rifiutato."""
+def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "") -> tuple[str, list]:
+    """Valida e (se non dry) invia l'ordine. Restituisce (testo di risposta, elenco delle posizioni da seguire: una, oppure due se il segnale ha il TP2); solleva ValueError se rifiutato."""
     ti = mt5.terminal_info()
     if ti is not None and getattr(ti, "trade_allowed", True) is False:
         raise ValueError("Il trading automatico è spento in MT5 (pulsante «Algo Trading» rosso). Chiudi MT5 e lancia  .venv\\Scripts\\python -m src.prepara_mt5  per correggere l'impostazione che lo spegne al cambio di conto.")
@@ -155,10 +161,25 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
     else:
         check_levels(sig, tick.bid, tick.ask)
         sl, tp, scarto = sig["sl"], sig["tp1"], 0.0
-    req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": lots, "type": mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL,
-           "price": px, "sl": round(sl, d), "tp": round(tp, d), "deviation": DEVIATION, "magic": MAGIC,
-           "comment": "tg-signal", "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling(mt5, info)}
-    summary = f"{sig['side'].upper()} {sym} {lots} lotti a mercato ~{px} · SL {req['sl']} ({abs(px - req['sl']):.2f} $) · TP1 {req['tp']} ({abs(req['tp'] - px):.2f} $)"
+    # parzializzazione: con TP2 nel segnale, conto in modalità hedging e lotti divisibili si aprono DUE posizioni (PARTIAL_FRACTION a TP1, il resto a TP2)
+    step = getattr(info, "volume_step", 0.01) or 0.01
+    vmin = getattr(info, "volume_min", step)
+    v1 = round(round(lots * PARTIAL_FRACTION / step) * step, 2)
+    v2 = round(lots - v1, 2)
+    hedging = getattr(acc, "margin_mode", None) == getattr(mt5, "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING", 2)
+    split = relative_levels() and sig.get("tp2") is not None and hedging and v1 >= vmin - 1e-9 and v2 >= vmin - 1e-9
+    parts = [(v1, tp, "tp1")]
+    if split:
+        tp2_d = abs(sig["tp2"] - sig["entry"])
+        parts.append((v2, ref + tp2_d if buy else ref - tp2_d, "tp2"))
+    else:
+        parts = [(lots, tp, None)]
+    reqs = [{"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": v, "type": mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL,
+             "price": px, "sl": round(sl, d), "tp": round(t, d), "deviation": DEVIATION, "magic": MAGIC,
+             "comment": "tg-signal" + (f"-{name}" if name else ""), "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling(mt5, info)} for v, t, name in parts]
+    base = f"{sig['side'].upper()} {sym} " + (f"{v1}+{v2} lotti" if split else f"{lots} lotti") + f" a mercato ~{px} · SL {reqs[0]['sl']} ({abs(px - reqs[0]['sl']):.2f} $) · TP1 {reqs[0]['tp']} ({abs(reqs[0]['tp'] - px):.2f} $)"
+    summary = base + (f" · TP2 {reqs[1]['tp']} ({abs(reqs[1]['tp'] - px):.2f} $): a TP1 il resto va a pareggio" if split else
+                      (" · TP2 ignorato: " + ("conto non in modalità hedging" if sig.get("tp2") is not None and not hedging else "lotti non divisibili") if sig.get("tp2") is not None and not split else ""))
     if relative_levels():
         summary += f" · scarto dal canale {scarto:+.2f} · spread {tick.ask - tick.bid:.2f}"
         hist = [v for _, v in read_scarti()[:-1]]                       # esclude quello appena registrato
@@ -168,12 +189,30 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
             if abs(scarto - m) > 3.0:
                 summary += f" · ⚠ scarto insolito (tipico {m:+.2f})"
     if dry:
-        return f"[PROVA, nessun ordine inviato] {summary}", None
+        return f"[PROVA, nessun ordine inviato] {summary}", []
+    trks, group, note = [], f"{time.time():.0f}-{tag}", ""
+    for req, (_, _, name) in zip(reqs, parts):
+        res = mt5.order_send(req)
+        if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
+            why = f"{getattr(res, 'retcode', None)} {getattr(res, 'comment', mt5.last_error())}"
+            if not trks:
+                raise ValueError(f"ordine rifiutato dal broker: {why}")
+            note = f" · ATTENZIONE: la seconda parte ({name}) non è stata aperta: {why}"
+            break
+        trks.append({"position": int(res.order), "symbol": sym, "side": sig["side"], "open": float(res.price), "tp": req["tp"], "part": name, "group": group})
+    return (f"✅ Aperto: {summary} · prezzo eseguito {trks[0]['open']} · ticket {', '.join(str(t['position']) for t in trks)}{note}", trks)
+
+
+def move_to_be(mt5, t: dict) -> bool:
+    """Sposta lo SL della posizione al prezzo di apertura (pareggio). False se non si può (posizione chiusa, prezzo già tornato oltre il pareggio, rifiuto del broker)."""
+    pos = [p for p in (mt5.positions_get() or []) if int(p.ticket) == int(t["position"])]
+    if not pos:
+        return False
+    p = pos[0]
+    info = mt5.symbol_info(t["symbol"])
+    req = {"action": mt5.TRADE_ACTION_SLTP, "symbol": p.symbol, "position": p.ticket, "sl": round(t["open"], getattr(info, "digits", 2)), "tp": p.tp, "magic": MAGIC}
     res = mt5.order_send(req)
-    if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
-        raise ValueError(f"ordine rifiutato dal broker: {getattr(res, 'retcode', None)} {getattr(res, 'comment', mt5.last_error())}")
-    return (f"✅ Aperto: {summary} · prezzo eseguito {res.price} · ticket {res.order}",
-            {"position": int(res.order), "symbol": sym, "side": sig["side"], "open": float(res.price), "tp": req["tp"]})
+    return res is not None and res.retcode == mt5.TRADE_RETCODE_DONE
 
 
 def pips(sym: str, a: float, b: float) -> float:
@@ -200,10 +239,26 @@ def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
         n = pips(t["symbol"], d.price, t["open"])
         info = mt5.symbol_info(t["symbol"])
         price = f"{d.price:.{getattr(info, 'digits', 2)}f}"              # prezzo a cui la posizione si è chiusa
+        sign = 1 if t["side"] == "buy" else -1
+        sgn = n if (d.price - t["open"]) * sign >= 0 else -n               # pips con segno (guadagno o perdita reali)
+        part, sib = t.get("part"), [(k2, t2) for k2, t2 in pending.items() if t2.get("group") and t2.get("group") == t.get("group") and k2 != key]
         if d.reason == mt5.DEAL_REASON_TP:
-            say(bot, f"✅ TP1 +{n:.0f} pips · prezzo {price}", t["msg_id"])
+            say(bot, f"✅ {'TP2' if part == 'tp2' else 'TP1'} {sgn:+.0f} pips · prezzo {price}", t["msg_id"])
+            if part == "tp1":                                           # parte a TP1 incassata: lo stop del resto va a pareggio
+                for k2, t2 in sib:
+                    if t2.get("part") == "tp2":
+                        try:
+                            t2["be"] = move_to_be(mt5, t2)
+                            print(f"SL a pareggio sulla posizione {t2['position']}: {'fatto' if t2['be'] else 'non possibile (prezzo già tornato sotto il pareggio?)'}", flush=True)
+                        except Exception as e:
+                            print("SL a pareggio non riuscito:", str(e)[:120], flush=True)
         elif d.reason == mt5.DEAL_REASON_SL:
-            say(bot, f"❌ SL HIT -{n:.0f} pips · prezzo {price}", t["msg_id"])
+            if part == "tp2" and t.get("be"):
+                say(bot, f"🟰 BE {sgn:+.0f} pips · prezzo {price}", t["msg_id"])
+            elif not t.get("sl_reported"):
+                say(bot, f"❌ SL HIT {sgn:+.0f} pips · prezzo {price}", t["msg_id"])
+            for k2, t2 in sib:                                           # un solo messaggio di SL per segnale
+                t2["sl_reported"] = True
         log([datetime.now(timezone.utc).isoformat(timespec="seconds"), f"chiusura posizione {t['position']}", f"motivo {d.reason} prezzo {d.price} profitto {d.profit}"])
         save_pending(pending)
 
@@ -459,16 +514,17 @@ def main(dry: bool) -> None:
                     try:
                         if acc:
                             with ma.session(acc) as mt:
-                                res, trk = execute(mt, sig, dry, acc["lots"], acc["login"] and str(acc["login"]))
+                                res, trks = execute(mt, sig, dry, acc["lots"], acc["login"] and str(acc["login"]))
                         else:
                             if legacy is None:
                                 from src.mt5_feed import connect
                                 legacy = connect()
-                            res, trk = execute(legacy, sig, dry)
-                        if trk:
+                            res, trks = execute(legacy, sig, dry)
+                        for trk in trks:
                             if acc:
                                 trk["account"] = acc["id"]
                             pending[f"{acc['id'] if acc else 0}:{trk['position']}"] = {**trk, "msg_id": m["message_id"]}
+                        if trks:
                             save_pending(pending)
                     except ValueError as e:
                         res = f"⛔ Non apro: {e}"
