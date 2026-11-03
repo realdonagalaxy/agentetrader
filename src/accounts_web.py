@@ -1,6 +1,6 @@
 """Gestione Conti: gestione e monitoraggio dei conti MetaTrader 5 come applicazione web LOCALE (127.0.0.1, solo questo computer).
 
-Avvio:  python -m src.accounts_web        (si apre il browser, di solito su http://127.0.0.1:47951)
+Avvio:  python -m src.accounts_web        (si apre il browser, di solito su http://127.0.0.1:8080)
 Funzioni: aggiungi / modifica / elimina conti; vedi saldo, equity, profitto aperto e posizioni di ciascun conto; chiudi singole posizioni o tutte (solo conti DEMO).
 I conti abilitati con "Usa per i segnali" sono quelli su cui `python -m src.mt5_orders` apre le operazioni ricevute da Telegram (lotti per conto).
 Su un conto REALE l'app legge soltanto: nessun ordine live senza una tua conferma esplicita (regola del progetto).
@@ -24,8 +24,17 @@ WEB = Path(__file__).resolve().parent / "web"
 HDR = "accounts"                                                    # intestazione X-Requested-With richiesta alle scritture (impedisce invii da altri siti)
 
 
+PORTE = [8080] + list(range(47951, 47981))      # si prova prima la 8080; se è occupata, le successive
+
+
 class Server(ThreadingHTTPServer):
     allow_reuse_address = False
+
+    def server_bind(self):
+        if os.name == "nt":                                           # su Windows senza questo ci si potrebbe sovrapporre a un'altra app già in ascolto sulla stessa porta
+            import socket
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 
 def telegram_status() -> dict:
@@ -217,7 +226,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", type=int, default=47951)
+    ap.add_argument("--port", type=int, help="porta da provare per prima (predefinita 8080; se occupata si usano le successive)")
     ap.add_argument("--no-browser", action="store_true")
     a = ap.parse_args()
     try:
@@ -226,7 +235,7 @@ def main():
     except ImportError:
         pass
     srv = None
-    for port in range(a.port, a.port + 30):
+    for port in ([a.port] if a.port else []) + [x for x in PORTE if x != a.port]:
         try:
             srv = Server(("127.0.0.1", port), Handler)
             break
