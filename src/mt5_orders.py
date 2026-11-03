@@ -37,6 +37,7 @@ for _stream in (sys.stdout, sys.stderr):                           # su Windows 
 LOTS = 0.05
 MAX_SLIP_PRICE = 3.0
 MAX_POSITIONS = 6                 # posizioni aperte da questo programma per conto (ogni segnale con TP2 ne apre due)
+PARTIAL_ENABLED = os.environ.get("PARTIAL_TP2") == "1"    # parzializzazione SPENTA (decisione 05/11/2026: tutto chiuso a TP1); per riaccenderla: PARTIAL_TP2=1 in config.env
 PARTIAL_FRACTION = 0.6            # parte di lotti chiusa a TP1 (0,03 su 0,05); il resto va a pareggio e corre verso TP2
 MAX_SPREAD = float(os.environ.get("MAX_SPREAD") or 1.00)            # $: oltre questo spread non si apre (rollover, notizie). Cambiabile in config.env
 MAX_SPREAD_PCT = float(os.environ.get("MAX_SPREAD_PCT") or 0.20)    # frazione della distanza del TP1: lo spread non deve mangiarne più di così
@@ -167,7 +168,7 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
     v1 = round(round(lots * PARTIAL_FRACTION / step) * step, 2)
     v2 = round(lots - v1, 2)
     hedging = getattr(acc, "margin_mode", None) == getattr(mt5, "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING", 2)
-    split = relative_levels() and sig.get("tp2") is not None and hedging and v1 >= vmin - 1e-9 and v2 >= vmin - 1e-9
+    split = PARTIAL_ENABLED and relative_levels() and sig.get("tp2") is not None and hedging and v1 >= vmin - 1e-9 and v2 >= vmin - 1e-9
     parts = [(v1, tp, "tp1")]
     if split:
         tp2_d = abs(sig["tp2"] - sig["entry"])
@@ -178,8 +179,11 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
              "price": px, "sl": round(sl, d), "tp": round(t, d), "deviation": DEVIATION, "magic": MAGIC,
              "comment": "tg-signal" + (f"-{name}" if name else ""), "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling(mt5, info)} for v, t, name in parts]
     base = f"{sig['side'].upper()} {sym} " + (f"{v1}+{v2} lotti" if split else f"{lots} lotti") + f" a mercato ~{px} · SL {reqs[0]['sl']} ({abs(px - reqs[0]['sl']):.2f} $) · TP1 {reqs[0]['tp']} ({abs(reqs[0]['tp'] - px):.2f} $)"
-    summary = base + (f" · TP2 {reqs[1]['tp']} ({abs(reqs[1]['tp'] - px):.2f} $): a TP1 il resto va a pareggio" if split else
-                      (" · TP2 ignorato: " + ("conto non in modalità hedging" if sig.get("tp2") is not None and not hedging else "lotti non divisibili") if sig.get("tp2") is not None and not split else ""))
+    summary = base
+    if split:
+        summary += f" · TP2 {reqs[1]['tp']} ({abs(reqs[1]['tp'] - px):.2f} $): a TP1 il resto va a pareggio"
+    elif PARTIAL_ENABLED and sig.get("tp2") is not None:
+        summary += " · TP2 ignorato: " + ("conto non in modalità hedging" if not hedging else "lotti non divisibili")
     if relative_levels():
         summary += f" · scarto dal canale {scarto:+.2f} · spread {tick.ask - tick.bid:.2f}"
         hist = [v for _, v in read_scarti()[:-1]]                       # esclude quello appena registrato
