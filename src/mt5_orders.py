@@ -410,6 +410,7 @@ def main(dry: bool) -> None:
             if time.time() - m.get("date", 0) > MAX_AGE_S:
                 say(bot, "⚠️ Messaggio troppo vecchio (> 2 minuti): ignorato.")
                 continue
+            say(bot, "📥 Segnale ricevuto, lo applico sui conti…", m.get("message_id"))        # conferma immediata: se questa non arriva, il messaggio non è giunto al programma
             try:
                 sig = parse_signal(text)
             except ValueError as e:
