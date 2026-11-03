@@ -7,7 +7,6 @@ Su un conto REALE l'app legge soltanto: nessun ordine live senza una tua conferm
 Prova senza MT5:  set MT5_SIMULATOR=1  (conti e prezzi finti, solo per vedere l'interfaccia).
 """
 import argparse
-import csv
 import json
 import os
 import re
@@ -96,15 +95,6 @@ def listener_stop() -> None:
         pass
 
 
-def activity(n: int = 60) -> list[dict]:
-    p = ma.DATA_DIR / "ordini_mt5.csv"
-    if not p.exists():
-        return []
-    with p.open(encoding="utf-8", newline="") as f:
-        rows = list(csv.DictReader(f))
-    return rows[-n:][::-1]
-
-
 class Handler(BaseHTTPRequestHandler):
     server_version = "AccountsWeb/1.0"
 
@@ -144,8 +134,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"accounts": ma.list_accounts(), "simulator": os.environ.get("MT5_SIMULATOR") == "1"})
             if path == "/api/telegram":
                 return self._json(telegram_status())
-            if path == "/api/activity":
-                return self._json({"rows": activity()})
             if path == "/api/calendar":
                 q = parse_qs(urlparse(self.path).query)
                 month = (q.get("month") or [datetime.now().strftime("%Y-%m")])[0]

@@ -107,7 +107,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
 <div class="wrap">
 <header class="top">
   <div><h1>Gestione Conti</h1><div class="hsub" id="upd">Monitoraggio e gestione dei conti MetaTrader 5</div></div>
-  <nav role="tablist"><button role="tab" aria-selected="true" data-tab="conti">Conti</button><button role="tab" aria-selected="false" data-tab="ris">Risultati</button><button role="tab" aria-selected="false" data-tab="att">Attività</button></nav>
+  <nav role="tablist"><button role="tab" aria-selected="true" data-tab="conti">Conti</button><button role="tab" aria-selected="false" data-tab="ris">Risultati</button></nav>
   <button class="btn sec" id="refresh" style="color:#fff;border-color:rgba(255,255,255,.3)">Aggiorna</button>
   <button class="btn sec" id="imp" style="color:#fff;border-color:rgba(255,255,255,.3)" title="Aggiunge il conto a cui il terminale MT5 aperto è collegato adesso">Importa da MT5</button>
   <button class="btn" id="add" style="background:#fff;color:#14233a">+ Nuovo conto</button>
@@ -147,9 +147,6 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
     </div>
   </div>
 </div>
-<div id="tab-att" hidden>
-  <div class="panel"><h2>Ultime operazioni dei segnali Telegram</h2>
-    <div class="tw"><table style="min-width:640px"><thead><tr><th>Quando (UTC)</th><th>Messaggio</th><th>Esito</th></tr></thead><tbody id="act"></tbody></table></div></div>
 </div>
 </main>
 </div>
@@ -398,9 +395,8 @@ $("cnext").onclick = () => { calMonth.setMonth(calMonth.getMonth() + 1); loadCal
 $("ctoday").onclick = () => { calMonth = new Date(); calMonth.setDate(1); loadCalendar(); };
 document.querySelectorAll("nav button").forEach(b => b.onclick = async () => {
   document.querySelectorAll("nav button").forEach(x => x.setAttribute("aria-selected", x === b));
-  $("tab-conti").hidden = b.dataset.tab !== "conti"; $("tab-att").hidden = b.dataset.tab !== "att"; $("tab-ris").hidden = b.dataset.tab !== "ris";
+  $("tab-conti").hidden = b.dataset.tab !== "conti"; $("tab-ris").hidden = b.dataset.tab !== "ris";
   if (b.dataset.tab === "ris") fillSources();
-  if (b.dataset.tab === "att") { const j = await api("/api/activity"); $("act").innerHTML = j.rows.length ? j.rows.map(r => `<tr><td class="num" style="white-space:nowrap">${esc((r.quando_utc || "").replace("T", " "))}</td><td>${esc(r.messaggio)}</td><td>${esc(r.esito)}</td></tr>`).join("") : `<tr><td colspan="3" class="empty">Nessuna operazione registrata.</td></tr>`; }
 });
 refresh(); setInterval(() => { if (!document.querySelector("dialog[open]") && !document.hidden) refresh(); }, 20000);
 </script>
