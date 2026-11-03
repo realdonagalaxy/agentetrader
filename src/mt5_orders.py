@@ -105,6 +105,9 @@ def filling(mt5, info) -> int:
 
 def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "") -> tuple[str, dict | None]:
     """Valida e (se non dry) invia l'ordine. Restituisce (testo di risposta, dati della posizione da seguire); solleva ValueError se rifiutato."""
+    ti = mt5.terminal_info()
+    if ti is not None and getattr(ti, "trade_allowed", True) is False:
+        raise ValueError("Il trading automatico è spento in MT5 (pulsante «Algo Trading» rosso). Chiudi MT5 e lancia  .venv\\Scripts\\python -m src.prepara_mt5  per correggere l'impostazione che lo spegne al cambio di conto.")
     acc = mt5.account_info()
     if acc is None:
         raise ValueError("MT5 non risponde: controlla che il terminale sia aperto e collegato")
