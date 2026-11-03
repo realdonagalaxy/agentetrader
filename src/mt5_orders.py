@@ -18,6 +18,7 @@ Uso: python -m src.mt5_orders            (ascolta Telegram e apre gli ordini)
      python -m src.mt5_orders --dry      (legge e valida ma non invia ordini)
 """
 import argparse
+from collections import deque
 import csv
 import json
 import os
@@ -55,17 +56,30 @@ def clean_text(text: str) -> str:
     return "".join(c for c in t if c not in "\u200b\u200c\u200d\u200e\u200f\u2060\ufeff")
 
 
+def looks_like_signal(text: str) -> bool:
+    """Messaggio che sembra un segnale: ha BUY/SELL, oppure i tre livelli Entry, SL e TP1 con i loro numeri."""
+    if re.search(r"\b(BUY|SELL)\b", text, re.I):
+        return True
+    return all(re.search(pat + r"\s*[:=]?\s*" + NUM, text, re.I) for pat in (r"Entry", r"SL", r"TP\s*1"))
+
+
 def parse_signal(text: str) -> dict:
-    """Estrae side, symbol, entry, sl, tp1. Solleva ValueError con il motivo se manca o è ambiguo qualcosa."""
+    """Estrae side, symbol, entry, sl, tp1. Se manca la riga «BUY/SELL SIMBOLO» la direzione si deduce dai livelli (SL sopra l'Entry e TP1 sotto = SELL; il contrario = BUY) e lo
+    strumento è XAUUSD; in quel caso sig['inferred'] è True. Solleva ValueError con il motivo se manca o è ambiguo qualcosa."""
     head = re.search(r"\b(BUY|SELL)\s+([A-Za-z0-9._]+)", text, re.I)
-    if not head:
-        raise ValueError("non trovo 'BUY/SELL SIMBOLO' nella prima riga")
-    out = {"side": head.group(1).lower(), "symbol": head.group(2).upper()}
+    out = {"side": head.group(1).lower(), "symbol": head.group(2).upper(), "inferred": False} if head else {}
     for key, pat in (("entry", r"Entry"), ("sl", r"SL"), ("tp1", r"TP\s*1")):
         found = re.findall(pat + r"\s*[:=]?\s*" + NUM, text, re.I)
         if len(found) != 1:
             raise ValueError(f"{key.upper()} {'mancante' if not found else 'presente più volte'}")
         out[key] = float(found[0].replace(",", "."))
+    if not head:
+        if out["sl"] > out["entry"] > out["tp1"]:
+            out.update(side="sell", symbol="XAUUSD", inferred=True)
+        elif out["sl"] < out["entry"] < out["tp1"]:
+            out.update(side="buy", symbol="XAUUSD", inferred=True)
+        else:
+            raise ValueError("manca la riga BUY/SELL e i livelli non permettono di dedurre la direzione (SL, Entry e TP1 non sono in ordine)")
     return out
 
 
@@ -204,6 +218,12 @@ def load_pending() -> dict:
         return {}
 
 
+SENT: "deque[str]" = deque(maxlen=100)                         # testi inviati da questo programma: nel canale il bot rivede i propri post e non deve leggerli come segnali
+
+
+OWN_PREFIXES = ("🟢 Pronto", "📥", "ℹ️", "⚠️", "⛔", "✅ Aperto", "✅ TP1 ", "❌ SL HIT", "✅ Gestione Conti", "[")    # inizio dei messaggi scritti dal programma
+
+
 def telegram_on() -> bool:
     """Interruttore «Telegram» di Gestione Conti: spento = il programma non legge i messaggi e non ne invia."""
     try:
@@ -219,6 +239,7 @@ def say(bot, text: str, reply_to: int | None = None) -> None:
         return
     kw = {"reply_to_message_id": reply_to} if reply_to else {}
     try:
+        SENT.append(clean_text(text))
         bot._call("sendMessage", chat_id=bot.chat_id, text=text, **kw)
     except Exception as e:
         print("Invio Telegram fallito:", str(e)[:200], flush=True)
@@ -414,7 +435,9 @@ def main(dry: bool) -> None:
             m = u.get("message") or u.get("channel_post") or u.get("edited_message") or u.get("edited_channel_post") or {}
             text = clean_text(m.get("text") or m.get("caption") or "")
             cid = str((m.get("chat") or {}).get("id"))
-            if cid != allowed or not re.search(r"\b(BUY|SELL)\b", text, re.I):
+            if text in SENT or text.startswith(OWN_PREFIXES):         # un nostro stesso messaggio che ritorna dal canale
+                continue
+            if cid != allowed or not looks_like_signal(text):
                 print(f"Ignorato: chat {cid} (attesa {allowed}), contiene BUY/SELL: {bool(re.search(r'BUY|SELL', text, re.I))}, tipo: {[k for k in u if k != 'update_id']}, "
                       f"campi: {[k for k in m if k not in ('chat', 'date', 'message_id', 'sender_chat')]}, testo: {text[:80]!r}", flush=True)
                 continue
@@ -427,7 +450,7 @@ def main(dry: bool) -> None:
             except ValueError as e:
                 lines = [f"⛔ Non apro: {e}"]
             else:
-                lines = []
+                lines = [f"ℹ️ Manca la riga BUY/SELL: direzione dedotta dai livelli, {sig['side'].upper()} {sig['symbol']}."] if sig.get("inferred") else []
                 targets = active_accounts() or [None]
                 for acc in targets:
                     tag = f"[{acc['name']}] " if acc else ""
