@@ -69,7 +69,8 @@ def listener_start() -> int:
         raise ValueError("L'ascolto dei segnali è già attivo.")
     log = open(ma.DATA_DIR / "mt5_orders.log", "a", encoding="utf-8")
     flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)) if os.name == "nt" else 0
-    p = subprocess.Popen([sys.executable, "-u", "-m", "src.mt5_orders"], cwd=str(ma.ROOT), stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, creationflags=flags)
+    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}          # il registro è UTF-8: niente errori con le emoji
+    p = subprocess.Popen([sys.executable, "-u", "-m", "src.mt5_orders"], cwd=str(ma.ROOT), stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, creationflags=flags, env=env)
     _pid_file().write_text(str(p.pid))
     return p.pid
 
