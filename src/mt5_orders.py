@@ -203,7 +203,7 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
                 raise ValueError(f"ordine rifiutato dal broker: {why}")
             note = f" · ATTENZIONE: la seconda parte ({name}) non è stata aperta: {why}"
             break
-        trks.append({"position": int(res.order), "symbol": sym, "side": sig["side"], "open": float(res.price), "tp": req["tp"], "part": name, "group": group})
+        trks.append({"position": int(res.order), "symbol": sym, "side": sig["side"], "open": float(res.price), "tp": req["tp"], "sl": req["sl"], "part": name, "group": group})
     return (f"✅ Aperto: {summary} · prezzo eseguito {trks[0]['open']} · ticket {', '.join(str(t['position']) for t in trks)}{note}", trks)
 
 
@@ -229,6 +229,47 @@ def mt5_point(sym: str) -> float:
     return mt5.symbol_info(sym).point
 
 
+def say_photo(bot, png: bytes, caption: str, reply_to: int | None = None) -> bool:
+    """Invia l'immagine con didascalia (rispondendo al segnale). False se non è stato possibile: chi chiama ripiega sul solo testo. Con Telegram spento non invia nulla (True)."""
+    if not telegram_on():
+        return True
+    try:
+        SENT.append(clean_text(caption))
+        bot.send_photo(png, caption, reply_to)
+        return True
+    except Exception as e:
+        print("Invio immagine fallito:", str(e)[:200], flush=True)
+        return False
+
+
+def trade_screenshot(mt5, t: dict, deals, d, label: str) -> bytes | None:
+    """Grafico dell'operazione chiusa (candele di ActivTrades con Entry, SL, TP e chiusura). None se mancano i dati. Orari: server del broker."""
+    from src import trade_chart
+    ins = [x for x in deals if x.entry == mt5.DEAL_ENTRY_IN]
+    t_in = ins[0].time if ins else d.time - 300
+    minutes = (d.time - t_in) / 60
+    tf, secs = (mt5.TIMEFRAME_M1, 60) if minutes <= 180 else (mt5.TIMEFRAME_M5, 300) if minutes <= 900 else (mt5.TIMEFRAME_M15, 900)
+    d0 = datetime.fromtimestamp(t_in - 30 * secs, tz=timezone.utc)
+    d1 = datetime.fromtimestamp(d.time + 15 * secs, tz=timezone.utc)
+    rates = mt5.copy_rates_range(t["symbol"], tf, d0, d1)
+    if rates is None or len(rates) < 5:
+        return None
+    candles = [(int(r["time"]), float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"])) for r in rates]
+    info = mt5.symbol_info(t["symbol"])
+    return trade_chart.render(candles, t["open"], t.get("sl"), t.get("tp") or None, d.price, t["side"], t["symbol"], label, getattr(info, "digits", 2), t_in, d.time)
+
+
+def announce(bot, mt5, t: dict, deals, d, text: str, label: str) -> None:
+    """Risposta al segnale con lo screenshot dei livelli (Entry, SL, TP) e il testo come didascalia; se il grafico non è possibile, solo il testo."""
+    png = None
+    try:
+        png = trade_screenshot(mt5, t, deals, d, label)
+    except Exception as e:
+        print("Screenshot non riuscito:", str(e)[:150], flush=True)
+    if not (png and say_photo(bot, png, text, t["msg_id"])):
+        say(bot, text, t["msg_id"])
+
+
 def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
     """Per ogni posizione seguita già chiusa: se è chiusa a TP risponde al messaggio del segnale, pulito: '✅ TP1 +N pips · prezzo P' o '❌ SL HIT -N pips · prezzo P'; poi la toglie dall'elenco."""
     for key, t in list(pending.items()):
@@ -247,7 +288,8 @@ def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
         sgn = n if (d.price - t["open"]) * sign >= 0 else -n               # pips con segno (guadagno o perdita reali)
         part, sib = t.get("part"), [(k2, t2) for k2, t2 in pending.items() if t2.get("group") and t2.get("group") == t.get("group") and k2 != key]
         if d.reason == mt5.DEAL_REASON_TP:
-            say(bot, f"✅ {'TP2' if part == 'tp2' else 'TP1'} {sgn:+.0f} pips · prezzo {price}", t["msg_id"])
+            lab = f"{'TP2' if part == 'tp2' else 'TP1'} {sgn:+.0f} pips · prezzo {price}"
+            announce(bot, mt5, t, deals, d, f"✅ {lab}", lab)
             if part == "tp1":                                           # parte a TP1 incassata: lo stop del resto va a pareggio
                 for k2, t2 in sib:
                     if t2.get("part") == "tp2":
@@ -258,9 +300,11 @@ def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
                             print("SL a pareggio non riuscito:", str(e)[:120], flush=True)
         elif d.reason == mt5.DEAL_REASON_SL:
             if part == "tp2" and t.get("be"):
-                say(bot, f"🟰 BE {sgn:+.0f} pips · prezzo {price}", t["msg_id"])
+                lab = f"BE {sgn:+.0f} pips · prezzo {price}"
+                announce(bot, mt5, t, deals, d, f"🟰 {lab}", lab)
             elif not t.get("sl_reported"):
-                say(bot, f"❌ SL HIT {sgn:+.0f} pips · prezzo {price}", t["msg_id"])
+                lab = f"SL HIT {sgn:+.0f} pips · prezzo {price}"
+                announce(bot, mt5, t, deals, d, f"❌ {lab}", lab)
             for k2, t2 in sib:                                           # un solo messaggio di SL per segnale
                 t2["sl_reported"] = True
         log([datetime.now(timezone.utc).isoformat(timespec="seconds"), f"chiusura posizione {t['position']}", f"motivo {d.reason} prezzo {d.price} profitto {d.profit}"])
@@ -282,7 +326,7 @@ def load_pending() -> dict:
 SENT: "deque[str]" = deque(maxlen=100)                         # testi inviati da questo programma: nel canale il bot rivede i propri post e non deve leggerli come segnali
 
 
-OWN_PREFIXES = ("🟢 Pronto", "📥", "ℹ️", "⚠️", "⛔", "✅ Aperto", "✅ TP1 ", "❌ SL HIT", "✅ Gestione Conti", "[")    # inizio dei messaggi scritti dal programma
+OWN_PREFIXES = ("🟢 Pronto", "📥", "ℹ️", "⚠️", "⛔", "✅ Aperto", "✅ TP1 ", "❌ SL HIT", "🟰 BE", "✅ TP2 ", "✅ Gestione Conti", "[")    # inizio dei messaggi scritti dal programma
 
 
 def telegram_on() -> bool:

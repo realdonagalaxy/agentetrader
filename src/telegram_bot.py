@@ -41,10 +41,13 @@ class TelegramBot:
             raise RuntimeError("TELEGRAM_CHAT_ID mancante: esegui `python -m src.telegram_bot --chat-id`")
         self._call("sendMessage", chat_id=self.chat_id, text=text, parse_mode="HTML")
 
-    def send_photo(self, png: bytes, caption: str = "") -> None:
-        """Invia un'immagine (screenshot del setup) con didascalia (max 1024 caratteri)."""
+    def send_photo(self, png: bytes, caption: str = "", reply_to: int | None = None) -> None:
+        """Invia un'immagine (screenshot del setup) con didascalia (max 1024 caratteri); reply_to = id del messaggio a cui rispondere."""
+        data = {"chat_id": self.chat_id, "caption": caption[:1024], "parse_mode": "HTML"}
+        if reply_to:
+            data["reply_to_message_id"] = reply_to
         r = requests.post(API.format(token=self.token, method="sendPhoto"),
-                          data={"chat_id": self.chat_id, "caption": caption[:1024], "parse_mode": "HTML"},
+                          data=data,
                           files={"photo": ("setup.png", png, "image/png")}, timeout=30)
         self._result(r, "sendPhoto")
 

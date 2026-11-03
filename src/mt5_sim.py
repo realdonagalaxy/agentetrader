@@ -14,7 +14,7 @@ ORDER_FILLING_FOK, ORDER_FILLING_IOC, ORDER_FILLING_RETURN = 0, 1, 2
 TRADE_RETCODE_DONE = 10009
 DEAL_ENTRY_IN, DEAL_ENTRY_OUT = 0, 1
 DEAL_REASON_CLIENT, DEAL_REASON_SL, DEAL_REASON_TP = 0, 4, 5
-TIMEFRAME_M5 = 5
+TIMEFRAME_M1, TIMEFRAME_M5, TIMEFRAME_M15 = 1, 5, 15
 
 _state = {"login": None, "positions": {}, "deals": {}, "next": 5000000000, "real": {9990001}}
 _BAL = {}
@@ -69,6 +69,19 @@ def symbol_select(sym, on=True):
     return sym in ("GOLD", "XAUUSD")
 
 
+def copy_rates_range(sym, tf, d0, d1):
+    import random
+    step = {1: 60, 5: 300, 15: 900}.get(tf, 60)
+    t, out = int(d0.timestamp()) // step * step, []
+    rnd, px = random.Random(t), 3990.0
+    while t < d1.timestamp() and len(out) < 2000:
+        o = px
+        c = o + rnd.gauss(0, 0.8)
+        out.append({"time": t, "open": o, "high": max(o, c) + abs(rnd.gauss(0, .3)), "low": min(o, c) - abs(rnd.gauss(0, .3)), "close": c})
+        px, t = c, t + step
+    return out
+
+
 def symbols_get(*a, **kw):
     return (N(name="GOLD"), N(name="EURUSD"), N(name="XAUEUR"))
 
@@ -101,7 +114,9 @@ def _tick_positions():
 def _close(pos, price, reason):
     _state["positions"].pop(pos.ticket, None)
     _BAL[pos.login] = _BAL.get(pos.login, 10000.0) + pos.profit
-    _state["deals"].setdefault(pos.ticket, []).append(N(entry=DEAL_ENTRY_OUT, reason=reason, price=price, profit=pos.profit, position_id=pos.ticket))
+    lst = _state["deals"].setdefault(pos.ticket, [])
+    lst.append(N(entry=DEAL_ENTRY_IN, reason=DEAL_REASON_CLIENT, price=pos.price_open, profit=0.0, position_id=pos.ticket, time=pos.time, type=pos.type))
+    lst.append(N(entry=DEAL_ENTRY_OUT, reason=reason, price=price, profit=pos.profit, position_id=pos.ticket, time=int(time.time()), type=1 - pos.type))
 
 
 def positions_get(**kw):
