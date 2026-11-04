@@ -39,7 +39,8 @@ for _stream in (sys.stdout, sys.stderr):                           # su Windows 
 LOTS = 0.05
 MAX_SLIP_PRICE = 3.0
 MAX_POSITIONS = 6                 # posizioni aperte da questo programma per conto (ogni segnale con TP2 ne apre due)
-ENTRY_ORDER = os.environ.get("ENTRY_ORDER", "stop").lower()            # "stop" (BUY/SELL STOP all'Entry del segnale, default) oppure "market" (esecuzione a mercato come prima)
+ENTRY_ORDER = os.environ.get("ENTRY_ORDER", "market").lower()            # "market" (default: a mercato, Entry di Vantage convertita con lo scarto) oppure "stop" (BUY/SELL STOP all'Entry del segnale)
+MIN_REMAINING_PIPS = float(os.environ.get("MIN_REMAINING_PIPS") or 45)  # a mercato si entra solo se, calcolata l'Entry su ActivTrades con lo scarto, al TP1 mancano PIÙ di questi pips
 MARKET_MIN_PIPS = float(os.environ.get("MARKET_MIN_PIPS") or 40)       # Entry già superata: si entra a mercato solo se al TP1 mancano PIÙ di questi pips
 PARTIAL_ENABLED = os.environ.get("PARTIAL_TP2") == "1"    # parzializzazione SPENTA (decisione 05/11/2026: tutto chiuso a TP1); per riaccenderla: PARTIAL_TP2=1 in config.env
 PARTIAL_FRACTION = 0.6            # parte di lotti chiusa a TP1 (0,03 su 0,05); il resto va a pareggio e corre verso TP2
@@ -155,12 +156,27 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
     buy = sig["side"] == "buy"
     px = tick.ask if buy else tick.bid
     d = info.digits
+    note_off = ""
     if relative_levels():
         check_message(sig)
         sl_d, tp_d = abs(sig["entry"] - sig["sl"]), abs(sig["tp1"] - sig["entry"])
         ref = tick.bid if buy else tick.ask               # SL e TP scattano sul prezzo di CHIUSURA (BUY: bid, SELL: ask), come il grafico del canale: così lo spread non accorcia lo stop
-        sl, tp = (ref - sl_d, ref + tp_d) if buy else (ref + sl_d, ref - tp_d)
         scarto = tick.bid - sig["entry"]                  # differenza di quotazione tra il tuo broker e il canale (entrambi sul bid)
+        off, src = current_offset()
+        pip = _pip(sym, info)
+        if off is not None:                               # Entry, SL e TP di Vantage convertiti in prezzi di ActivTrades; si entra solo se al TP1 mancano abbastanza pips
+            e_at, tp_at, sl_at = sig["entry"] + off, sig["tp1"] + off, sig["sl"] + off
+            remaining = ((tp_at - tick.bid) if buy else (tick.bid - tp_at)) / pip
+            if remaining <= MIN_REMAINING_PIPS:
+                raise ValueError(f"al TP1 mancano solo {remaining:.0f} pips (minimo {MIN_REMAINING_PIPS:.0f}): non apro. Entry di Vantage {sig['entry']} = {e_at:.2f} su ActivTrades "
+                                 f"(scarto {off:+.2f}, {src}), TP1 {tp_at:.2f}, prezzo ora {tick.bid:.2f}.")
+            if (buy and sl_at >= tick.bid) or (not buy and sl_at <= tick.bid):
+                raise ValueError(f"il prezzo ({tick.bid:.2f}) ha già superato lo SL convertito ({sl_at:.2f}): non apro.")
+            sl, tp = (sl_at, tp_at) if buy else (sl_at + (tick.ask - tick.bid), tp_at + (tick.ask - tick.bid))
+            note_off = f" · Entry su ActivTrades {e_at:.2f} (scarto {off:+.2f}, {src}) · al TP1 mancano {remaining:.0f} pips"
+        else:                                              # nessuno scarto disponibile: distanze dall'Entry sul prezzo di adesso, filtro dei pips non applicabile
+            sl, tp = (ref - sl_d, ref + tp_d) if buy else (ref + sl_d, ref - tp_d)
+            note_off = f" · filtro dei {MIN_REMAINING_PIPS:.0f} pips NON applicato: scarto non disponibile ({src})"
         try:
             log_scarto(tag, sig, tick, scarto)
         except OSError:
@@ -178,7 +194,9 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
     parts = [(v1, tp, "tp1")]
     if split:
         tp2_d = abs(sig["tp2"] - sig["entry"])
-        parts.append((v2, ref + tp2_d if buy else ref - tp2_d, "tp2"))
+        off2 = current_offset()[0]
+        tp2_lv = (sig["tp2"] + off2 + (0 if buy else tick.ask - tick.bid)) if off2 is not None else (ref + tp2_d if buy else ref - tp2_d)
+        parts.append((v2, tp2_lv, "tp2"))
     else:
         parts = [(lots, tp, None)]
     reqs = [{"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": v, "type": mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL,
@@ -191,7 +209,7 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
     elif PARTIAL_ENABLED and sig.get("tp2") is not None:
         summary += " · TP2 ignorato: " + ("conto non in modalità hedging" if not hedging else "lotti non divisibili")
     if relative_levels():
-        summary += f" · scarto dal canale {scarto:+.2f} · spread {tick.ask - tick.bid:.2f}"
+        summary += note_off + f" · scarto misurato {scarto:+.2f} · spread {tick.ask - tick.bid:.2f}"
         hist = [v for _, v in read_scarti()[:-1]]                       # esclude quello appena registrato
         if len(hist) >= 5:
             import statistics as st
@@ -440,6 +458,22 @@ def log_scarto(tag: str, sig: dict, tick, scarto: float) -> None:
         if new:
             w.writerow(["quando_utc", "conto", "lato", "entry_canale", "bid", "ask", "spread", "scarto"])
         w.writerow([datetime.now(timezone.utc).isoformat(timespec="seconds"), tag, sig["side"], sig["entry"], tick.bid, tick.ask, round(tick.ask - tick.bid, 5), round(scarto, 3)])
+
+
+def current_offset() -> tuple[float | None, str]:
+    """Scarto tra il prezzo di ActivTrades e quello di Vantage (ActivTrades - Vantage), per convertire i livelli del segnale. Fonte: SCARTO_ACTIVTRADES in config.env, altrimenti la mediana
+    degli scarti dei segnali già eseguiti (almeno 10). Nessuna fonte: (None, motivo)."""
+    env = os.environ.get("SCARTO_ACTIVTRADES")
+    if env not in (None, ""):
+        try:
+            return float(env.replace(",", ".")), "SCARTO_ACTIVTRADES"
+        except ValueError:
+            pass
+    import statistics as st
+    vals = [v for _, v in read_scarti()][-30:]
+    if len(vals) >= 10:
+        return st.median(vals), f"mediana di {len(vals)} segnali"
+    return None, f"{len(vals)} segnali raccolti su 10 necessari"
 
 
 def read_scarti() -> list[tuple[str, float]]:
