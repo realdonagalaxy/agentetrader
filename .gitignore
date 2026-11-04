@@ -17,3 +17,6 @@ journal/conti_mt5.db
 journal/mt5.lock
 journal/p.json
 journal/grafici/
+journal/segnali.csv
+journal/segnali_esiti.csv
+journal/segnali_chiusure.csv

@@ -52,6 +52,10 @@ MAGIC = 530001
 LOG = Path("journal/ordini_mt5.csv")
 PENDING = Path("journal/ordini_aperti.json")
 SCARTI = Path(os.environ.get("JOURNAL_DIR", "journal")) / "scarti.csv"      # uno scarto per ogni segnale eseguito: serve alla calibrazione canale/broker
+SEGNALI = Path(os.environ.get("JOURNAL_DIR", "journal")) / "segnali.csv"             # un record per ogni segnale ricevuto (anche se scartato)
+ESITI = Path(os.environ.get("JOURNAL_DIR", "journal")) / "segnali_esiti.csv"         # un record per segnale e per conto: aperto / rifiutato e perché, con prezzi e scarto del momento
+CHIUSURE = Path(os.environ.get("JOURNAL_DIR", "journal")) / "segnali_chiusure.csv"   # un record per ogni posizione chiusa: motivo, prezzo, pips
+INFO: dict = {}                                                                       # dettagli dell'ultima valutazione fatta da execute() (per il registro degli esiti)
 HEARTBEAT = Path(os.environ.get("JOURNAL_DIR", "journal")) / "mt5_orders.heartbeat"       # battito: Gestione Conti lo legge per mostrare se l'ascolto è attivo
 NUM = r"([0-9]+(?:[.,][0-9]+)?)"
 
@@ -80,6 +84,9 @@ def parse_signal(text: str) -> dict:
         if len(found) != 1:
             raise ValueError(f"{key.upper()} {'mancante' if not found else 'presente più volte'}")
         out[key] = float(found[0].replace(",", "."))
+    tp3 = re.findall(r"TP\s*3\s*[:=]?\s*" + NUM, text, re.I)
+    if len(tp3) == 1:
+        out["tp3"] = float(tp3[0].replace(",", "."))
     tp2 = re.findall(r"TP\s*2\s*[:=]?\s*" + NUM, text, re.I)
     if len(tp2) == 1:
         out["tp2"] = float(tp2[0].replace(",", "."))
@@ -147,6 +154,8 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
     if len(mine) >= MAX_POSITIONS:
         raise ValueError(f"già {len(mine)} posizioni o ordini aperti da questo programma (massimo {MAX_POSITIONS})")
     tick = mt5.symbol_info_tick(sym)
+    INFO.clear()
+    INFO.update(bid=tick.bid, ask=tick.ask, spread=round(tick.ask - tick.bid, 5))
     spread, tp_dist = tick.ask - tick.bid, abs(sig["tp1"] - sig["entry"])
     limit = min(MAX_SPREAD, MAX_SPREAD_PCT * tp_dist) if tp_dist > 0 else MAX_SPREAD
     if spread > limit + 1e-9:                                        # filtro sullo spread: con spread alto il costo mangia il TP
@@ -167,6 +176,7 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
         if off is not None:                               # Entry, SL e TP di Vantage convertiti in prezzi di ActivTrades; si entra solo se al TP1 mancano abbastanza pips
             e_at, tp_at, sl_at = sig["entry"] + off, sig["tp1"] + off, sig["sl"] + off
             remaining = ((tp_at - tick.bid) if buy else (tick.bid - tp_at)) / pip
+            INFO.update(offset=round(off, 3), src=src, remaining=round(remaining, 1))
             if remaining <= MIN_REMAINING_PIPS:
                 raise ValueError(f"al TP1 mancano solo {remaining:.0f} pips (minimo {MIN_REMAINING_PIPS:.0f}): non apro. Entry di Vantage {sig['entry']} = {e_at:.2f} su ActivTrades "
                                  f"(scarto {off:+.2f}, {src}), TP1 {tp_at:.2f}, prezzo ora {tick.bid:.2f}.")
@@ -408,6 +418,7 @@ def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
             for k2, t2 in sib:                                           # un solo messaggio di SL per segnale
                 t2["sl_reported"] = True
         log([datetime.now(timezone.utc).isoformat(timespec="seconds"), f"chiusura posizione {t['position']}", f"motivo {d.reason} prezzo {d.price} profitto {d.profit}"])
+        log_chiusura(t, d, "tp" if d.reason == mt5.DEAL_REASON_TP else "sl" if d.reason == mt5.DEAL_REASON_SL else "altra", sgn)
         save_pending(pending)
 
 
@@ -448,6 +459,43 @@ def say(bot, text: str, reply_to: int | None = None) -> None:
         bot._call("sendMessage", chat_id=bot.chat_id, text=text, **kw)
     except Exception as e:
         print("Invio Telegram fallito:", str(e)[:200], flush=True)
+
+
+def _csv_append(path: Path, header: list, row: list) -> None:
+    """Aggiunge una riga a un registro CSV (crea il file con l'intestazione). Un errore di scrittura non deve mai fermare il programma."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        new = not path.exists()
+        with path.open("a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(header)
+            w.writerow(row)
+    except OSError:
+        pass
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def log_segnale(msg_id, msg_time, sig: dict | None, text: str, errore: str = "") -> None:
+    sig = sig or {}
+    _csv_append(SEGNALI, ["quando_utc", "msg_id", "ora_messaggio_utc", "direzione", "simbolo", "entry", "sl", "tp1", "tp2", "tp3", "direzione_dedotta", "errore_lettura", "testo"],
+                [now_iso(), msg_id, datetime.fromtimestamp(msg_time, tz=timezone.utc).isoformat(timespec="seconds") if msg_time else "", sig.get("side", ""), sig.get("symbol", ""),
+                 sig.get("entry", ""), sig.get("sl", ""), sig.get("tp1", ""), sig.get("tp2", ""), sig.get("tp3", ""), int(bool(sig.get("inferred"))), errore, text.replace("\n", " | ")])
+
+
+def log_esito(msg_id, conto, res: str, lots, trks: list) -> None:
+    kind = "prova" if res.startswith("[PROVA") else "stop" if res.startswith("⏳") else "aperto" if res.startswith("✅ Aperto") else "rifiutato" if "Non apro" in res else "errore"
+    _csv_append(ESITI, ["quando_utc", "msg_id", "conto", "esito", "lotti", "bid", "ask", "spread", "scarto_usato", "fonte_scarto", "pips_al_tp1", "ticket", "prezzo_apertura", "dettaglio"],
+                [now_iso(), msg_id, conto, kind, lots, INFO.get("bid", ""), INFO.get("ask", ""), INFO.get("spread", ""), INFO.get("offset", ""), INFO.get("src", ""),
+                 INFO.get("remaining", ""), ",".join(str(t["position"]) for t in trks), trks[0]["open"] if trks else "", res.replace("\n", " | ")[:400]])
+
+
+def log_chiusura(t: dict, d, reason: str, pips_signed: float) -> None:
+    _csv_append(CHIUSURE, ["quando_utc", "msg_id", "conto_id", "simbolo", "direzione", "parte", "esito", "prezzo_apertura", "prezzo_chiusura", "pips", "profitto", "ora_chiusura_server"],
+                [now_iso(), t.get("msg_id", ""), t.get("account", ""), t["symbol"], t["side"], t.get("part") or "", reason, t["open"], d.price, round(pips_signed, 1), d.profit, int(d.time)])
 
 
 def log_scarto(tag: str, sig: dict, tick, scarto: float) -> None:
@@ -672,11 +720,15 @@ def main(dry: bool) -> None:
                 sig = parse_signal(text)
             except ValueError as e:
                 lines = [f"⛔ Non apro: {e}"]
+                log_segnale(m.get("message_id"), m.get("date"), None, text, str(e))
             else:
+                log_segnale(m.get("message_id"), m.get("date"), sig, text)
                 lines = [f"ℹ️ Manca la riga BUY/SELL: direzione dedotta dai livelli, {sig['side'].upper()} {sig['symbol']}."] if sig.get("inferred") else []
                 targets = active_accounts() or [None]
                 for acc in targets:
                     tag = f"[{acc['name']}] " if acc else ""
+                    trks = []
+                    INFO.clear()
                     try:
                         if acc:
                             with ma.session(acc) as mt:
@@ -697,6 +749,7 @@ def main(dry: bool) -> None:
                     except Exception as e:
                         res = f"⛔ Errore: {e}"
                     lines.append(tag + res)
+                    log_esito(m.get("message_id"), acc["login"] if acc else "", res, acc["lots"] if acc else LOTS, trks)
                     log([datetime.now(timezone.utc).isoformat(timespec="seconds"), (tag + text).replace("\n", " | "), res])
             out = "\n".join(lines)
             print(out, flush=True)
