@@ -75,10 +75,21 @@ def signals_from_csv(path: str) -> list[dict]:
 
 # ---------- prezzi ----------
 def load_m1(path: str) -> pd.DataFrame:
-    m = pd.read_pickle(path) if path.endswith(".pkl") else pd.read_csv(path, index_col=0, parse_dates=True)
-    if m.index.tz is not None:
-        m.index = m.index.tz_convert("UTC").tz_localize(None)
-    return m[["open", "high", "low", "close"]].sort_index()
+    """Barre M1 in UTC da uno o più file: pickle, oppure CSV/CSV.GZ (anche con caratteri jolly, es. data/raw/XAUUSD_BID_M1_*.csv come li scrive dukascopy_fetch)."""
+    import glob
+    from src.data_loader import load_ohlc
+    files = sorted(glob.glob(path)) or [path]
+    parts = []
+    for f in files:
+        if f.endswith(".pkl"):
+            m = pd.read_pickle(f)
+            if m.index.tz is not None:
+                m.index = m.index.tz_convert("UTC").tz_localize(None)
+        else:
+            m = load_ohlc(f)
+        parts.append(m[["open", "high", "low", "close"]])
+    m = pd.concat(parts)
+    return m[~m.index.duplicated(keep="first")].sort_index()
 
 
 def m1_from_mt5(start, end) -> pd.DataFrame:
