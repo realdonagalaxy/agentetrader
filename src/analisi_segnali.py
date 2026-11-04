@@ -136,7 +136,7 @@ def mtm(side, close_bid, entry_px, s):
     return pnl(side, entry_px, close_bid, s)
 
 
-def simulate_signal(sg, m1, arr, off, s, delay_s, horizon):
+def simulate_signal(sg, m1, arr, off, s, delay_s, horizon, tie="sl"):
     """Esito di tutte le varianti per un segnale. None se non ci sono prezzi. `arr` = (indice, open, high, low, close) come array."""
     idx, op, hi, lo, cl = arr
     t0 = sg["time"] + pd.Timedelta(seconds=delay_s)
@@ -156,10 +156,10 @@ def simulate_signal(sg, m1, arr, off, s, delay_s, horizon):
     if (buy and lv["sl"] >= bid0) or (not buy and lv["sl"] <= bid0):
         return None                                                  # prezzo già oltre lo SL: dal vivo non si apre
     sl_i, tp_i, last = walk(sg["side"], hi, lo, cl, i0, bid0, s, lv, horizon)
-    res = {"time": sg["time"], "side": sg["side"], "measured": measured, "remaining": remaining if off is not None else np.nan, "has_tp2": "tp2" in sg, "has_tp3": "tp3" in sg}
+    res = {"time": sg["time"], "side": sg["side"], "entry": sg["entry"], "measured": measured, "remaining": remaining if off is not None else np.nan, "has_tp2": "tp2" in sg, "has_tp3": "tp3" in sg}
     def exit_single(k):
         t = tp_i.get(k)
-        if t is not None and (sl_i is None or t < sl_i):
+        if t is not None and (sl_i is None or t < sl_i or (tie == "tp" and t == sl_i)):          # stessa barra: per prudenza SL (tie="sl"), oppure TP (tie="tp") per misurare quanto conta
             return pnl(sg["side"], entry_px, lv[k], s), "tp"
         if sl_i is not None:
             return pnl(sg["side"], entry_px, lv["sl"], s), "sl"
@@ -258,6 +258,7 @@ def main() -> None:
     ap.add_argument("--ritardo", type=float, default=5, help="secondi tra il messaggio e l'esecuzione")
     ap.add_argument("--ore", type=float, default=24, help="durata massima del trade in ore")
     ap.add_argument("--simbolo", default="XAUUSD")
+    ap.add_argument("--pari", choices=("sl", "tp"), default="sl", help="se nella stessa barra M1 toccano sia SL sia TP: conta lo SL (prudente) o il TP")
     a = ap.parse_args()
     sigs = signals_from_json(a.json, a.fuso, a.simbolo) if a.json else signals_from_csv(a.csv) if a.csv else None
     if sigs is None:
@@ -270,7 +271,7 @@ def main() -> None:
     rows, hist, skipped = [], [], 0
     for sg in sigs:
         use = a.scarto if a.scarto is not None else (float(np.median(hist[-30:])) if len(hist) >= 10 else None)
-        r = simulate_signal(sg, m1, arr, use, a.spread, a.ritardo, int(a.ore * 60))
+        r = simulate_signal(sg, m1, arr, use, a.spread, a.ritardo, int(a.ore * 60), a.pari)
         if r is None:
             skipped += 1
             continue
