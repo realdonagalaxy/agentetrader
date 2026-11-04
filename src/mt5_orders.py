@@ -7,7 +7,9 @@ Formato del messaggio (decisione utente 30/10/2026):
     ✅ TP1: 3977
     ✅ TP2: 3982        (ignorato)
     ✅ TP3: 4012        (ignorato)
-Regole: lotto fisso LOTS (0.05); ordine A MERCATO (l'Entry del messaggio serve solo a controllare che il prezzo non si sia allontanato più di MAX_SLIP_PRICE);
+Entry (dal 04/11/2026): ordine BUY STOP / SELL STOP al prezzo del segnale, valido fino a fine giornata, senza correzione dello scarto tra broker (ENTRY_ORDER=market in config.env per tornare
+a mercato). Entry già superata: a mercato solo se al TP1 mancano più di MARKET_MIN_PIPS (40) pips. Se il prezzo tocca il TP1 prima dello stop, l'ordine si annulla.
+Regole (versione a mercato): lotto fisso LOTS (0.05); ordine A MERCATO (l'Entry del messaggio serve solo a controllare che il prezzo non si sia allontanato più di MAX_SLIP_PRICE);
 SL e TP1 impostati sull'ordine; TP2/TP3 ignorati. Il simbolo XAUUSD viene tradotto in MT5_SYMBOL (es. GOLD).
 Filtro sullo spread: non apre se lo spread supera MAX_SPREAD (1,00 $) o MAX_SPREAD_PCT (20%) della distanza del TP1.
 Sicurezze: accetta messaggi solo dalla chat TELEGRAM_CHAT_ID; ignora i messaggi arrivati prima dell'avvio e quelli più vecchi di MAX_AGE_S;
@@ -37,6 +39,8 @@ for _stream in (sys.stdout, sys.stderr):                           # su Windows 
 LOTS = 0.05
 MAX_SLIP_PRICE = 3.0
 MAX_POSITIONS = 6                 # posizioni aperte da questo programma per conto (ogni segnale con TP2 ne apre due)
+ENTRY_ORDER = os.environ.get("ENTRY_ORDER", "stop").lower()            # "stop" (BUY/SELL STOP all'Entry del segnale, default) oppure "market" (esecuzione a mercato come prima)
+MARKET_MIN_PIPS = float(os.environ.get("MARKET_MIN_PIPS") or 40)       # Entry già superata: si entra a mercato solo se al TP1 mancano PIÙ di questi pips
 PARTIAL_ENABLED = os.environ.get("PARTIAL_TP2") == "1"    # parzializzazione SPENTA (decisione 05/11/2026: tutto chiuso a TP1); per riaccenderla: PARTIAL_TP2=1 in config.env
 PARTIAL_FRACTION = 0.6            # parte di lotti chiusa a TP1 (0,03 su 0,05); il resto va a pareggio e corre verso TP2
 MAX_SPREAD = float(os.environ.get("MAX_SPREAD") or 1.00)            # $: oltre questo spread non si apre (rollover, notizie). Cambiabile in config.env
@@ -138,14 +142,16 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
     info = mt5.symbol_info(sym)
     if info is None or not mt5.symbol_select(sym, True):
         raise ValueError(f"simbolo {sym!r} non trovato su MT5")
-    mine = [p for p in (mt5.positions_get() or []) if p.magic == MAGIC]
+    mine = [p for p in (mt5.positions_get() or []) if p.magic == MAGIC] + [o for o in (mt5.orders_get() or []) if o.magic == MAGIC]
     if len(mine) >= MAX_POSITIONS:
-        raise ValueError(f"già {len(mine)} posizioni aperte da questo programma (massimo {MAX_POSITIONS})")
+        raise ValueError(f"già {len(mine)} posizioni o ordini aperti da questo programma (massimo {MAX_POSITIONS})")
     tick = mt5.symbol_info_tick(sym)
     spread, tp_dist = tick.ask - tick.bid, abs(sig["tp1"] - sig["entry"])
     limit = min(MAX_SPREAD, MAX_SPREAD_PCT * tp_dist) if tp_dist > 0 else MAX_SPREAD
     if spread > limit + 1e-9:                                        # filtro sullo spread: con spread alto il costo mangia il TP
         raise ValueError(f"spread troppo alto: {spread:.2f} $ (limite {limit:.2f} $: massimo {MAX_SPREAD:.2f} $ e {MAX_SPREAD_PCT:.0%} del TP1 di {tp_dist:.2f} $). Non apro.")
+    if ENTRY_ORDER == "stop" and relative_levels():
+        return _execute_stop(mt5, sig, sym, info, tick, lots, dry, tag)
     buy = sig["side"] == "buy"
     px = tick.ask if buy else tick.bid
     d = info.digits
@@ -205,6 +211,85 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
             break
         trks.append({"position": int(res.order), "symbol": sym, "side": sig["side"], "open": float(res.price), "tp": req["tp"], "sl": req["sl"], "part": name, "group": group})
     return (f"✅ Aperto: {summary} · prezzo eseguito {trks[0]['open']} · ticket {', '.join(str(t['position']) for t in trks)}{note}", trks)
+
+
+def _pip(sym: str, info) -> float:
+    return 0.10 if ("XAU" in sym.upper() or "GOLD" in sym.upper()) else ((info.point * 10) if info else 0.0001)
+
+
+def _execute_stop(mt5, sig: dict, sym: str, info, tick, lots: float, dry: bool, tag: str) -> tuple[str, list]:
+    """Entry con ordine BUY STOP / SELL STOP al prezzo del segnale (senza correzione dello scarto tra broker), valido fino a fine giornata. SL e TP1 a distanza dall'Entry, partendo
+    dal prezzo che li fa scattare (BUY: bid = Entry - spread; SELL: ask = Entry + spread), come per gli ordini a mercato.
+    Se l'Entry è già stata superata (lo stop non si può piazzare) si entra a mercato SOLO se al TP1 mancano più di MARKET_MIN_PIPS pips; altrimenti non si apre."""
+    check_message(sig)
+    buy = sig["side"] == "buy"
+    d, entry = info.digits, sig["entry"]
+    sl_d, tp_d = abs(entry - sig["sl"]), abs(sig["tp1"] - entry)
+    sp = tick.ask - tick.bid
+    ref = entry - sp if buy else entry + sp
+    sl, tp = (ref - sl_d, ref + tp_d) if buy else (ref + sl_d, ref - tp_d)
+    stops = (getattr(info, "trade_stops_level", 0) or 0) * (getattr(info, "point", 0.01) or 0.01)
+    valid = (entry - tick.ask > stops) if buy else (tick.bid - entry > stops)         # BUY STOP sopra il prezzo, SELL STOP sotto
+    pip = _pip(sym, info)
+    kind = "stop" if valid else "market"
+    if valid:
+        exp_ok = getattr(info, "expiration_mode", 15) & 2
+        req = {"action": mt5.TRADE_ACTION_PENDING, "symbol": sym, "volume": lots, "type": mt5.ORDER_TYPE_BUY_STOP if buy else mt5.ORDER_TYPE_SELL_STOP,
+               "price": round(entry, d), "sl": round(sl, d), "tp": round(tp, d), "deviation": DEVIATION, "magic": MAGIC, "comment": "tg-signal-stop",
+               "type_time": mt5.ORDER_TIME_DAY if exp_ok else mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_RETURN}
+        head = f"⏳ Ordine {'BUY' if buy else 'SELL'} STOP piazzato: {sym} {lots} lotti @ {req['price']} (valido fino a fine giornata)"
+    else:
+        remaining = ((sig["tp1"] - tick.ask) if buy else (tick.bid - sig["tp1"])) / pip
+        if remaining <= MARKET_MIN_PIPS:
+            raise ValueError(f"Entry {entry} già superata (prezzo {tick.ask if buy else tick.bid}) e al TP1 mancano solo {remaining:.0f} pips (minimo {MARKET_MIN_PIPS:.0f}): non apro.")
+        px = tick.ask if buy else tick.bid
+        req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": lots, "type": mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL, "price": px, "sl": round(sl, d),
+               "tp": round(tp, d), "deviation": DEVIATION, "magic": MAGIC, "comment": "tg-signal", "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling(mt5, info)}
+        head = f"✅ Aperto a mercato (Entry già superata, al TP1 mancano {remaining:.0f} pips): {sig['side'].upper()} {sym} {lots} lotti ~{px}"
+    summary = f"{head} · SL {req['sl']} ({abs(ref - req['sl']):.2f} $) · TP1 {req['tp']} ({abs(req['tp'] - ref):.2f} $) · spread {sp:.2f}"
+    if dry:
+        return f"[PROVA, nessun ordine inviato] {summary}", []
+    res = mt5.order_send(req)
+    ok = (mt5.TRADE_RETCODE_DONE, getattr(mt5, "TRADE_RETCODE_PLACED", 10008))
+    if res is None or res.retcode not in ok:
+        raise ValueError(f"ordine rifiutato dal broker: {getattr(res, 'retcode', None)} {getattr(res, 'comment', mt5.last_error())}")
+    trk = {"position": int(res.order), "symbol": sym, "side": sig["side"], "open": float(entry if valid else res.price), "tp": req["tp"], "sl": req["sl"], "part": None,
+           "group": f"{time.time():.0f}-{tag}", "pending": valid, "kind": kind}
+    return f"{summary} · ticket {res.order}", [trk]
+
+
+def follow_orders(mt5, pending: dict, bot, only=None) -> None:
+    """Segue gli ordini stop in attesa: quando scattano diventano posizioni (avviso «Entrato»); se il prezzo tocca il TP1 prima dello stop l'ordine viene annullato; se scade o sparisce
+    senza essere eseguito lo segnala. Presuppone che il ticket della posizione sia quello dell'ordine che l'ha aperta (conti hedging)."""
+    for key, t in list(pending.items()):
+        if not t.get("pending") or (only is not None and not only(t)):
+            continue
+        tk, buy = int(t["position"]), t["side"] == "buy"
+        info = mt5.symbol_info(t["symbol"])
+        fmt = lambda v: f"{v:.{getattr(info, 'digits', 2)}f}"
+        pos = [p for p in (mt5.positions_get() or []) if int(p.ticket) == tk]
+        if pos:
+            t["pending"], t["open"] = False, float(pos[0].price_open)
+            say(bot, f"📌 Entrato {t['side'].upper()} {t['symbol']} a {fmt(t['open'])}", t["msg_id"])
+            save_pending(pending)
+            continue
+        if list(mt5.orders_get(ticket=tk) or ()):
+            tick = mt5.symbol_info_tick(t["symbol"])
+            if (tick.bid >= t["tp"]) if buy else (tick.ask <= t["tp"]):          # il movimento è partito senza lo stop: setup non più valido
+                res = mt5.order_send({"action": mt5.TRADE_ACTION_REMOVE, "order": tk})
+                if res is not None and res.retcode == mt5.TRADE_RETCODE_DONE:
+                    say(bot, f"🚫 Ordine annullato: il prezzo ha toccato il TP1 ({fmt(t['tp'])}) senza attivare lo stop", t["msg_id"])
+                    del pending[key]
+                    save_pending(pending)
+            continue
+        ins = [x for x in (mt5.history_deals_get(position=tk) or ()) if x.entry == mt5.DEAL_ENTRY_IN]
+        if ins:                                                                 # scattato e già chiuso tra un controllo e l'altro: lo gestisce check_closed
+            t["pending"], t["open"] = False, float(ins[0].price)
+            save_pending(pending)
+            continue
+        say(bot, "⌛ Ordine stop non eseguito: scaduto o annullato", t["msg_id"])
+        del pending[key]
+        save_pending(pending)
 
 
 def move_to_be(mt5, t: dict) -> bool:
@@ -270,7 +355,7 @@ def announce(bot, mt5, t: dict, deals, d, text: str, label: str) -> None:
 def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
     """Per ogni posizione seguita già chiusa: se è chiusa a TP risponde al messaggio del segnale, pulito: '✅ TP1 +N pips · prezzo P' o '❌ SL HIT -N pips · prezzo P'; poi la toglie dall'elenco."""
     for key, t in list(pending.items()):
-        if only is not None and not only(t):
+        if (only is not None and not only(t)) or t.get("pending"):
             continue
         deals = mt5.history_deals_get(position=t["position"]) or []
         out = [d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT]
@@ -323,7 +408,7 @@ def load_pending() -> dict:
 SENT: "deque[str]" = deque(maxlen=100)                         # testi inviati da questo programma: nel canale il bot rivede i propri post e non deve leggerli come segnali
 
 
-OWN_PREFIXES = ("🟢 Pronto", "📥", "ℹ️", "⚠️", "⛔", "✅ Aperto", "✅ TP1 ", "❌ SL HIT", "🟰 BE", "✅ TP2 ", "✅ Gestione Conti", "[")    # inizio dei messaggi scritti dal programma
+OWN_PREFIXES = ("🟢 Pronto", "📥", "ℹ️", "⚠️", "⛔", "✅ Aperto", "✅ TP1 ", "❌ SL HIT", "⏳", "📌", "🚫", "⌛", "🟰 BE", "✅ TP2 ", "✅ Gestione Conti", "[")    # inizio dei messaggi scritti dal programma
 
 
 def telegram_on() -> bool:
@@ -474,10 +559,12 @@ def follow_closures(pending: dict, bot, legacy) -> None:
             continue
         try:
             with ma.session(acc) as m:
+                follow_orders(m, pending, bot, only=lambda t, a=aid: t.get("account") == a)
                 check_closed(m, pending, bot, only=lambda t, a=aid: t.get("account") == a, prefix=f" · {acc['name']}")
         except Exception as e:
             print(f"Controllo chiusure {acc['name']}:", str(e)[:200], flush=True)
     if legacy is not None and any(not t.get("account") for t in pending.values()):
+        follow_orders(legacy, pending, bot, only=lambda t: not t.get("account"))
         check_closed(legacy, pending, bot, only=lambda t: not t.get("account"))
 
 

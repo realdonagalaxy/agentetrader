@@ -7,6 +7,10 @@ from types import SimpleNamespace as N
 ACCOUNT_TRADE_MODE_DEMO, ACCOUNT_TRADE_MODE_REAL = 0, 2
 TRADE_ACTION_DEAL = 1
 TRADE_ACTION_SLTP = 2
+TRADE_ACTION_PENDING, TRADE_ACTION_REMOVE = 5, 8
+ORDER_TYPE_BUY_STOP, ORDER_TYPE_SELL_STOP = 4, 5
+ORDER_TIME_DAY = 1
+TRADE_RETCODE_PLACED = 10008
 ACCOUNT_MARGIN_MODE_RETAIL_NETTING, ACCOUNT_MARGIN_MODE_RETAIL_HEDGING = 0, 2
 ORDER_TYPE_BUY, ORDER_TYPE_SELL = 0, 1
 ORDER_TIME_GTC = 0
@@ -16,7 +20,7 @@ DEAL_ENTRY_IN, DEAL_ENTRY_OUT = 0, 1
 DEAL_REASON_CLIENT, DEAL_REASON_SL, DEAL_REASON_TP = 0, 4, 5
 TIMEFRAME_M1, TIMEFRAME_M5, TIMEFRAME_M15 = 1, 5, 15
 
-_state = {"login": None, "positions": {}, "deals": {}, "next": 5000000000, "real": {9990001}}
+_state = {"orders": {}, "login": None, "positions": {}, "deals": {}, "next": 5000000000, "real": {9990001}}
 _BAL = {}
 
 
@@ -87,7 +91,7 @@ def symbols_get(*a, **kw):
 
 
 def symbol_info(sym):
-    return N(digits=2, filling_mode=3, point=0.01) if sym in ("GOLD", "XAUUSD") else None
+    return N(digits=2, filling_mode=3, point=0.01, trade_stops_level=0, expiration_mode=15) if sym in ("GOLD", "XAUUSD") else None
 
 
 def symbol_info_tick(sym):
@@ -97,6 +101,14 @@ def symbol_info_tick(sym):
 
 def _tick_positions():
     p = _px()
+    for tk, od in list(_state["orders"].items()):                    # ordini stop: scattano quando il prezzo raggiunge il livello
+        ask = round(p + 0.47, 2)
+        if (od.type == ORDER_TYPE_BUY_STOP and ask >= od.price_open) or (od.type == ORDER_TYPE_SELL_STOP and p <= od.price_open):
+            _state["orders"].pop(tk)
+            ty = ORDER_TYPE_BUY if od.type == ORDER_TYPE_BUY_STOP else ORDER_TYPE_SELL
+            _state["positions"][tk] = N(ticket=tk, login=od.login, symbol=od.symbol, type=ty, volume=od.volume, price_open=od.price_open, price_current=p, sl=od.sl, tp=od.tp,
+                                        profit=0.0, swap=0.0, time=int(time.time()), magic=od.magic, comment=od.comment)
+            _state["deals"].setdefault(tk, []).append(N(entry=DEAL_ENTRY_IN, reason=DEAL_REASON_CLIENT, price=od.price_open, profit=0.0, position_id=tk, time=int(time.time()), type=ty))
     for k, pos in list(_state["positions"].items()):
         buy = pos.type == ORDER_TYPE_BUY
         cur = p if buy else round(p + 0.47, 2)
@@ -115,8 +127,14 @@ def _close(pos, price, reason):
     _state["positions"].pop(pos.ticket, None)
     _BAL[pos.login] = _BAL.get(pos.login, 10000.0) + pos.profit
     lst = _state["deals"].setdefault(pos.ticket, [])
-    lst.append(N(entry=DEAL_ENTRY_IN, reason=DEAL_REASON_CLIENT, price=pos.price_open, profit=0.0, position_id=pos.ticket, time=pos.time, type=pos.type))
+    if not any(x.entry == DEAL_ENTRY_IN for x in lst):
+        lst.append(N(entry=DEAL_ENTRY_IN, reason=DEAL_REASON_CLIENT, price=pos.price_open, profit=0.0, position_id=pos.ticket, time=pos.time, type=pos.type))
     lst.append(N(entry=DEAL_ENTRY_OUT, reason=reason, price=price, profit=pos.profit, position_id=pos.ticket, time=int(time.time()), type=1 - pos.type))
+
+
+def orders_get(ticket=None, **kw):
+    _tick_positions()
+    return tuple(o for o in _state["orders"].values() if o.login == _state["login"] and (ticket is None or o.ticket == ticket))
 
 
 def positions_get(**kw):
@@ -174,6 +192,15 @@ def history_deals_get(*a, position=None, **kw):
 
 def order_send(req):
     _tick_positions()
+    if req.get("action") == TRADE_ACTION_PENDING:
+        _state["next"] += 1
+        _state["orders"][_state["next"]] = N(ticket=_state["next"], login=_state["login"], symbol=req["symbol"], type=req["type"], price_open=req["price"], sl=req["sl"], tp=req["tp"],
+                                             volume=req["volume"], magic=req.get("magic", 0), comment=req.get("comment", ""))
+        return N(retcode=TRADE_RETCODE_PLACED, comment="Placed", price=0, order=_state["next"])
+    if req.get("action") == TRADE_ACTION_REMOVE:
+        if _state["orders"].pop(req["order"], None) is None:
+            return N(retcode=10013, comment="Invalid request", price=0, order=0)
+        return N(retcode=TRADE_RETCODE_DONE, comment="Done", price=0, order=req["order"])
     if req.get("action") == TRADE_ACTION_SLTP:                         # modifica di SL/TP
         pos = _state["positions"].get(req["position"])
         if pos is None:
