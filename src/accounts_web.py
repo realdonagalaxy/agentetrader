@@ -58,7 +58,16 @@ class Server(ThreadingHTTPServer):
 def telegram_status() -> dict:
     """Stato dell'ascolto dei segnali: il battito del programma (listener_age = secondi dall'ultimo controllo, None se mai partito)."""
     import time
-    out = {"listener_age": None}
+    import json
+    out = {"listener_age": None, "channel": {"state": "non_configurato"}}
+    if os.environ.get("TELEGRAM_CANALE", "").strip():
+        out["channel"] = {"state": "in_attesa", "name": os.environ["TELEGRAM_CANALE"].strip()}
+        try:
+            c = json.loads((ma.DATA_DIR / "canale_stato.json").read_text(encoding="utf-8"))
+            out["channel"] = {"state": c.get("state") or "in_attesa", "name": c.get("title") or out["channel"]["name"], "detail": c.get("detail") or "",
+                              "ts_age": round(time.time() - float(c.get("ts") or 0)), "last_msg_age": round(time.time() - float(c["last_msg"])) if c.get("last_msg") else None}
+        except (OSError, ValueError):
+            pass
     hb = ma.DATA_DIR / "mt5_orders.heartbeat"
     try:
         out["listener_age"] = round(time.time() - float(hb.read_text()))

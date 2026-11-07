@@ -333,9 +333,18 @@ async function tgCheck() {
     const on = t.listener_age !== null && t.listener_age < 60;
     $("lsbtn").textContent = on ? "Ferma ascolto segnali" : "Avvia ascolto segnali";
     $("lsbtn").className = "btn" + (on ? " sec" : "");
-    el.innerHTML = t.listener_age === null ? `<span class="badge b-off">Ascolto segnali non attivo</span> <span class="sub">premi «Avvia ascolto segnali»</span>`
+    const c = t.channel || {};
+    const ago = s => s < 90 ? `${s} s fa` : s < 5400 ? `${Math.round(s / 60)} min fa` : `${Math.round(s / 3600)} h fa`;
+    let ch;
+    if (c.state === "non_configurato") ch = `<span class="badge b-off">Canale non configurato</span> <span class="sub">imposta TELEGRAM_CANALE in config.env</span>`;
+    else if (!on) ch = `<span class="badge b-off">Canale ${esc(c.name || "")}: ascolto fermo</span>`;
+    else if (c.state === "collegato" && c.ts_age !== undefined && c.ts_age < 60) ch = `<span class="badge b-ok">Canale «${esc(c.name)}» collegato</span> <span class="sub">${c.last_msg_age != null ? "ultimo messaggio " + ago(c.last_msg_age) : "nessun messaggio ricevuto da quando è attivo"}</span>`;
+    else if (c.state === "riconnessione") ch = `<span class="badge b-err">Canale ${esc(c.name || "")}: connessione persa, riprovo</span> <span class="sub">${esc(c.detail || "")}</span>`;
+    else if (c.state === "errore") ch = `<span class="badge b-err">Canale non collegato</span> <span class="err">${esc(c.detail || "vedi journal/mt5_orders.log")}</span>`;
+    else ch = `<span class="badge b-off">Canale ${esc(c.name || "")}: collegamento in corso…</span>`;
+    el.innerHTML = ch + "<br>" + (t.listener_age === null ? `<span class="badge b-off">Ascolto segnali non attivo</span> <span class="sub">premi «Avvia ascolto segnali»</span>`
       : on ? `<span class="badge b-ok">Ascolto segnali attivo</span> <span class="sub">ultimo controllo ${t.listener_age} s fa</span>`
-      : `<span class="badge b-err">Ascolto segnali fermo</span> <span class="sub">ultimo controllo ${Math.round(t.listener_age / 60)} min fa</span>`;
+      : `<span class="badge b-err">Ascolto segnali fermo</span> <span class="sub">ultimo controllo ${Math.round(t.listener_age / 60)} min fa</span>`);
   } catch (e) { el.textContent = e.message; }
 }
 $("lsbtn").onclick = async () => {

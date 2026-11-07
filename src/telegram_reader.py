@@ -19,7 +19,7 @@ from pathlib import Path
 
 from src.mt5_orders import clean_text, looks_like_signal, parse_signal
 
-JOURNAL = Path("journal")
+JOURNAL = Path(os.environ.get("JOURNAL_DIR", "journal"))
 MSG_CSV = JOURNAL / "canale_messaggi.csv"
 SIG_CSV = JOURNAL / "canale_segnali.csv"
 SESSION = str(JOURNAL / "telegram")                                  # Telethon aggiunge .session
@@ -35,6 +35,23 @@ def _append(path: Path, cols: list, row: dict) -> None:
         if new:
             w.writeheader()
         w.writerow(row)
+
+
+def write_status(**kw) -> None:
+    """Stato del collegamento al canale, letto da Gestione Conti (journal/canale_stato.json). Si aggiornano solo i campi passati."""
+    import json
+    import time
+    f = JOURNAL / "canale_stato.json"
+    try:
+        cur = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cur = {}
+    cur.update(kw, ts=time.time())
+    try:
+        JOURNAL.mkdir(exist_ok=True)
+        f.write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def seen_ids() -> set:
@@ -116,6 +133,7 @@ def start_channel_feed(name: str, q, notify=None) -> None:
 
     def tell(msg: str) -> None:
         print(msg, flush=True)
+        write_status(detail=msg)
         if notify:
             try:
                 notify(msg)
@@ -133,22 +151,36 @@ def start_channel_feed(name: str, q, notify=None) -> None:
         async def run():
             await client.connect()
             if not await client.is_user_authorized():
+                write_status(state="errore")
                 tell("Canale Telegram: sessione non autorizzata. Esegui prima: python -m src.telegram_reader --elenca")
                 return False
             ent = await _find(client, name)
+            title = getattr(ent, "title", None) or name
+            write_status(state="collegato", title=title, detail="")
 
             @client.on(events.NewMessage(chats=ent))
             async def handler(ev):
                 text = ev.message.message or ""
                 process(text, ev.message.date, ev.message.id, seen)
                 q.put((text, ev.message.id, ev.message.date.timestamp()))
+                write_status(last_msg=ev.message.date.timestamp(), last_signal=bool(looks_like_signal(clean_text(text))) or None)
+
+            async def pulse():                                                # ogni 15 s: connessione viva? (serve a Gestione Conti per mostrare lo stato vero)
+                while True:
+                    write_status(state="collegato" if client.is_connected() else "riconnessione", title=title)
+                    await asyncio.sleep(15)
+
+            pulse_task = asyncio.ensure_future(pulse())
 
             if not state["told"]:                                             # il messaggio di collegamento una volta sola, anche dopo una riconnessione
                 tell(f"Canale «{getattr(ent, 'title', name)}» collegato (sola lettura).")
                 state["told"] = True
             else:
                 print("Canale ricollegato.", flush=True)
-            await client.run_until_disconnected()
+            try:
+                await client.run_until_disconnected()
+            finally:
+                pulse_task.cancel()
             return True
 
         wait = 10
@@ -158,6 +190,7 @@ def start_channel_feed(name: str, q, notify=None) -> None:
                     return
                 wait = 10
             except BaseException as e:                                        # SystemExit di _find incluso: il listener continua con il solo canale del bot
+                write_status(state="errore" if not state["told"] else "riconnessione")
                 if not state["told"] or wait == 10:
                     tell(f"Canale Telegram non collegato: {type(e).__name__} {str(e)[:200]}. Riprovo.")
                 if isinstance(e, SystemExit) and not state["told"]:
