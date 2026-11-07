@@ -650,7 +650,7 @@ def follow_closures(pending: dict, bot, legacy) -> None:
         check_closed(legacy, pending, bot, only=lambda t: not t.get("account"))
 
 
-def main(dry: bool) -> None:
+def main(dry: bool, channel: str = "") -> None:
     from dotenv import load_dotenv
     load_dotenv("config.env")
     from src import mt5_accounts as ma
@@ -664,6 +664,12 @@ def main(dry: bool) -> None:
     except Exception as e:                                        # un problema di rete all'avvio non deve fermare il programma
         print("Telegram non raggiungibile all'avvio, riprovo:", str(e)[:150], flush=True)
         offset = 0
+    import queue
+    feed: "queue.Queue" = queue.Queue()
+    canale = (channel or os.environ.get("TELEGRAM_CANALE", "")).strip()
+    if canale:                                                    # i segnali arrivano anche direttamente dal canale (account dell'utente, sola lettura)
+        from src.telegram_reader import start_channel_feed
+        start_channel_feed(canale, feed)
     pending = load_pending()
     accs = active_accounts()
     where = f"{len(accs)} conti dall'app" if accs else f"terminale singolo, lotto {LOTS}"
@@ -696,13 +702,17 @@ def main(dry: bool) -> None:
         except Exception as e:
             print("Controllo chiusure:", e, flush=True)
         try:
-            ups = bot._call("getUpdates", offset=offset, timeout=8)
+            ups = bot._call("getUpdates", offset=offset, timeout=2 if canale else 8)
         except Exception as e:
             print("Telegram:", type(e).__name__, str(e)[:200], flush=True)
             time.sleep(5)
             continue
+        while not feed.empty():                                      # messaggi del canale: stesso percorso dei messaggi al bot (cid = chat attesa)
+            ftext, fid, fdate = feed.get()
+            ups.append({"update_id": None, "message": {"text": ftext, "chat": {"id": allowed}, "date": fdate, "message_id": None, "chan_id": fid}})
         for u in ups:
-            offset = u["update_id"] + 1
+            if u["update_id"] is not None:
+                offset = u["update_id"] + 1
             m = u.get("message") or u.get("channel_post") or u.get("edited_message") or u.get("edited_channel_post") or {}
             text = clean_text(m.get("text") or m.get("caption") or "")
             cid = str((m.get("chat") or {}).get("id"))
@@ -710,7 +720,7 @@ def main(dry: bool) -> None:
                 continue
             if cid != allowed or not looks_like_signal(text):
                 print(f"Ignorato: chat {cid} (attesa {allowed}), contiene BUY/SELL: {bool(re.search(r'BUY|SELL', text, re.I))}, tipo: {[k for k in u if k != 'update_id']}, "
-                      f"campi: {[k for k in m if k not in ('chat', 'date', 'message_id', 'sender_chat')]}, testo: {text[:80]!r}", flush=True)
+                      f"campi: {[k for k in m if k not in ('chat', 'date', 'message_id', 'chan_id', 'sender_chat')]}, testo: {text[:80]!r}", flush=True)
                 continue
             if time.time() - m.get("date", 0) > MAX_AGE_S:
                 say(bot, "⚠️ Messaggio troppo vecchio (> 2 minuti): ignorato.")
@@ -720,9 +730,9 @@ def main(dry: bool) -> None:
                 sig = parse_signal(text)
             except ValueError as e:
                 lines = [f"⛔ Non apro: {e}"]
-                log_segnale(m.get("message_id"), m.get("date"), None, text, str(e))
+                log_segnale(m.get("message_id") or m.get("chan_id"), m.get("date"), None, text, str(e))
             else:
-                log_segnale(m.get("message_id"), m.get("date"), sig, text)
+                log_segnale(m.get("message_id") or m.get("chan_id"), m.get("date"), sig, text)
                 lines = [f"ℹ️ Manca la riga BUY/SELL: direzione dedotta dai livelli, {sig['side'].upper()} {sig['symbol']}."] if sig.get("inferred") else []
                 targets = active_accounts() or [None]
                 for acc in targets:
@@ -749,7 +759,7 @@ def main(dry: bool) -> None:
                     except Exception as e:
                         res = f"⛔ Errore: {e}"
                     lines.append(tag + res)
-                    log_esito(m.get("message_id"), acc["login"] if acc else "", res, acc["lots"] if acc else LOTS, trks)
+                    log_esito(m.get("message_id") or m.get("chan_id"), acc["login"] if acc else "", res, acc["lots"] if acc else LOTS, trks)
                     log([datetime.now(timezone.utc).isoformat(timespec="seconds"), (tag + text).replace("\n", " | "), res])
             out = "\n".join(lines)
             print(out, flush=True)
@@ -759,8 +769,9 @@ def main(dry: bool) -> None:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true", help="valida ma non invia ordini")
+    ap.add_argument("--canale", default="", help="titolo/id del canale Telegram da leggere con il tuo account (vedi src/telegram_reader.py); in alternativa TELEGRAM_CANALE in config.env")
     ap.add_argument("--calibra", action="store_true", help="riepilogo degli scarti tra il prezzo del canale e quello del tuo broker")
     ap.add_argument("--check", action="store_true", help="diagnosi dei conti e del collegamento a MT5")
     ap.add_argument("--suggest", action="store_true", help="stampa un messaggio di prova coerente con il prezzo attuale")
     a = ap.parse_args()
-    calibra() if a.calibra else check() if a.check else suggest() if a.suggest else main(a.dry)
+    calibra() if a.calibra else check() if a.check else suggest() if a.suggest else main(a.dry, a.canale)
