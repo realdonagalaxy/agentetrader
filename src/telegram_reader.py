@@ -144,6 +144,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--elenca", action="store_true", help="elenca chat e canali con id")
     ap.add_argument("--canale", help="titolo, @username o id del canale")
+    ap.add_argument("--ultimo", action="store_true", help="mostra l'ultimo messaggio del canale e lo manda al tuo bot Telegram (chat TELEGRAM_CHAT_ID)")
     ap.add_argument("--storico", type=int, default=0, help="scarica gli ultimi N messaggi invece di ascoltare")
     a = ap.parse_args()
     if not a.elenca and not a.canale:
@@ -163,6 +164,23 @@ def main() -> None:
         ent = await _find(client, a.canale)
         title = getattr(ent, "title", None) or a.canale
         seen = seen_ids()
+        if a.ultimo:
+            msgs = [m async for m in client.iter_messages(ent, limit=1)]
+            if not msgs:
+                print("Il canale non ha messaggi.")
+                return
+            m = msgs[0]
+            when = m.date.astimezone().strftime("%d/%m/%Y %H:%M")
+            body = clean_text(m.message or "") or "(messaggio senza testo: immagine o altro)"
+            text = f"📨 Ultimo messaggio di «{title}» ({when}):\n\n{body}"
+            print(text)
+            from dotenv import load_dotenv
+            load_dotenv("config.env")
+            from src.telegram_bot import TelegramBot
+            bot = TelegramBot()
+            bot._call("sendMessage", chat_id=bot.chat_id, text=text)
+            print("Inviato al tuo bot Telegram.")
+            return
         if a.storico:
             counts = {}
             async for m in client.iter_messages(ent, limit=a.storico):
