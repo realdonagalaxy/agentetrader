@@ -123,16 +123,18 @@ def start_channel_feed(name: str, q, notify=None) -> None:
                 pass
 
     def work():
+        import time
         from telethon import events
         asyncio.set_event_loop(asyncio.new_event_loop())
         client = _client()
         seen = seen_ids()
+        state = {"told": False}
 
         async def run():
             await client.connect()
             if not await client.is_user_authorized():
                 tell("Canale Telegram: sessione non autorizzata. Esegui prima: python -m src.telegram_reader --elenca")
-                return
+                return False
             ent = await _find(client, name)
 
             @client.on(events.NewMessage(chats=ent))
@@ -141,13 +143,27 @@ def start_channel_feed(name: str, q, notify=None) -> None:
                 process(text, ev.message.date, ev.message.id, seen)
                 q.put((text, ev.message.id, ev.message.date.timestamp()))
 
-            tell(f"Canale «{getattr(ent, 'title', name)}» collegato (sola lettura).")
+            if not state["told"]:                                             # il messaggio di collegamento una volta sola, anche dopo una riconnessione
+                tell(f"Canale «{getattr(ent, 'title', name)}» collegato (sola lettura).")
+                state["told"] = True
+            else:
+                print("Canale ricollegato.", flush=True)
             await client.run_until_disconnected()
+            return True
 
-        try:
-            asyncio.get_event_loop().run_until_complete(run())
-        except BaseException as e:                                            # SystemExit di _find incluso: il listener continua con il solo canale del bot
-            tell(f"Canale Telegram non collegato: {type(e).__name__} {str(e)[:200]}")
+        wait = 10
+        while True:                                                           # sempre in ascolto: se la connessione cade si riprova
+            try:
+                if asyncio.get_event_loop().run_until_complete(run()) is False:
+                    return
+                wait = 10
+            except BaseException as e:                                        # SystemExit di _find incluso: il listener continua con il solo canale del bot
+                if not state["told"] or wait == 10:
+                    tell(f"Canale Telegram non collegato: {type(e).__name__} {str(e)[:200]}. Riprovo.")
+                if isinstance(e, SystemExit) and not state["told"]:
+                    return                                                    # canale non trovato: inutile riprovare
+                wait = min(wait * 2, 300)
+            time.sleep(wait)
 
     threading.Thread(target=work, daemon=True, name="canale-telegram").start()
 

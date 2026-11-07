@@ -437,7 +437,7 @@ def load_pending() -> dict:
 SENT: "deque[str]" = deque(maxlen=100)                         # testi inviati da questo programma: nel canale il bot rivede i propri post e non deve leggerli come segnali
 
 
-OWN_PREFIXES = ("🟢 Pronto", "📡", "📥", "ℹ️", "⚠️", "⛔", "✅ Aperto", "✅ TP1 ", "❌ SL HIT", "⏳", "📌", "🚫", "⌛", "🟰 BE", "✅ TP2 ", "✅ Gestione Conti", "[")    # inizio dei messaggi scritti dal programma
+OWN_PREFIXES = ("🟢 Pronto", "📡", "📨", "📥", "ℹ️", "⚠️", "⛔", "✅ Aperto", "✅ TP1 ", "❌ SL HIT", "⏳", "📌", "🚫", "⌛", "🟰 BE", "✅ TP2 ", "✅ Gestione Conti", "[")    # inizio dei messaggi scritti dal programma
 
 
 def telegram_on() -> bool:
@@ -725,6 +725,8 @@ def main(dry: bool, channel: str = "") -> None:
             if time.time() - m.get("date", 0) > MAX_AGE_S:
                 say(bot, "⚠️ Messaggio troppo vecchio (> 2 minuti): ignorato.")
                 continue
+            if m.get("chan_id"):                                       # dal canale: te lo inoltro subito sul tuo Telegram, poi lo applico
+                say(bot, "📨 Segnale dal canale:\n\n" + text)
             say(bot, "📥 Segnale ricevuto, lo applico sui conti…", m.get("message_id"))        # conferma immediata: se questa non arriva, il messaggio non è giunto al programma
             try:
                 sig = parse_signal(text)
