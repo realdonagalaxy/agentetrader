@@ -143,12 +143,10 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
   <div class="banner" id="sim" hidden>Modalità SIMULATORE: conti, prezzi e operazioni sono finti. Serve solo a provare l'interfaccia.</div>
   <div class="banner" id="warn" hidden></div>
   <div class="kpis" id="kpis"></div>
-  <div class="panel"><h2>Telegram</h2>
+  <div class="panel"><h2>Ascolto segnali</h2>
     <div class="body stack" style="grid-template-columns:minmax(0,1fr) auto;align-items:center">
       <div id="tgst" class="sub" style="font-size:13px;color:var(--ink)">Controllo…</div>
-      <div class="actions" style="align-items:center"><label class="sw" title="Attiva o disattiva Telegram: spento, il programma non legge i segnali e non invia messaggi"><input type="checkbox" role="switch" id="tgon" aria-label="Attiva o disattiva Telegram"><span></span></label>
-        <button class="btn sec" id="tgtest">Invia messaggio di prova</button>
-        <button class="btn" id="lsbtn">Avvia ascolto segnali</button></div>
+      <div class="actions" style="align-items:center"><button class="btn" id="lsbtn">Avvia ascolto segnali</button></div>
     </div>
   </div>
   <div class="panel">
@@ -192,7 +190,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
       <label>Nota<input type="text" id="note" maxlength="300"></label>
     </div>
     <label class="chk"><input type="checkbox" id="enabled" checked><span>Conto attivo (viene monitorato)</span></label>
-    <label class="chk"><input type="checkbox" id="use_signals" checked><span>Usa per i segnali Telegram (apre le operazioni; solo se il conto è demo)</span></label>
+    <label class="chk"><input type="checkbox" id="use_signals" checked><span>Usa per i segnali del canale (apre le operazioni; solo se il conto è demo)</span></label>
   </div>
   <div class="foot"><span class="msg" id="tmsg"></span>
     <button type="button" class="btn sec" id="test">Prova connessione</button>
@@ -332,35 +330,19 @@ async function tgCheck() {
   const el = $("tgst");
   try {
     const t = await api("/api/telegram");
-    $("tgon").checked = t.enabled; $("tgtest").disabled = !t.enabled;
-    if (!t.enabled) { el.innerHTML = `<span class="badge b-off">Telegram disattivato</span> <span class="sub">il programma dei segnali non legge né invia messaggi</span>`; return; }
-    const b = t.bot ? `<span class="badge b-ok">Bot ${esc(t.bot)} risponde</span>` : `<span class="badge b-err">Bot non raggiungibile</span> <span class="err">${esc(t.bot_error)}</span>`;
-    const c = t.chat ? `<span class="badge b-ok">Chat configurata</span>` : `<span class="badge b-err">Chat non configurata</span>`;
-    $("lsbtn").textContent = t.listener_age !== null && t.listener_age < 60 ? "Ferma ascolto segnali" : "Avvia ascolto segnali";
-    $("lsbtn").className = "btn" + (t.listener_age !== null && t.listener_age < 60 ? " sec" : "");
-    const l = t.listener_age === null ? `<span class="badge b-off">Ascolto segnali non attivo</span> <span class="sub">premi «Avvia ascolto segnali»</span>`
-      : t.listener_age < 60 ? `<span class="badge b-ok">Ascolto segnali attivo</span> <span class="sub">ultimo controllo ${t.listener_age} s fa</span>`
+    const on = t.listener_age !== null && t.listener_age < 60;
+    $("lsbtn").textContent = on ? "Ferma ascolto segnali" : "Avvia ascolto segnali";
+    $("lsbtn").className = "btn" + (on ? " sec" : "");
+    el.innerHTML = t.listener_age === null ? `<span class="badge b-off">Ascolto segnali non attivo</span> <span class="sub">premi «Avvia ascolto segnali»</span>`
+      : on ? `<span class="badge b-ok">Ascolto segnali attivo</span> <span class="sub">ultimo controllo ${t.listener_age} s fa</span>`
       : `<span class="badge b-err">Ascolto segnali fermo</span> <span class="sub">ultimo controllo ${Math.round(t.listener_age / 60)} min fa</span>`;
-    el.innerHTML = [b, c, l].join(" &nbsp; ");
   } catch (e) { el.textContent = e.message; }
 }
-$("tgtest").onclick = async () => {
-  $("tgtest").disabled = true;
-  try { await api("/api/telegram/test", "POST", {}); toast("Messaggio di prova inviato: controlla Telegram", 6000); }
-  catch (e) { toast("Invio non riuscito: " + e.message, 8000); }
-  $("tgtest").disabled = false; tgCheck();
-};
 $("lsbtn").onclick = async () => {
   const stop = $("lsbtn").textContent.startsWith("Ferma"); $("lsbtn").disabled = true;
   try { await api("/api/listener", "POST", {action: stop ? "stop" : "start"}); toast(stop ? "Ascolto segnali fermato" : "Ascolto segnali avviato: tra qualche secondo lo stato diventa «attivo»", 6000); }
   catch (e) { toast(e.message, 8000); }
   setTimeout(() => { $("lsbtn").disabled = false; tgCheck(); }, stop ? 500 : 6000);
-};
-$("tgon").onchange = async () => {
-  const on = $("tgon").checked; $("tgon").disabled = true;
-  try { await api("/api/telegram/enabled", "POST", {enabled: on}); toast(on ? "Telegram attivato" : "Telegram disattivato: nessun segnale letto, nessun messaggio inviato", 6000); }
-  catch (e) { $("tgon").checked = !on; toast(e.message); }
-  $("tgon").disabled = false; tgCheck();
 };
 tgCheck(); setInterval(() => { if (!document.hidden) tgCheck(); }, 20000);
 $("imp").onclick = async () => {
