@@ -319,6 +319,13 @@ def main():
         print("Accesso da cellulare ATTIVO (serve il PIN). Dalla stessa rete Wi-Fi apri uno di questi indirizzi:")
         for ip in sorted(i for i in ips if not i.startswith("127.")):
             print(f"   http://{ip}:{port}")
+    if os.environ.get("AVVIO_ASCOLTO", "1").strip().lower() not in ("0", "no", "off", "false"):    # insieme al server parte anche l'ascolto dei segnali (AVVIO_ASCOLTO=0 in config.env lo disattiva)
+        try:
+            print(f"Ascolto segnali avviato (pid {listener_start()}). Registro: {ma.DATA_DIR / 'mt5_orders.log'}", flush=True)
+        except ValueError as e:
+            print(str(e), flush=True)
+        except Exception as e:
+            print("Ascolto segnali non avviato:", str(e)[:200], flush=True)
     if not a.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
