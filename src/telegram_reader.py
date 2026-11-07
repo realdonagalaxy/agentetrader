@@ -83,14 +83,22 @@ def _client():
     return TelegramClient(SESSION, int(api_id), api_hash)
 
 
+def _norm(t: str) -> str:
+    """Confronto tollerante: maiuscole, accenti (È/É/E), lettere speciali dei font e spazi multipli non contano."""
+    import unicodedata
+    t = unicodedata.normalize("NFKD", unicodedata.normalize("NFKC", t))
+    return " ".join("".join(c for c in t if not unicodedata.combining(c)).lower().replace("-", " ").split())
+
+
 async def _find(client, name: str):
     """Canale per id numerico, @username o titolo (maiuscole ignorate, basta una parte del titolo se è unica)."""
     if name.lstrip("-").isdigit():
         return await client.get_entity(int(name))
     if name.startswith("@"):
         return await client.get_entity(name)
-    matches = [d for d in await client.get_dialogs() if name.lower() in (d.name or "").lower()]
-    exact = [d for d in matches if (d.name or "").lower() == name.lower()]
+    norm = _norm(name)
+    matches = [d for d in await client.get_dialogs() if norm in _norm(d.name or "")]
+    exact = [d for d in matches if _norm(d.name or "") == norm]
     matches = exact or matches
     if len(matches) != 1:
         sys.exit(f"Canale «{name}»: {'nessuno trovato' if not matches else 'più di uno: ' + ', '.join(d.name for d in matches)}. Usa --elenca e passa l'id.")
