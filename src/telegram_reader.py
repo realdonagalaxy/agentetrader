@@ -87,7 +87,8 @@ def _norm(t: str) -> str:
     """Confronto tollerante: maiuscole, accenti (È/É/E), lettere speciali dei font e spazi multipli non contano."""
     import unicodedata
     t = unicodedata.normalize("NFKD", unicodedata.normalize("NFKC", t))
-    return " ".join("".join(c for c in t if not unicodedata.combining(c)).lower().replace("-", " ").split())
+    t = "".join(" " if unicodedata.category(c) in ("Pd", "Pc") else c for c in t if not unicodedata.combining(c))
+    return " ".join(t.lower().split())
 
 
 async def _find(client, name: str):
