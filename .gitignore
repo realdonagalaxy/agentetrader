@@ -20,3 +20,6 @@ journal/grafici/
 journal/segnali.csv
 journal/segnali_esiti.csv
 journal/segnali_chiusure.csv
+journal/telegram.session*
+journal/canale_messaggi.csv
+journal/canale_segnali.csv
