@@ -650,12 +650,32 @@ def follow_closures(pending: dict, bot, legacy) -> None:
         check_closed(legacy, pending, bot, only=lambda t: not t.get("account"))
 
 
-def main(dry: bool, channel: str = "") -> None:
+class NullBot:
+    """Al posto del bot Telegram quando si lavora senza notifiche (--senza-bot / SENZA_BOT=1): non invia nulla e non riceve nulla; i segnali arrivano solo dal canale letto con il tuo account."""
+    chat_id = "canale"
+
+    def _call(self, method: str, **kw):
+        return [] if method == "getUpdates" else {}
+
+    def send(self, *a, **k) -> None:
+        pass
+
+    def send_photo(self, *a, **k) -> None:
+        pass
+
+
+def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
     from dotenv import load_dotenv
     load_dotenv("config.env")
     from src import mt5_accounts as ma
-    from src.telegram_bot import TelegramBot
-    bot = TelegramBot()
+    no_bot = no_bot or os.environ.get("SENZA_BOT", "").strip().lower() in ("1", "si", "true", "on")
+    if no_bot:
+        bot = NullBot()
+        if not (channel or os.environ.get("TELEGRAM_CANALE", "").strip()):
+            sys.exit("Senza bot i segnali possono arrivare solo dal canale: imposta TELEGRAM_CANALE in config.env (o --canale).")
+    else:
+        from src.telegram_bot import TelegramBot
+        bot = TelegramBot()
     legacy = None
     allowed = str(bot.chat_id)
     try:
@@ -682,7 +702,7 @@ def main(dry: bool, channel: str = "") -> None:
             HEARTBEAT.write_text(str(time.time()))
         except OSError:
             pass
-        if not telegram_on():                                       # interruttore spento: né lettura né invio; le chiusure restano in attesa
+        if not no_bot and not telegram_on():                        # interruttore spento: né lettura né invio; le chiusure restano in attesa
             was_off = True
             time.sleep(2)
             continue
@@ -703,6 +723,8 @@ def main(dry: bool, channel: str = "") -> None:
             print("Controllo chiusure:", e, flush=True)
         try:
             ups = bot._call("getUpdates", offset=offset, timeout=2 if canale else 8)
+            if no_bot:
+                time.sleep(1)                                         # niente attesa lunga di Telegram: il ritmo lo dà questa pausa
         except Exception as e:
             print("Telegram:", type(e).__name__, str(e)[:200], flush=True)
             time.sleep(5)
@@ -771,9 +793,10 @@ def main(dry: bool, channel: str = "") -> None:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true", help="valida ma non invia ordini")
+    ap.add_argument("--senza-bot", action="store_true", help="niente notifiche sul bot Telegram: legge il canale (TELEGRAM_CANALE) e apre i segnali; tutto si vede in Gestione Conti. Equivale a SENZA_BOT=1 in config.env")
     ap.add_argument("--canale", default="", help="titolo/id del canale Telegram da leggere con il tuo account (vedi src/telegram_reader.py); in alternativa TELEGRAM_CANALE in config.env")
     ap.add_argument("--calibra", action="store_true", help="riepilogo degli scarti tra il prezzo del canale e quello del tuo broker")
     ap.add_argument("--check", action="store_true", help="diagnosi dei conti e del collegamento a MT5")
     ap.add_argument("--suggest", action="store_true", help="stampa un messaggio di prova coerente con il prezzo attuale")
     a = ap.parse_args()
-    calibra() if a.calibra else check() if a.check else suggest() if a.suggest else main(a.dry, a.canale)
+    calibra() if a.calibra else check() if a.check else suggest() if a.suggest else main(a.dry, a.canale, a.senza_bot)
