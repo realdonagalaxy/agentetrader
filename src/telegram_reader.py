@@ -97,10 +97,18 @@ async def _find(client, name: str):
     return matches[0].entity
 
 
-def start_channel_feed(name: str, q) -> None:
+def start_channel_feed(name: str, q, notify=None) -> None:
     """Per il listener degli ordini: ascolta il canale in un thread e mette in coda (testo, id, timestamp) di ogni nuovo messaggio. Richiede la sessione già creata con --elenca. Sola lettura."""
     import asyncio
     import threading
+
+    def tell(msg: str) -> None:
+        print(msg, flush=True)
+        if notify:
+            try:
+                notify(msg)
+            except Exception:
+                pass
 
     def work():
         from telethon import events
@@ -111,7 +119,7 @@ def start_channel_feed(name: str, q) -> None:
         async def run():
             await client.connect()
             if not await client.is_user_authorized():
-                print("Canale Telegram: sessione non autorizzata. Esegui prima: python -m src.telegram_reader --elenca", flush=True)
+                tell("Canale Telegram: sessione non autorizzata. Esegui prima: python -m src.telegram_reader --elenca")
                 return
             ent = await _find(client, name)
 
@@ -121,13 +129,13 @@ def start_channel_feed(name: str, q) -> None:
                 process(text, ev.message.date, ev.message.id, seen)
                 q.put((text, ev.message.id, ev.message.date.timestamp()))
 
-            print(f"Canale «{getattr(ent, 'title', name)}» collegato (sola lettura).", flush=True)
+            tell(f"Canale «{getattr(ent, 'title', name)}» collegato (sola lettura).")
             await client.run_until_disconnected()
 
         try:
             asyncio.get_event_loop().run_until_complete(run())
         except BaseException as e:                                            # SystemExit di _find incluso: il listener continua con il solo canale del bot
-            print("Canale Telegram non collegato:", type(e).__name__, str(e)[:200], flush=True)
+            tell(f"Canale Telegram non collegato: {type(e).__name__} {str(e)[:200]}")
 
     threading.Thread(target=work, daemon=True, name="canale-telegram").start()
 

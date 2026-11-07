@@ -437,7 +437,7 @@ def load_pending() -> dict:
 SENT: "deque[str]" = deque(maxlen=100)                         # testi inviati da questo programma: nel canale il bot rivede i propri post e non deve leggerli come segnali
 
 
-OWN_PREFIXES = ("🟢 Pronto", "📥", "ℹ️", "⚠️", "⛔", "✅ Aperto", "✅ TP1 ", "❌ SL HIT", "⏳", "📌", "🚫", "⌛", "🟰 BE", "✅ TP2 ", "✅ Gestione Conti", "[")    # inizio dei messaggi scritti dal programma
+OWN_PREFIXES = ("🟢 Pronto", "📡", "📥", "ℹ️", "⚠️", "⛔", "✅ Aperto", "✅ TP1 ", "❌ SL HIT", "⏳", "📌", "🚫", "⌛", "🟰 BE", "✅ TP2 ", "✅ Gestione Conti", "[")    # inizio dei messaggi scritti dal programma
 
 
 def telegram_on() -> bool:
@@ -669,7 +669,7 @@ def main(dry: bool, channel: str = "") -> None:
     canale = (channel or os.environ.get("TELEGRAM_CANALE", "")).strip()
     if canale:                                                    # i segnali arrivano anche direttamente dal canale (account dell'utente, sola lettura)
         from src.telegram_reader import start_channel_feed
-        start_channel_feed(canale, feed)
+        start_channel_feed(canale, feed, notify=lambda t: say(bot, "📡 " + t))
     pending = load_pending()
     accs = active_accounts()
     where = f"{len(accs)} conti dall'app" if accs else f"terminale singolo, lotto {LOTS}"
