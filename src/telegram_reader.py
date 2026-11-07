@@ -94,7 +94,10 @@ def _norm(t: str) -> str:
 async def _find(client, name: str):
     """Canale per id numerico, @username o titolo (maiuscole ignorate, basta una parte del titolo se è unica)."""
     if name.lstrip("-").isdigit():
-        return await client.get_entity(int(name))
+        try:
+            return await client.get_entity(int(name))
+        except ValueError:
+            sys.exit(f"Nessuna chat con id {name} nel tuo account. Esegui --elenca e copia l'id reale (il numero nell'esempio della guida è inventato).")
     if name.startswith("@"):
         return await client.get_entity(name)
     norm = _norm(name)
