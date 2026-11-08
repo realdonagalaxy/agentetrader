@@ -97,6 +97,8 @@ def parse_signal(text: str) -> dict:
             out.update(side="buy", symbol="XAUUSD", inferred=True)
         else:
             raise ValueError("manca la riga BUY/SELL e i livelli non permettono di dedurre la direzione (SL, Entry e TP1 non sono in ordine)")
+    if "tp3" in out and not ((out["tp3"] > out.get("tp2", out["tp1"])) if out["side"] == "buy" else (out["tp3"] < out.get("tp2", out["tp1"]))):
+        raise ValueError(f"TP3 non coerente con la direzione {out['side'].upper()} (TP3 {out['tp3']})")
     if "tp2" in out and not ((out["tp2"] > out["tp1"]) if out["side"] == "buy" else (out["tp2"] < out["tp1"])):
         raise ValueError(f"TP2 non coerente con la direzione {out['side'].upper()} (TP1 {out['tp1']}, TP2 {out['tp2']})")
     return out
@@ -136,7 +138,29 @@ def filling(mt5, info) -> int:
     return mt5.ORDER_FILLING_IOC if m & 2 else mt5.ORDER_FILLING_FOK if m & 1 else mt5.ORDER_FILLING_RETURN
 
 
-def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "") -> tuple[str, list]:
+def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "", target: int = 1) -> tuple[str, list]:
+    """Apre il segnale con il TP scelto per il conto (target 1, 2 o 3): se il segnale non contiene quel TP non apre. Con target > 1 niente parzializzazione.
+    Internamente il TP scelto passa come «tp1» e nei messaggi la dicitura TP1 diventa TP{target}."""
+    if target not in (1, 2, 3):
+        target = 1
+    if target == 1:
+        return _execute(mt5, sig, dry, lots, tag)
+    chosen = sig.get(f"tp{target}")
+    if chosen is None:
+        raise ValueError(f"il segnale non contiene TP{target}: su questo conto non apro (obiettivo scelto TP{target})")
+    buy = sig["side"] == "buy"
+    if not ((chosen > sig["tp1"]) if buy else (chosen < sig["tp1"])):
+        raise ValueError(f"TP{target} {chosen} non coerente con TP1 {sig['tp1']} per un {sig['side'].upper()}: non apro")
+    try:
+        text, trks = _execute(mt5, {**sig, "tp1": chosen, "tp2": None}, dry, lots, tag)
+    except ValueError as e:
+        raise ValueError(str(e).replace("TP1", f"TP{target}")) from None
+    for t in trks:
+        t["target"] = target
+    return text.replace("TP1", f"TP{target}"), trks
+
+
+def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "") -> tuple[str, list]:
     """Valida e (se non dry) invia l'ordine. Restituisce (testo di risposta, elenco delle posizioni da seguire: una, oppure due se il segnale ha il TP2); solleva ValueError se rifiutato."""
     ti = mt5.terminal_info()
     if ti is not None and getattr(ti, "trade_allowed", True) is False:
@@ -398,7 +422,7 @@ def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
         sgn = n if (d.price - t["open"]) * sign >= 0 else -n               # pips con segno (guadagno o perdita reali)
         part, sib = t.get("part"), [(k2, t2) for k2, t2 in pending.items() if t2.get("group") and t2.get("group") == t.get("group") and k2 != key]
         if d.reason == mt5.DEAL_REASON_TP:
-            lab = f"{'TP2' if part == 'tp2' else 'TP1'} {sgn:+.0f} pips · prezzo {price}"
+            lab = f"{'TP2' if part == 'tp2' else 'TP' + str(t.get('target', 1))} {sgn:+.0f} pips · prezzo {price}"
             announce(bot, mt5, t, deals, d, f"✅ {lab}", lab)
             if part == "tp1":                                           # parte a TP1 incassata: lo stop del resto va a pareggio
                 for k2, t2 in sib:
@@ -766,7 +790,7 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
                     try:
                         if acc:
                             with ma.session(acc) as mt:
-                                res, trks = execute(mt, sig, dry, acc["lots"], acc["login"] and str(acc["login"]))
+                                res, trks = execute(mt, sig, dry, acc["lots"], acc["login"] and str(acc["login"]), acc.get("tp_target") or 1)
                         else:
                             if legacy is None:
                                 from src.mt5_feed import connect

@@ -61,6 +61,10 @@ def db() -> sqlite3.Connection:
         con.execute("ALTER TABLE accounts ADD COLUMN broker TEXT DEFAULT ''")    # nome del broker / prop firm come lo comunica MT5 (account_info.company)
     except sqlite3.OperationalError:
         pass
+    try:
+        con.execute("ALTER TABLE accounts ADD COLUMN tp_target INTEGER DEFAULT 1")   # quale TP del segnale usa il conto: 1, 2 o 3
+    except sqlite3.OperationalError:
+        pass
     return con
 
 
@@ -147,7 +151,8 @@ def clean(d: dict) -> dict:
     if not 0.01 <= lots <= MAX_LOTS:
         raise ValueError(f"i lotti devono stare tra 0,01 e {MAX_LOTS:g}")
     return {"name": name[:60], "login": login, "server": server[:80], "terminal_path": norm_terminal(str(d.get("terminal_path") or "")),
-            "lots": round(lots, 2), "enabled": 1 if d.get("enabled", True) else 0, "use_signals": 1 if d.get("use_signals", True) else 0, "note": str(d.get("note") or "")[:300]}
+            "lots": round(lots, 2), "enabled": 1 if d.get("enabled", True) else 0, "use_signals": 1 if d.get("use_signals", True) else 0, "note": str(d.get("note") or "")[:300],
+            "tp_target": int(d.get("tp_target") or 1) if str(d.get("tp_target") or 1) in ("1", "2", "3") else 1}
 
 
 def out(r: sqlite3.Row) -> dict:
@@ -204,14 +209,14 @@ def save_account(d: dict, aid: int | None = None) -> int:
         set_password(c["login"], c["server"], pw)
     con = db()
     if old is None:
-        cur = con.execute("INSERT INTO accounts (name,login,server,terminal_path,lots,enabled,use_signals,note,created_at) VALUES (?,?,?,?,?,?,?,?,datetime('now'))",
-                          (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["note"]))
+        cur = con.execute("INSERT INTO accounts (name,login,server,terminal_path,lots,enabled,use_signals,note,tp_target,created_at) VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))",
+                          (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["note"], c["tp_target"]))
         aid = cur.lastrowid
     else:
         if (old["login"], old["server"]) != (c["login"], c["server"]):
             del_password(old["login"], old["server"])                  # la vecchia password non vale più
-        con.execute("UPDATE accounts SET name=?,login=?,server=?,terminal_path=?,lots=?,enabled=?,use_signals=?,note=? WHERE id=?",
-                    (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["note"], aid))
+        con.execute("UPDATE accounts SET name=?,login=?,server=?,terminal_path=?,lots=?,enabled=?,use_signals=?,note=?,tp_target=? WHERE id=?",
+                    (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["note"], c["tp_target"], aid))
     if first:                                                          # tipo e società li conosciamo già dal primo collegamento
         con.execute("UPDATE accounts SET kind=?, broker=COALESCE(NULLIF(?, ''), broker) WHERE id=?",
                     ("demo" if first.get("demo") else "real", first.get("company", ""), aid))
@@ -467,7 +472,23 @@ def import_connected(terminal_path: str = "") -> dict:
 
 if __name__ == "__main__":
     import sys
-    if "--delete-all" in sys.argv:
+    if "--tp" in sys.argv:                                              # imposta il TP usato da ogni conto: --tp 6285383=1 6285381=2 6285380=3
+        pairs = [x for x in sys.argv[sys.argv.index("--tp") + 1:] if "=" in x]
+        if not pairs:
+            sys.exit("Uso: python -m src.mt5_accounts --tp LOGIN=1|2|3 [LOGIN=1|2|3 ...]")
+        by_login = {str(a["login"]): a for a in list_accounts()}
+        for pr in pairs:
+            lg, tp = pr.split("=", 1)
+            if lg not in by_login or tp not in ("1", "2", "3"):
+                sys.exit(f"Non valido: {pr} (conti presenti: {', '.join(by_login) or 'nessuno'}; TP deve essere 1, 2 o 3)")
+        con = db()
+        for pr in pairs:
+            lg, tp = pr.split("=", 1)
+            con.execute("UPDATE accounts SET tp_target=? WHERE id=?", (int(tp), by_login[lg]["id"]))
+            print(f"Conto {lg}: TP{tp}")
+        con.commit()
+        con.close()
+    elif "--delete-all" in sys.argv:
         accs = list_accounts()
         if not accs:
             sys.exit("Nessun conto da cancellare.")
