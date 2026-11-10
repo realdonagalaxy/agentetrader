@@ -72,7 +72,7 @@ def process(text: str, when, msg_id, seen: set | None = None) -> str:
         return "msg"
     t = when.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if when.tzinfo else when.strftime("%Y-%m-%d %H:%M:%S")
     _append(MSG_CSV, MSG_COLS, {"time_utc": t, "msg_id": msg_id, "testo": text})
-    if not looks_like_signal(text):
+    if not is_signal_text(text):                                          # annunci come «SEGNALE DI SELL IN ARRIVO» restano semplici messaggi
         return "msg"
     row = {"time_utc": t, "msg_id": msg_id, "testo": text}
     try:
@@ -84,6 +84,31 @@ def process(text: str, when, msg_id, seen: set | None = None) -> str:
         out = "illeggibile"
     _append(SIG_CSV, SIG_COLS, row)
     return out
+
+
+def is_signal_text(text: str) -> bool:
+    """Un vero segnale ha i livelli (Entry compreso): l'annuncio «SEGNALE DI SELL IN ARRIVO» contiene SELL ma non va aperto."""
+    import re
+    t = clean_text(text or "")
+    return looks_like_signal(t) and bool(re.search(r"Entry\s*[:=]?\s*\d", t, re.I))
+
+
+def handle_message(msg, edited: bool, seen: set, acted: set, q=None, max_age: float = 120.0) -> str:
+    """Un messaggio nuovo o MODIFICATO del canale. Cedric pubblica il segnale come foto e ne scrive il testo pochi secondi dopo modificando il messaggio:
+    alla creazione il testo è vuoto, quindi si agisce anche sulle modifiche. Ogni messaggio-segnale viene aperto una sola volta (acted)."""
+    import time
+    text = msg.message or ""
+    if is_signal_text(text):
+        if msg.id in acted:
+            return "gia_visto"
+        acted.add(msg.id)
+        process(text, msg.date, msg.id, None)                           # registro: anche se il messaggio era già stato visto senza testo
+        if q is not None and time.time() - msg.date.timestamp() <= max_age:
+            q.put((text, msg.id, msg.date.timestamp()))
+        return "segnale"
+    if not edited:
+        return process(text, msg.date, msg.id, seen)
+    return "msg"
 
 
 def _client():
@@ -146,6 +171,7 @@ def start_channel_feed(name: str, q, notify=None) -> None:
         asyncio.set_event_loop(asyncio.new_event_loop())
         client = _client()
         seen = seen_ids()
+        acted: set = set()
         state = {"told": False}
 
         async def run():
@@ -158,12 +184,18 @@ def start_channel_feed(name: str, q, notify=None) -> None:
             title = getattr(ent, "title", None) or name
             write_status(state="collegato", title=title, detail="")
 
+            from src.mt5_orders import MAX_AGE_S
+
             @client.on(events.NewMessage(chats=ent))
             async def handler(ev):
-                text = ev.message.message or ""
-                process(text, ev.message.date, ev.message.id, seen)
-                q.put((text, ev.message.id, ev.message.date.timestamp()))
-                write_status(last_msg=ev.message.date.timestamp(), last_signal=bool(looks_like_signal(clean_text(text))) or None)
+                r = handle_message(ev.message, False, seen, acted, q, MAX_AGE_S)
+                write_status(last_msg=ev.message.date.timestamp(), last_signal=(r == "segnale") or None)
+
+            @client.on(events.MessageEdited(chats=ent))
+            async def handler_edit(ev):
+                r = handle_message(ev.message, True, seen, acted, q, MAX_AGE_S)
+                if r == "segnale":
+                    write_status(last_msg=ev.message.date.timestamp(), last_signal=True)
 
             async def pulse():                                                # ogni 15 s: connessione viva? (serve a Gestione Conti per mostrare lo stato vero)
                 while True:
@@ -250,9 +282,12 @@ def main() -> None:
             print(f"{title}: letti {a.storico} messaggi -> {counts}. File: {MSG_CSV}, {SIG_CSV}")
             return
 
+        acted: set = set()
+
         @client.on(events.NewMessage(chats=ent))
+        @client.on(events.MessageEdited(chats=ent))
         async def handler(ev):
-            r = process(ev.message.message or "", ev.message.date, ev.message.id, seen)
+            r = handle_message(ev.message, False if isinstance(ev, events.NewMessage.Event) else True, seen, acted)
             if r in ("segnale", "illeggibile"):
                 print(f"[{ev.message.date:%H:%M:%S}] {r}: {(ev.message.message or '')[:80]!r}", flush=True)
 
