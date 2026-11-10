@@ -511,7 +511,7 @@ async function loadSignals() {
     if (c.stato === "aperto" || c.stato === "stop") {
       const ch = c.chiusura;
       const res = ch ? ` · ${ch === "tp" ? "TP" : ch === "sl" ? "SL" : "chiusa"} ${c.pips >= 0 ? "+" : ""}${Math.round(c.pips)}p` : c.non_verificata ? " · stato non verificabile (conto non collegato)" : " · in corso";
-      return `<span class="badge b-ok" title="Aperto a ${esc(c.prezzo || "")}">aperto${res}</span>`;
+      return `<span class="badge b-ok" title="Aperto a ${esc(c.prezzo || "")}${c.profitto != null ? " · profitto " + c.profitto + " $" : ""}">aperto${res}</span>`;
     }
     return `<span class="badge b-err" title="${esc(c.dettaglio || "")}">${c.stato === "rifiutato" ? "rifiutato" : "errore"}</span> <span class="sub">${esc((c.dettaglio || "").slice(0, 60))}</span>`;
   };

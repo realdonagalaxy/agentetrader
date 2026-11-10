@@ -197,7 +197,7 @@ def signals_day(date: str, tz_min: int) -> dict:
                     rr = real.get((lg, str(e.get("ticket") or "").split(",")[0].strip())) or {}
                     cl = chius.get(mid, {}).get(lg) or []
                     if rr.get("chiusura"):                                          # cronologia di MT5: la fonte più affidabile
-                        c["chiusura"], c["pips"] = rr["chiusura"], rr["pips"]
+                        c["chiusura"], c["pips"], c["profitto"] = rr["chiusura"], rr["pips"], rr.get("profitto")
                     elif cl:
                         c["chiusura"] = cl[-1]["esito"]
                         c["pips"] = sum(float(x["pips"] or 0) for x in cl)
