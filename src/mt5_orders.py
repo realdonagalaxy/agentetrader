@@ -714,6 +714,12 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
     if canale:                                                    # i segnali arrivano anche direttamente dal canale (account dell'utente, sola lettura)
         from src.telegram_reader import start_channel_feed
         start_channel_feed(canale, feed, notify=lambda t: say(bot, "📡 " + t))
+    try:                                                          # versione del codice in esecuzione: serve a capire se dopo un aggiornamento il programma è stato riavviato
+        import subprocess
+        ver = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=str(Path(__file__).resolve().parents[1]), timeout=5).stdout.strip()
+    except Exception:
+        ver = ""
+    print(f"Versione del programma: {ver or 'sconosciuta'}", flush=True)
     pending = load_pending()
     accs = active_accounts()
     where = f"{len(accs)} conti dall'app" if accs else f"terminale singolo, lotto {LOTS}"
