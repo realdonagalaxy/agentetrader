@@ -98,6 +98,7 @@ def handle_message(msg, edited: bool, seen: set, acted: set, q=None, max_age: fl
     alla creazione il testo è vuoto, quindi si agisce anche sulle modifiche. Ogni messaggio-segnale viene aperto una sola volta (acted)."""
     import time
     text = msg.message or ""
+    print(f"[canale] {'modifica' if edited else 'nuovo'} id={msg.id} {msg.date.astimezone():%H:%M:%S} testo={text[:70]!r}", flush=True)     # traccia di ogni evento ricevuto: nel registro si vede se il messaggio è arrivato
     if is_signal_text(text):
         if msg.id in acted:
             return "gia_visto"
