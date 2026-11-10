@@ -749,10 +749,12 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
             ups = bot._call("getUpdates", offset=offset, timeout=2 if canale else 8)
             if no_bot:
                 time.sleep(1)                                         # niente attesa lunga di Telegram: il ritmo lo dà questa pausa
-        except Exception as e:
+        except Exception as e:                                        # un errore del bot Telegram non deve bloccare i segnali che arrivano dal canale
             print("Telegram:", type(e).__name__, str(e)[:200], flush=True)
-            time.sleep(5)
-            continue
+            ups = []
+            if feed.empty():
+                time.sleep(5)
+                continue
         while not feed.empty():                                      # messaggi del canale: stesso percorso dei messaggi al bot (cid = chat attesa)
             ftext, fid, fdate = feed.get()
             ups.append({"update_id": None, "message": {"text": ftext, "chat": {"id": allowed}, "date": fdate, "message_id": None, "chan_id": fid}})
