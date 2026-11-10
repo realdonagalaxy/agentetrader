@@ -55,6 +55,9 @@ class Server(ThreadingHTTPServer):
         super().server_bind()
 
 
+_LAST_REQ = 0.0
+
+
 def telegram_status() -> dict:
     """Stato dell'ascolto dei segnali: il battito del programma (listener_age = secondi dall'ultimo controllo, None se mai partito)."""
     import time
@@ -214,6 +217,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"accounts": ma.list_accounts(), "simulator": os.environ.get("MT5_SIMULATOR") == "1"})
             if path == "/api/telegram":
                 return self._json(telegram_status())
+            if path == "/api/last-signal":
+                try:
+                    return self._json(json.loads((ma.DATA_DIR / "ultimo_segnale_info.json").read_text(encoding="utf-8")))
+                except (OSError, ValueError):
+                    return self._json({})
             if path == "/api/day":
                 q = parse_qs(urlparse(self.path).query)
                 day = (q.get("date") or [""])[0]
@@ -251,6 +259,19 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/accounts" and method == "POST":
                 aid = ma.save_account(self._data())
                 return self._json({"id": aid, "terminal_path": ma.get_account(aid)["terminal_path"]}, 201)
+            if path == "/api/last-signal" and method == "POST":                    # «Apri l'ultimo segnale»: il programma dei segnali lo cerca nel canale e lo applica ai conti
+                global _LAST_REQ
+                if not listener_running():
+                    raise ValueError("L'ascolto dei segnali non è attivo: avvialo e riprova.")
+                if time.time() - _LAST_REQ < 20:
+                    raise ValueError("Richiesta già inviata pochi secondi fa: aspetta l'esito prima di ripetere.")
+                _LAST_REQ = time.time()
+                try:
+                    (ma.DATA_DIR / "ultimo_segnale_info.json").unlink()
+                except OSError:
+                    pass
+                (ma.DATA_DIR / "richiesta_ultimo.flag").write_text(str(time.time()), encoding="utf-8")
+                return self._json({"requested": True})
             if path == "/api/listener" and method == "POST":
                 act = self._data().get("action")
                 if act == "start":

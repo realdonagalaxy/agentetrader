@@ -146,7 +146,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
   <div class="panel"><h2>Ascolto segnali</h2>
     <div class="body stack" style="grid-template-columns:minmax(0,1fr) auto;align-items:center">
       <div id="tgst" class="sub" style="font-size:13px;color:var(--ink)">Controllo…</div>
-      <div class="actions" style="align-items:center"><button class="btn" id="lsbtn">Avvia ascolto segnali</button></div>
+      <div class="actions" style="align-items:center"><button class="btn sec" id="lastbtn" title="Se un segnale non è stato aperto da solo: lo cerca nel canale e lo applica ai conti demo">Apri l'ultimo segnale</button><button class="btn" id="lsbtn">Avvia ascolto segnali</button></div>
     </div>
   </div>
   <div class="panel">
@@ -349,6 +349,20 @@ async function tgCheck() {
       : `<span class="badge b-err">Ascolto segnali fermo</span> <span class="sub">ultimo controllo ${Math.round(t.listener_age / 60)} min fa</span>`);
   } catch (e) { el.textContent = e.message; }
 }
+$("lastbtn").onclick = async () => {
+  if (!confirm("Applico ora l'ULTIMO segnale del canale ai conti demo?\n\nSe è vecchio il prezzo può aver già superato i TP: i conti rifiutano da soli quando il TP è troppo vicino o già superato.")) return;
+  const b = $("lastbtn"); b.disabled = true;
+  try {
+    await api("/api/last-signal", "POST", {});
+    toast("Richiesta inviata: cerco l'ultimo segnale…", 4000);
+    let r = {};
+    for (let i = 0; i < 10 && !r.ts; i++) { await new Promise(x => setTimeout(x, 1500)); r = await api("/api/last-signal"); }
+    if (!r.ts) toast("Nessuna risposta dal programma dei segnali: controlla che sia attivo e collegato al canale.", 9000);
+    else if (!r.ok) toast(r.msg, 9000);
+    else toast(`Ultimo segnale (${r.age_min} min fa) passato ai conti. L'esito per conto è nella tabella e in journal/mt5_orders.log`, 10000);
+  } catch (e) { toast(e.message, 8000); }
+  setTimeout(() => { b.disabled = false; refresh(); }, 6000);
+};
 $("lsbtn").onclick = async () => {
   const stop = $("lsbtn").textContent.startsWith("Ferma"); $("lsbtn").disabled = true;
   try { await api("/api/listener", "POST", {action: stop ? "stop" : "start"}); toast(stop ? "Ascolto segnali fermato" : "Ascolto segnali avviato: tra qualche secondo lo stato diventa «attivo»", 6000); }

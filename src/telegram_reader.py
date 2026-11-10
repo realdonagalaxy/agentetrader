@@ -203,7 +203,36 @@ def start_channel_feed(name: str, q, notify=None) -> None:
                     write_status(state="collegato" if client.is_connected() else "riconnessione", title=title)
                     await asyncio.sleep(15)
 
+            async def watch_requests():                                       # il pulsante «Apri l'ultimo segnale» di Gestione Conti crea questo file: si cerca l'ultimo segnale e lo si passa ai conti
+                import json
+                import time as _t
+                flag, info = JOURNAL / "richiesta_ultimo.flag", JOURNAL / "ultimo_segnale_info.json"
+                while True:
+                    if flag.exists():
+                        try:
+                            flag.unlink()
+                        except OSError:
+                            pass
+                        found = None
+                        try:
+                            async for m in client.iter_messages(ent, limit=60):
+                                if is_signal_text(m.message or ""):
+                                    found = m
+                                    break
+                            if found is None:
+                                res = {"ok": False, "msg": "Nessun segnale con Entry, SL e TP tra gli ultimi 60 messaggi del canale."}
+                            else:
+                                q.put((found.message, found.id, found.date.timestamp(), True))
+                                age = (_t.time() - found.date.timestamp()) / 60
+                                res = {"ok": True, "age_min": round(age, 1), "text": clean_text(found.message), "id": found.id}
+                        except Exception as e:
+                            res = {"ok": False, "msg": f"Lettura del canale non riuscita: {type(e).__name__} {str(e)[:150]}"}
+                        res["ts"] = _t.time()
+                        info.write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
+                    await asyncio.sleep(2)
+
             pulse_task = asyncio.ensure_future(pulse())
+            watch_task = asyncio.ensure_future(watch_requests())
 
             if not state["told"]:                                             # il messaggio di collegamento una volta sola, anche dopo una riconnessione
                 tell(f"Canale «{getattr(ent, 'title', name)}» collegato (sola lettura).")
@@ -214,6 +243,7 @@ def start_channel_feed(name: str, q, notify=None) -> None:
                 await client.run_until_disconnected()
             finally:
                 pulse_task.cancel()
+                watch_task.cancel()
             return True
 
         wait = 10
