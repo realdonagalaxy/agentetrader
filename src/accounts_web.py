@@ -166,6 +166,15 @@ def signals_day(date: str, tz_min: int) -> dict:
             target, inferred = (prev[-1] if prev else ""), True
         if target in sigs:
             res_by_sig.setdefault(target, []).append({"tipo": r["tipo"], "pips": r.get("pips"), "t": t.isoformat(), "dedotto": inferred})
+    linked = {mid for mid in res_by_sig}
+    orfani = []                                                                 # esiti di Cedric del giorno il cui segnale non è nell'elenco: si mostrano comunque
+    for r in _read_csv("canale_esiti.csv"):
+        try:
+            t = datetime.strptime(r["time_utc"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        except (KeyError, ValueError):
+            continue
+        if d0 <= t < d1 and (r.get("reply_to") or "") not in sigs and not (not r.get("reply_to") and any(ts <= t and mid in sigs for ts, mid in all_sigs)):
+            orfani.append({"tipo": r["tipo"], "pips": r.get("pips"), "t": t.isoformat(), "reply_to": r.get("reply_to") or ""})
     needed = {}                                                                 # posizioni aperte dall'app per i segnali del giorno: se ne legge lo stato vero da MT5
     for mid in sigs:
         for lg, e in esiti.get(mid, {}).items():
@@ -199,7 +208,7 @@ def signals_day(date: str, tz_min: int) -> dict:
         rows.append({"id": mid, "t": g["t"], "side": g.get("side") or "", "symbol": g.get("symbol") or "", "entry": g.get("entry"), "sl": g.get("sl"),
                      "tp1": g.get("tp1"), "tp2": g.get("tp2"), "tp3": g.get("tp3"), "errore": g.get("errore") or "", "conti": per, "aperti": n_open,
                      "cedric": sorted(res_by_sig.get(mid, []), key=lambda x: x["t"])})
-    return {"date": date, "conti": [{"login": lg, "target": a.get("tp_target") or 1} for lg, a in accs.items()], "segnali": rows}
+    return {"date": date, "conti": [{"login": lg, "target": a.get("tp_target") or 1} for lg, a in accs.items()], "segnali": rows, "esiti_orfani": orfani}
 
 
 def telegram_status() -> dict:

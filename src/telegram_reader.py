@@ -12,6 +12,7 @@ Uso: python -m src.telegram_reader --elenca                      (elenca chat e 
 """
 import argparse
 import csv
+import re
 import os
 import sys
 from datetime import datetime, timezone
@@ -166,6 +167,31 @@ def handle_message(msg, edited: bool, seen: set, acted: set, q=None, max_age: fl
     return "msg"
 
 
+async def download_day(client, ent, start, end) -> dict:
+    """Registra segnali ed esiti di Cedric (TP/SL) dei messaggi del canale tra start e end (UTC) più le 24 ore successive per gli esiti; non esegue nulla."""
+    new = seen_n = new_res = n_sig = 0
+    first_t = last_t = None
+    miss = []                                                  # messaggi che sembrano segnali ma non vengono riconosciuti: servono a capire cosa manca
+    from datetime import timedelta
+    async for m in client.iter_messages(ent, offset_date=end + timedelta(days=1), limit=3000):      # gli esiti (TP/SL) di un segnale possono arrivare il giorno dopo
+        if m.date < start:
+            break
+        if m.date < end:
+            seen_n += 1
+            first_t, last_t = (m.date if first_t is None else first_t), m.date
+            if is_signal_text(m.message or ""):
+                n_sig += 1
+            elif len(miss) < 5 and parse_result(m.message or "") is None and re.search(r"\b(BUY|SELL|SL|TP\s*1|Entry)\b", m.message or "", re.I) and not re.search(r"IN\s+ARRIVO", m.message or "", re.I):
+                miss.append({"t": m.date.astimezone(timezone.utc).strftime("%H:%M"), "testo": clean_text(m.message or "")[:140]})
+            if record_signal(m.message or "", m.date, m.id):
+                new += 1
+        if record_result(m):
+            new_res += 1
+    return {"ok": True, "messaggi": seen_n, "segnali": n_sig, "nuovi": new, "esiti": new_res, "non_riconosciuti": miss,
+           "dal": last_t.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M") if last_t else "", "al": first_t.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M") if first_t else ""}
+
+
+
 def _client():
     from dotenv import load_dotenv
     load_dotenv("config.env")
@@ -295,18 +321,7 @@ def start_channel_feed(name: str, q, notify=None) -> None:
                             r = json.loads(req.read_text(encoding="utf-8"))
                             req.unlink()
                             start, end = datetime.fromtimestamp(r["start"], tz=timezone.utc), datetime.fromtimestamp(r["end"], tz=timezone.utc)
-                            new = seen_n = new_res = 0
-                            from datetime import timedelta
-                            async for m in client.iter_messages(ent, offset_date=end + timedelta(days=1), limit=3000):      # gli esiti (TP/SL) di un segnale possono arrivare il giorno dopo
-                                if m.date < start:
-                                    break
-                                if m.date < end:
-                                    seen_n += 1
-                                    if record_signal(m.message or "", m.date, m.id):
-                                        new += 1
-                                if record_result(m):
-                                    new_res += 1
-                            res = {"ok": True, "messaggi": seen_n, "nuovi": new, "esiti": new_res}
+                            res = await download_day(client, ent, start, end)
                         except Exception as e:
                             res = {"ok": False, "msg": f"Scarico non riuscito: {type(e).__name__} {str(e)[:150]}"}
                         res["ts"] = _t.time()
