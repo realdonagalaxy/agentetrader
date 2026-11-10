@@ -238,6 +238,7 @@ def main() -> None:
     ap.add_argument("--elenca", action="store_true", help="elenca chat e canali con id")
     ap.add_argument("--canale", help="titolo, @username o id del canale")
     ap.add_argument("--ultimo", action="store_true", help="mostra l'ultimo messaggio del canale e lo manda al tuo bot Telegram (chat TELEGRAM_CHAT_ID)")
+    ap.add_argument("--apri-ultimo-segnale", action="store_true", help="trova l'ultimo segnale del canale (Entry, SL, TP) e lo passa al listener in esecuzione, che lo applica ai conti demo (controlli di prezzo e spread compresi, senza il limite dei 2 minuti)")
     ap.add_argument("--storico", type=int, default=0, help="scarica gli ultimi N messaggi invece di ascoltare")
     a = ap.parse_args()
     if not a.elenca and not a.canale:
@@ -257,6 +258,23 @@ def main() -> None:
         ent = await _find(client, a.canale)
         title = getattr(ent, "title", None) or a.canale
         seen = seen_ids()
+        if a.apri_ultimo_segnale:
+            import json
+            import time
+            found = None
+            async for m in client.iter_messages(ent, limit=60):
+                if is_signal_text(m.message or ""):
+                    found = m
+                    break
+            if found is None:
+                print("Nessun segnale con Entry, SL e TP tra gli ultimi 60 messaggi del canale.")
+                return
+            age = (time.time() - found.date.timestamp()) / 60
+            print(f"Ultimo segnale ({found.date.astimezone():%d/%m/%Y %H:%M}, {age:.0f} minuti fa):\n\n{clean_text(found.message)}\n")
+            JOURNAL.mkdir(exist_ok=True)
+            (JOURNAL / "segnale_manuale.json").write_text(json.dumps({"text": found.message, "id": found.id, "date": found.date.timestamp()}), encoding="utf-8")
+            print("Passato al listener: se è in esecuzione lo applica entro pochi secondi (controlla Gestione Conti e journal\\mt5_orders.log). Se non lo è, avvialo: il segnale resta in attesa.")
+            return
         if a.ultimo:
             msgs = [m async for m in client.iter_messages(ent, limit=1)]
             if not msgs:

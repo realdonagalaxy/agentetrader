@@ -56,6 +56,7 @@ SEGNALI = Path(os.environ.get("JOURNAL_DIR", "journal")) / "segnali.csv"        
 ESITI = Path(os.environ.get("JOURNAL_DIR", "journal")) / "segnali_esiti.csv"         # un record per segnale e per conto: aperto / rifiutato e perché, con prezzi e scarto del momento
 CHIUSURE = Path(os.environ.get("JOURNAL_DIR", "journal")) / "segnali_chiusure.csv"   # un record per ogni posizione chiusa: motivo, prezzo, pips
 INFO: dict = {}                                                                       # dettagli dell'ultima valutazione fatta da execute() (per il registro degli esiti)
+JOURNAL_DIR = Path(os.environ.get("JOURNAL_DIR", "journal"))
 HEARTBEAT = Path(os.environ.get("JOURNAL_DIR", "journal")) / "mt5_orders.heartbeat"       # battito: Gestione Conti lo legge per mostrare se l'ascolto è attivo
 NUM = r"([0-9]+(?:[.,][0-9]+)?)"
 
@@ -761,9 +762,18 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
             if feed.empty():
                 time.sleep(5)
                 continue
+        manual = JOURNAL_DIR / "segnale_manuale.json"                 # segnale passato a mano con: python -m src.telegram_reader --canale ... --apri-ultimo-segnale
+        if manual.exists():
+            try:
+                md = json.loads(manual.read_text(encoding="utf-8"))
+                manual.unlink()
+                feed.put((md["text"], md["id"], md["date"], True))
+            except (OSError, ValueError, KeyError) as e:
+                print("segnale_manuale.json non leggibile:", e, flush=True)
         while not feed.empty():                                      # messaggi del canale: stesso percorso dei messaggi al bot (cid = chat attesa)
-            ftext, fid, fdate = feed.get()
-            ups.append({"update_id": None, "message": {"text": ftext, "chat": {"id": allowed}, "date": fdate, "message_id": None, "chan_id": fid}})
+            fitem = feed.get()
+            ftext, fid, fdate = fitem[:3]
+            ups.append({"update_id": None, "message": {"text": ftext, "chat": {"id": allowed}, "date": fdate, "message_id": None, "chan_id": fid, "force": len(fitem) > 3}})
         for u in ups:
             if u["update_id"] is not None:
                 offset = u["update_id"] + 1
@@ -774,9 +784,9 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
                 continue
             if cid != allowed or not looks_like_signal(text):
                 print(f"Ignorato: chat {cid} (attesa {allowed}), contiene BUY/SELL: {bool(re.search(r'BUY|SELL', text, re.I))}, tipo: {[k for k in u if k != 'update_id']}, "
-                      f"campi: {[k for k in m if k not in ('chat', 'date', 'message_id', 'chan_id', 'sender_chat')]}, testo: {text[:80]!r}", flush=True)
+                      f"campi: {[k for k in m if k not in ('chat', 'date', 'message_id', 'chan_id', 'force', 'sender_chat')]}, testo: {text[:80]!r}", flush=True)
                 continue
-            if time.time() - m.get("date", 0) > MAX_AGE_S:
+            if not m.get("force") and time.time() - m.get("date", 0) > MAX_AGE_S:
                 say(bot, "⚠️ Messaggio troppo vecchio (> 2 minuti): ignorato.")
                 continue
             if m.get("chan_id"):                                       # dal canale: te lo inoltro subito sul tuo Telegram, poi lo applico
