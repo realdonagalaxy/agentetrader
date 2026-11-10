@@ -69,7 +69,9 @@ def clean_text(text: str) -> str:
 
 
 def looks_like_signal(text: str) -> bool:
-    """Messaggio che sembra un segnale: ha BUY/SELL, oppure i tre livelli Entry, SL e TP1 con i loro numeri."""
+    """Messaggio che sembra un segnale: ha BUY/SELL, oppure i tre livelli Entry, SL e TP1 con i loro numeri. Gli annunci «SEGNALE DI BUY IN ARRIVO SU XAUUSD» NON sono segnali: si ignorano."""
+    if re.search(r"\bIN\s+ARRIVO\b", text, re.I) and not re.search(r"Entry\s*[:=]?\s*\d", text, re.I):
+        return False
     if re.search(r"\b(BUY|SELL)\b", text, re.I):
         return True
     return all(re.search(pat + r"\s*[:=]?\s*" + NUM, text, re.I) for pat in (r"Entry", r"SL", r"TP\s*1"))
