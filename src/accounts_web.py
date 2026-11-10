@@ -58,6 +58,69 @@ class Server(ThreadingHTTPServer):
 _LAST_REQ = 0.0
 
 
+def _read_csv(name: str) -> list[dict]:
+    import csv
+    f = ma.DATA_DIR / name
+    try:
+        with f.open(encoding="utf-8", newline="") as fh:
+            return list(csv.DictReader(fh))
+    except OSError:
+        return []
+
+
+def day_range(date: str, tz_min: int):
+    """Intervallo UTC (epoch) del giorno locale dell'utente: tz_min = JS getTimezoneOffset() (minuti, positivo a ovest di UTC)."""
+    from datetime import datetime, timedelta, timezone
+    d0 = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(minutes=tz_min)
+    return d0, d0 + timedelta(days=1)
+
+
+def signals_day(date: str, tz_min: int) -> dict:
+    """Segnali del canale in un giorno (canale_segnali.csv) e cosa ha fatto l'app per ciascuno e per ogni conto: aperto / rifiutato (motivo) / chiuso a TP o SL (segnali_esiti.csv, segnali_chiusure.csv)."""
+    from datetime import datetime, timezone
+    d0, d1 = day_range(date, tz_min)
+    accs = {str(a["login"]): a for a in ma.list_accounts() if a.get("use_signals")}
+    by_id = {a["id"]: str(a["login"]) for a in ma.list_accounts()}
+    sigs = {}
+    for r in _read_csv("canale_segnali.csv"):                                  # un messaggio può comparire due volte (creato e poi modificato): vale l'ultima riga
+        try:
+            t = datetime.strptime(r["time_utc"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        except (KeyError, ValueError):
+            continue
+        if d0 <= t < d1:
+            sigs[r["msg_id"]] = {**r, "t": t.isoformat()}
+    esiti, chius = {}, {}
+    for r in _read_csv("segnali_esiti.csv"):
+        if r.get("esito") != "prova":
+            esiti.setdefault(r["msg_id"], {})[r["conto"]] = r                  # per ogni conto vale l'ultimo esito
+    for r in _read_csv("segnali_chiusure.csv"):
+        lg = by_id.get(int(r["conto_id"])) if str(r.get("conto_id", "")).isdigit() else None
+        if lg:
+            chius.setdefault(r["msg_id"], {}).setdefault(lg, []).append(r)
+    rows = []
+    for mid, g in sorted(sigs.items(), key=lambda kv: kv[1]["t"]):
+        per = {}
+        for lg, a in accs.items():
+            e = esiti.get(mid, {}).get(lg)
+            c = {"target": a.get("tp_target") or 1}
+            if e is None:
+                c["stato"] = "nessuno"
+            else:
+                c["stato"] = e["esito"]
+                c["dettaglio"] = (e.get("dettaglio") or "").split("Non apro:")[-1].strip()[:140]
+                if e["esito"] == "aperto":
+                    c["prezzo"] = e.get("prezzo_apertura")
+                    cl = chius.get(mid, {}).get(lg) or []
+                    if cl:
+                        c["chiusura"] = cl[-1]["esito"]
+                        c["pips"] = sum(float(x["pips"] or 0) for x in cl)
+            per[lg] = c
+        n_open = sum(1 for c in per.values() if c["stato"] in ("aperto", "stop"))
+        rows.append({"id": mid, "t": g["t"], "side": g.get("side") or "", "symbol": g.get("symbol") or "", "entry": g.get("entry"), "sl": g.get("sl"),
+                     "tp1": g.get("tp1"), "tp2": g.get("tp2"), "tp3": g.get("tp3"), "errore": g.get("errore") or "", "conti": per, "aperti": n_open})
+    return {"date": date, "conti": [{"login": lg, "target": a.get("tp_target") or 1} for lg, a in accs.items()], "segnali": rows}
+
+
 def telegram_status() -> dict:
     """Stato dell'ascolto dei segnali: il battito del programma (listener_age = secondi dall'ultimo controllo, None se mai partito)."""
     import time
@@ -217,6 +280,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"accounts": ma.list_accounts(), "simulator": os.environ.get("MT5_SIMULATOR") == "1"})
             if path == "/api/telegram":
                 return self._json(telegram_status())
+            if path == "/api/signals-day":
+                q = parse_qs(urlparse(self.path).query)
+                return self._json(signals_day((q.get("date") or [datetime.now().strftime("%Y-%m-%d")])[0], int((q.get("tz") or ["0"])[0])))
+            if path == "/api/signals-sync-info":
+                try:
+                    return self._json(json.loads((ma.DATA_DIR / "giorno_info.json").read_text(encoding="utf-8")))
+                except (OSError, ValueError):
+                    return self._json({})
             if path == "/api/last-signal":
                 try:
                     return self._json(json.loads((ma.DATA_DIR / "ultimo_segnale_info.json").read_text(encoding="utf-8")))
@@ -259,6 +330,17 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/accounts" and method == "POST":
                 aid = ma.save_account(self._data())
                 return self._json({"id": aid, "terminal_path": ma.get_account(aid)["terminal_path"]}, 201)
+            if path == "/api/signals-sync" and method == "POST":                   # «Scarica dal canale»: il programma dei segnali registra tutti i segnali di quel giorno (senza eseguirli)
+                d = self._data()
+                d0, d1 = day_range(str(d.get("date")), int(d.get("tz") or 0))
+                if not listener_running():
+                    raise ValueError("L'ascolto dei segnali non è attivo: avvialo e riprova.")
+                try:
+                    (ma.DATA_DIR / "giorno_info.json").unlink()
+                except OSError:
+                    pass
+                (ma.DATA_DIR / "richiesta_giorno.json").write_text(json.dumps({"start": d0.timestamp(), "end": d1.timestamp()}), encoding="utf-8")
+                return self._json({"requested": True})
             if path == "/api/last-signal" and method == "POST":                    # «Apri l'ultimo segnale»: il programma dei segnali lo cerca nel canale e lo applica ai conti
                 global _LAST_REQ
                 if not listener_running():

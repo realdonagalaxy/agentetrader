@@ -14,7 +14,7 @@ import argparse
 import csv
 import os
 import sys
-from datetime import timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.mt5_orders import clean_text, looks_like_signal, parse_signal
@@ -59,6 +59,26 @@ def seen_ids() -> set:
         return set()
     with MSG_CSV.open(encoding="utf-8") as f:
         return {r["msg_id"] for r in csv.DictReader(f)}
+
+
+def record_signal(text: str, when, msg_id) -> bool:
+    """Solo REGISTRA un segnale del canale in canale_segnali.csv se non c'è già (mai eseguito): serve a scaricare la cronologia di un giorno. Ritorna True se l'ha aggiunto."""
+    text = clean_text(text or "")
+    if not is_signal_text(text):
+        return False
+    if SIG_CSV.exists():
+        with SIG_CSV.open(encoding="utf-8") as f:
+            if str(msg_id) in {r.get("msg_id") for r in csv.DictReader(f)}:
+                return False
+    t = when.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    row = {"time_utc": t, "msg_id": msg_id, "testo": text}
+    try:
+        sig = parse_signal(text)
+        row.update({k: sig.get(k, "") for k in ("symbol", "side", "entry", "sl", "tp1", "tp2", "tp3", "inferred")})
+    except ValueError as e:
+        row["errore"] = str(e)
+    _append(SIG_CSV, SIG_COLS, row)
+    return True
 
 
 def process(text: str, when, msg_id, seen: set | None = None) -> str:
@@ -231,8 +251,33 @@ def start_channel_feed(name: str, q, notify=None) -> None:
                         info.write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
                     await asyncio.sleep(2)
 
+            async def watch_day():                                            # «Scarica dal canale» in Gestione Conti: registra tutti i segnali di un giorno (senza eseguirli)
+                import json
+                import time as _t
+                req, info = JOURNAL / "richiesta_giorno.json", JOURNAL / "giorno_info.json"
+                while True:
+                    if req.exists():
+                        try:
+                            r = json.loads(req.read_text(encoding="utf-8"))
+                            req.unlink()
+                            start, end = datetime.fromtimestamp(r["start"], tz=timezone.utc), datetime.fromtimestamp(r["end"], tz=timezone.utc)
+                            new = seen_n = 0
+                            async for m in client.iter_messages(ent, offset_date=end, limit=2000):
+                                if m.date < start:
+                                    break
+                                seen_n += 1
+                                if record_signal(m.message or "", m.date, m.id):
+                                    new += 1
+                            res = {"ok": True, "messaggi": seen_n, "nuovi": new}
+                        except Exception as e:
+                            res = {"ok": False, "msg": f"Scarico non riuscito: {type(e).__name__} {str(e)[:150]}"}
+                        res["ts"] = _t.time()
+                        info.write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
+                    await asyncio.sleep(2)
+
             pulse_task = asyncio.ensure_future(pulse())
             watch_task = asyncio.ensure_future(watch_requests())
+            day_task = asyncio.ensure_future(watch_day())
 
             if not state["told"]:                                             # il messaggio di collegamento una volta sola, anche dopo una riconnessione
                 tell(f"Canale «{getattr(ent, 'title', name)}» collegato (sola lettura).")
@@ -244,6 +289,7 @@ def start_channel_feed(name: str, q, notify=None) -> None:
             finally:
                 pulse_task.cancel()
                 watch_task.cancel()
+                day_task.cancel()
             return True
 
         wait = 10

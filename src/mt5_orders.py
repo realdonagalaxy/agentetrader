@@ -522,7 +522,7 @@ def log_esito(msg_id, conto, res: str, lots, trks: list) -> None:
 
 def log_chiusura(t: dict, d, reason: str, pips_signed: float) -> None:
     _csv_append(CHIUSURE, ["quando_utc", "msg_id", "conto_id", "simbolo", "direzione", "parte", "esito", "prezzo_apertura", "prezzo_chiusura", "pips", "profitto", "ora_chiusura_server"],
-                [now_iso(), t.get("msg_id", ""), t.get("account", ""), t["symbol"], t["side"], t.get("part") or "", reason, t["open"], d.price, round(pips_signed, 1), d.profit, int(d.time)])
+                [now_iso(), t.get("sig_id") or t.get("msg_id", ""), t.get("account", ""), t["symbol"], t["side"], t.get("part") or "", reason, t["open"], d.price, round(pips_signed, 1), d.profit, int(d.time)])
 
 
 def log_scarto(tag: str, sig: dict, tick, scarto: float) -> None:
@@ -819,7 +819,7 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
                         for trk in trks:
                             if acc:
                                 trk["account"] = acc["id"]
-                            pending[f"{acc['id'] if acc else 0}:{trk['position']}"] = {**trk, "msg_id": m["message_id"]}
+                            pending[f"{acc['id'] if acc else 0}:{trk['position']}"] = {**trk, "msg_id": m["message_id"], "sig_id": m.get("message_id") or m.get("chan_id")}
                         if trks:
                             save_pending(pending)
                     except ValueError as e:

@@ -133,7 +133,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
 <div class="wrap">
 <header class="top">
   <div><h1>Gestione Conti</h1><div class="hsub" id="upd">Monitoraggio e gestione dei conti MetaTrader 5</div></div>
-  <nav role="tablist"><button role="tab" aria-selected="true" data-tab="conti">Conti</button><button role="tab" aria-selected="false" data-tab="ris">Risultati</button></nav>
+  <nav role="tablist"><button role="tab" aria-selected="true" data-tab="conti">Conti</button><button role="tab" aria-selected="false" data-tab="ris">Risultati</button><button role="tab" aria-selected="false" data-tab="seg">Segnali</button></nav>
   <button class="btn sec" id="refresh" style="color:#fff;border-color:rgba(255,255,255,.3)">Aggiorna</button>
   <button class="btn sec" id="imp" style="color:#fff;border-color:rgba(255,255,255,.3)" title="Aggiunge il conto a cui il terminale MT5 aperto è collegato adesso">Importa da MT5</button>
   <button class="btn" id="add" style="background:#fff;color:#14233a">+ Nuovo conto</button>
@@ -155,6 +155,15 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
       <thead><tr><th>Conto</th><th>Tipo</th><th>Stato</th><th class="r">Saldo</th><th class="r">Equity</th><th class="r">P&amp;L aperto</th><th class="r">Pos.</th><th>Segnali</th><th>Attivo</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table></div>
+  </div>
+</div>
+<div id="tab-seg" hidden style="display:grid;gap:16px">
+  <div class="panel"><h2>Segnali del canale <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <input type="date" id="sdate" aria-label="Giorno" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit">
+      <button class="btn sm sec" id="sload">Aggiorna</button><button class="btn sm" id="ssync" title="Chiede al programma dei segnali di leggere dal canale tutti i messaggi di quel giorno e di registrarli (senza aprire nulla)">Scarica dal canale</button></span></h2>
+    <div class="kpis" id="skpis" style="padding:0 16px 8px"></div>
+    <div class="tw" style="padding:0 16px 16px"><table class="acctable" id="stable"><thead id="shead"></thead><tbody id="srows"></tbody></table></div>
+    <div class="sub" style="padding:0 16px 16px">Un segnale è «aperto su tutti» quando ogni conto abilitato ai segnali ha aperto la sua posizione. Il rapporto 1:1 è: segnali aperti su tutti i conti / segnali del canale. Se un segnale del canale manca dall'elenco, premi «Scarica dal canale»: registra i messaggi del giorno senza aprire nulla. Orari del tuo PC.</div>
   </div>
 </div>
 <div id="tab-ris" hidden style="display:grid;gap:16px">
@@ -460,10 +469,54 @@ $("rsrc").onchange = loadCalendar;
 $("cprev").onclick = () => { calMonth.setMonth(calMonth.getMonth() - 1); loadCalendar(); };
 $("cnext").onclick = () => { calMonth.setMonth(calMonth.getMonth() + 1); loadCalendar(); };
 $("ctoday").onclick = () => { calMonth = new Date(); calMonth.setDate(1); loadCalendar(); };
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+$("sdate").value = todayStr();
+async function loadSignals() {
+  let r;
+  try { r = await api(`/api/signals-day?date=${$("sdate").value}&tz=${new Date().getTimezoneOffset()}`); } catch (e) { toast(e.message, 6000); return; }
+  const accs = r.conti, S = r.segnali;
+  const allOpen = S.filter(s => accs.length && accs.every(a => ["aperto", "stop"].includes((s.conti[a.login] || {}).stato))).length;
+  const some = S.filter(s => s.aperti > 0).length;
+  $("skpis").innerHTML = `<div class="kpi"><div class="l">Segnali del canale</div><div class="v">${S.length}</div></div>
+    <div class="kpi"><div class="l">Aperti su almeno un conto</div><div class="v">${some}</div></div>
+    <div class="kpi"><div class="l">Aperti su tutti i conti</div><div class="v">${allOpen}</div><div class="s">${S.length ? Math.round(100 * allOpen / S.length) : 0}% dei segnali</div></div>
+    <div class="kpi"><div class="l">Non aperti</div><div class="v">${S.length - some}</div></div>`;
+  $("shead").innerHTML = `<tr><th>Ora</th><th>Segnale</th><th class="r">Entry</th><th class="r">SL</th><th class="r">TP1</th><th class="r">TP2</th><th class="r">TP3</th>${accs.map(a => `<th>${esc(a.login)} · TP${a.target}</th>`).join("")}</tr>`;
+  const cell = c => {
+    if (!c || c.stato === "nessuno") return `<span class="badge b-off" title="Nessun esito registrato: il programma non ha applicato questo segnale a questo conto">non aperto</span>`;
+    if (c.stato === "aperto" || c.stato === "stop") {
+      const ch = c.chiusura;
+      const res = ch ? ` · ${ch === "tp" ? "TP" : ch === "sl" ? "SL" : "chiusa"} ${c.pips >= 0 ? "+" : ""}${Math.round(c.pips)}p` : " · in corso";
+      return `<span class="badge b-ok" title="Aperto a ${esc(c.prezzo || "")}">aperto${res}</span>`;
+    }
+    return `<span class="badge b-err" title="${esc(c.dettaglio || "")}">${c.stato === "rifiutato" ? "rifiutato" : "errore"}</span> <span class="sub">${esc((c.dettaglio || "").slice(0, 60))}</span>`;
+  };
+  $("srows").innerHTML = S.length ? S.map(s => {
+    const t = new Date(s.t), hh = t.toLocaleTimeString("it-IT", {hour: "2-digit", minute: "2-digit"});
+    const dir = s.side ? s.side.toUpperCase() + " " + esc(s.symbol) : `<span class="err">${esc(s.errore || "non letto")}</span>`;
+    return `<tr><td>${hh}</td><td><b>${dir}</b></td><td class="r">${esc(s.entry || "")}</td><td class="r">${esc(s.sl || "")}</td><td class="r">${esc(s.tp1 || "")}</td><td class="r">${esc(s.tp2 || "")}</td><td class="r">${esc(s.tp3 || "")}</td>${accs.map(a => `<td>${cell(s.conti[a.login])}</td>`).join("")}</tr>`;
+  }).join("") : `<tr><td colspan="${7 + accs.length}" class="sub" style="padding:14px">Nessun segnale registrato per questo giorno. Se sai che ce ne sono stati, premi «Scarica dal canale».</td></tr>`;
+}
+$("sload").onclick = loadSignals; $("sdate").onchange = loadSignals;
+$("ssync").onclick = async () => {
+  const b = $("ssync"); b.disabled = true;
+  try {
+    await api("/api/signals-sync", "POST", {date: $("sdate").value, tz: new Date().getTimezoneOffset()});
+    toast("Richiesta inviata: leggo i messaggi del giorno dal canale…", 4000);
+    let r = {};
+    for (let i = 0; i < 40 && !r.ts; i++) { await new Promise(x => setTimeout(x, 1500)); r = await api("/api/signals-sync-info"); }
+    if (!r.ts) toast("Nessuna risposta dal programma dei segnali: controlla che sia attivo e collegato al canale.", 9000);
+    else if (!r.ok) toast(r.msg, 9000);
+    else toast(`Letti ${r.messaggi} messaggi del giorno: ${r.nuovi} segnali nuovi registrati`, 7000);
+    await loadSignals();
+  } catch (e) { toast(e.message, 8000); }
+  b.disabled = false;
+};
 document.querySelectorAll("nav button").forEach(b => b.onclick = async () => {
   document.querySelectorAll("nav button").forEach(x => x.setAttribute("aria-selected", x === b));
-  $("tab-conti").hidden = b.dataset.tab !== "conti"; $("tab-ris").hidden = b.dataset.tab !== "ris";
+  $("tab-conti").hidden = b.dataset.tab !== "conti"; $("tab-ris").hidden = b.dataset.tab !== "ris"; $("tab-seg").hidden = b.dataset.tab !== "seg";
   if (b.dataset.tab === "ris") fillSources();
+  if (b.dataset.tab === "seg") loadSignals();
 });
 refresh(); setInterval(() => { if (!document.querySelector("dialog[open]") && !document.hidden) refresh(); }, 20000);
 </script>
