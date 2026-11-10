@@ -695,6 +695,11 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
     from dotenv import load_dotenv
     load_dotenv("config.env")
     from src import mt5_accounts as ma
+    try:                                                          # un solo ascolto alla volta: due programmi aprirebbero ogni ordine due volte
+        if time.time() - float(HEARTBEAT.read_text()) < 20:
+            sys.exit("Un altro ascolto dei segnali è già in esecuzione: non ne avvio un secondo (gli ordini si aprirebbero due volte).")
+    except (OSError, ValueError):
+        pass
     no_bot = no_bot or os.environ.get("SENZA_BOT", "").strip().lower() in ("1", "si", "true", "on")
     if no_bot:
         bot = NullBot()
@@ -723,6 +728,10 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
     except Exception:
         ver = ""
     print(f"Versione del programma: {ver or 'sconosciuta'}", flush=True)
+    try:
+        (JOURNAL_DIR / "mt5_orders.version").write_text(ver, encoding="utf-8")      # Gestione Conti la confronta con la versione del codice per riavviare un ascolto vecchio
+    except OSError:
+        pass
     pending = load_pending()
     accs = active_accounts()
     where = f"{len(accs)} conti dall'app" if accs else f"terminale singolo, lotto {LOTS}"

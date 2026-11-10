@@ -245,6 +245,29 @@ def listener_running() -> bool:
         return False
 
 
+def code_version() -> str:
+    import subprocess
+    try:
+        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=str(ma.ROOT), timeout=5).stdout.strip()
+    except Exception:
+        return ""
+
+
+def kill_listeners() -> None:
+    """Ferma ogni programma `src.mt5_orders` in esecuzione (anche avviato a mano o dal .bat) e toglie il battito, così quello nuovo può partire subito."""
+    import subprocess
+    if os.name == "nt":
+        cmd = "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'src\\.mt5_orders' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+        subprocess.run(["powershell", "-NoProfile", "-Command", cmd], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    else:
+        subprocess.run(["pkill", "-f", "src.mt5_orders"], capture_output=True)
+    for n in ("mt5_orders.heartbeat", "mt5_orders.pid"):
+        try:
+            (ma.DATA_DIR / n).unlink()
+        except OSError:
+            pass
+
+
 def listener_start() -> int:
     """Avvia `python -m src.mt5_orders` in background (stesso Python di questa app). Output in journal/mt5_orders.log."""
     import subprocess
@@ -523,6 +546,15 @@ def main():
             print(f"   http://{ip}:{port}")
     if os.environ.get("AVVIO_ASCOLTO", "1").strip().lower() not in ("0", "no", "off", "false"):    # insieme al server parte anche l'ascolto dei segnali (AVVIO_ASCOLTO=0 in config.env lo disattiva)
         try:
+            if listener_running():                                          # un ascolto avviato con una versione precedente del codice (o a mano) va sostituito, altrimenti continua a usare il codice vecchio
+                try:
+                    running = (ma.DATA_DIR / "mt5_orders.version").read_text(encoding="utf-8").strip()
+                except OSError:
+                    running = ""
+                if running != code_version():
+                    print(f"Ascolto segnali con versione «{running or 'sconosciuta'}» diversa dal codice ({code_version()}): lo riavvio.", flush=True)
+                    kill_listeners()
+                    time.sleep(2)
             print(f"Ascolto segnali avviato (pid {listener_start()}). Registro: {ma.DATA_DIR / 'mt5_orders.log'}", flush=True)
         except ValueError as e:
             print(str(e), flush=True)
