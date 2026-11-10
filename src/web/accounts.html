@@ -480,8 +480,17 @@ async function loadSignals() {
   $("skpis").innerHTML = `<div class="kpi"><div class="l">Segnali del canale</div><div class="v">${S.length}</div></div>
     <div class="kpi"><div class="l">Aperti su almeno un conto</div><div class="v">${some}</div></div>
     <div class="kpi"><div class="l">Aperti su tutti i conti</div><div class="v">${allOpen}</div><div class="s">${S.length ? Math.round(100 * allOpen / S.length) : 0}% dei segnali</div></div>
-    <div class="kpi"><div class="l">Non aperti</div><div class="v">${S.length - some}</div></div>`;
-  $("shead").innerHTML = `<tr><th>Ora</th><th>Segnale</th><th class="r">Entry</th><th class="r">SL</th><th class="r">TP1</th><th class="r">TP2</th><th class="r">TP3</th>${accs.map(a => `<th>${esc(a.login)} · TP${a.target}</th>`).join("")}</tr>`;
+    <div class="kpi"><div class="l">Non aperti</div><div class="v">${S.length - some}</div></div>
+    <div class="kpi"><div class="l">Esito Cedric</div><div class="v">${S.filter(s => s.cedric.some(x => x.tipo !== "sl")).length} TP · ${S.filter(s => s.cedric.some(x => x.tipo === "sl")).length} SL</div><div class="s">segnali con almeno un TP / con SL</div></div>`;
+  $("shead").innerHTML = `<tr><th>Ora</th><th>Segnale</th><th class="r">Entry</th><th class="r">SL</th><th class="r">TP1</th><th class="r">TP2</th><th class="r">TP3</th><th>Esito Cedric</th>${accs.map(a => `<th>${esc(a.login)} · TP${a.target}</th>`).join("")}</tr>`;
+  const cedric = s => {
+    if (!s.cedric.length) return `<span class="badge b-off" title="Nessun messaggio di TP o SL di Cedric registrato per questo segnale">—</span>`;
+    return s.cedric.map(x => {
+      const hm = new Date(x.t).toLocaleTimeString("it-IT", {hour: "2-digit", minute: "2-digit"});
+      const lab = x.tipo === "sl" ? "SL" : x.tipo.toUpperCase(), p = x.pips !== "" && x.pips != null ? ` ${+x.pips > 0 ? "+" : ""}${Math.round(+x.pips)}p` : "";
+      return `<span class="badge ${x.tipo === "sl" ? "b-err" : "b-ok"}" title="${hm}${x.dedotto ? " · collegato al segnale precedente (non era una risposta)" : ""}">${lab}${p} · ${hm}</span>`;
+    }).join(" ");
+  };
   const cell = c => {
     if (!c || c.stato === "nessuno") return `<span class="badge b-off" title="Nessun esito registrato: il programma non ha applicato questo segnale a questo conto">non aperto</span>`;
     if (c.stato === "aperto" || c.stato === "stop") {
@@ -494,8 +503,8 @@ async function loadSignals() {
   $("srows").innerHTML = S.length ? S.map(s => {
     const t = new Date(s.t), hh = t.toLocaleTimeString("it-IT", {hour: "2-digit", minute: "2-digit"});
     const dir = s.side ? s.side.toUpperCase() + " " + esc(s.symbol) : `<span class="err">${esc(s.errore || "non letto")}</span>`;
-    return `<tr><td>${hh}</td><td><b>${dir}</b></td><td class="r">${esc(s.entry || "")}</td><td class="r">${esc(s.sl || "")}</td><td class="r">${esc(s.tp1 || "")}</td><td class="r">${esc(s.tp2 || "")}</td><td class="r">${esc(s.tp3 || "")}</td>${accs.map(a => `<td>${cell(s.conti[a.login])}</td>`).join("")}</tr>`;
-  }).join("") : `<tr><td colspan="${7 + accs.length}" class="sub" style="padding:14px">Nessun segnale registrato per questo giorno. Se sai che ce ne sono stati, premi «Scarica dal canale».</td></tr>`;
+    return `<tr><td>${hh}</td><td><b>${dir}</b></td><td class="r">${esc(s.entry || "")}</td><td class="r">${esc(s.sl || "")}</td><td class="r">${esc(s.tp1 || "")}</td><td class="r">${esc(s.tp2 || "")}</td><td class="r">${esc(s.tp3 || "")}</td><td>${cedric(s)}</td>${accs.map(a => `<td>${cell(s.conti[a.login])}</td>`).join("")}</tr>`;
+  }).join("") : `<tr><td colspan="${8 + accs.length}" class="sub" style="padding:14px">Nessun segnale registrato per questo giorno. Se sai che ce ne sono stati, premi «Scarica dal canale».</td></tr>`;
 }
 $("sload").onclick = loadSignals; $("sdate").onchange = loadSignals;
 $("ssync").onclick = async () => {

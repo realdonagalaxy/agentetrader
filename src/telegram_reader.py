@@ -61,6 +61,38 @@ def seen_ids() -> set:
         return {r["msg_id"] for r in csv.DictReader(f)}
 
 
+RES_CSV = JOURNAL / "canale_esiti.csv"
+RES_COLS = ["time_utc", "msg_id", "reply_to", "tipo", "pips", "testo"]
+
+
+def parse_result(text: str):
+    """Messaggi di esito di Cedric: «✅ TP1 HIT +50pips», «✅ TP2 HIT +100pips», «❌ STOP LOSS -150pips». Ritorna (tipo, pips) con tipo tp1/tp2/tp3/sl, oppure None."""
+    import re
+    t = clean_text(text or "")
+    m = re.search(r"\bTP\s*([123])\s*HIT\b[^0-9+-]*([+-]?\d+)?", t, re.I)
+    if m:
+        return f"tp{m.group(1)}", float(m.group(2)) if m.group(2) else None
+    m = re.search(r"\bSTOP\s*LOSS\b[^0-9+-]*([+-]?\d+)?", t, re.I)
+    if m:
+        return "sl", -abs(float(m.group(1))) if m.group(1) else None
+    return None
+
+
+def record_result(msg) -> bool:
+    """Registra in canale_esiti.csv un messaggio di esito di Cedric (TP/SL) con il segnale a cui risponde (reply_to), se non c'è già. Ritorna True se l'ha aggiunto."""
+    r = parse_result(msg.message or "")
+    if r is None:
+        return False
+    if RES_CSV.exists():
+        with RES_CSV.open(encoding="utf-8") as f:
+            if str(msg.id) in {x.get("msg_id") for x in csv.DictReader(f)}:
+                return False
+    rt = getattr(getattr(msg, "reply_to", None), "reply_to_msg_id", None)
+    _append(RES_CSV, RES_COLS, {"time_utc": msg.date.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), "msg_id": msg.id, "reply_to": rt or "", "tipo": r[0],
+                                "pips": "" if r[1] is None else r[1], "testo": clean_text(msg.message or "")})
+    return True
+
+
 def record_signal(text: str, when, msg_id) -> bool:
     """Solo REGISTRA un segnale del canale in canale_segnali.csv se non c'è già (mai eseguito): serve a scaricare la cronologia di un giorno. Ritorna True se l'ha aggiunto."""
     text = clean_text(text or "")
@@ -127,6 +159,8 @@ def handle_message(msg, edited: bool, seen: set, acted: set, q=None, max_age: fl
         if q is not None and time.time() - msg.date.timestamp() <= max_age:
             q.put((text, msg.id, msg.date.timestamp()))
         return "segnale"
+    if record_result(msg):                                              # «TP1 HIT» / «STOP LOSS»: si collega al segnale per la pagina Segnali
+        return "esito"
     if not edited:
         return process(text, msg.date, msg.id, seen)
     return "msg"
@@ -261,14 +295,16 @@ def start_channel_feed(name: str, q, notify=None) -> None:
                             r = json.loads(req.read_text(encoding="utf-8"))
                             req.unlink()
                             start, end = datetime.fromtimestamp(r["start"], tz=timezone.utc), datetime.fromtimestamp(r["end"], tz=timezone.utc)
-                            new = seen_n = 0
+                            new = seen_n = new_res = 0
                             async for m in client.iter_messages(ent, offset_date=end, limit=2000):
                                 if m.date < start:
                                     break
                                 seen_n += 1
                                 if record_signal(m.message or "", m.date, m.id):
                                     new += 1
-                            res = {"ok": True, "messaggi": seen_n, "nuovi": new}
+                                if record_result(m):
+                                    new_res += 1
+                            res = {"ok": True, "messaggi": seen_n, "nuovi": new, "esiti": new_res}
                         except Exception as e:
                             res = {"ok": False, "msg": f"Scarico non riuscito: {type(e).__name__} {str(e)[:150]}"}
                         res["ts"] = _t.time()

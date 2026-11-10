@@ -144,6 +144,26 @@ def signals_day(date: str, tz_min: int) -> dict:
         lg = by_id.get(int(r["conto_id"])) if str(r.get("conto_id", "")).isdigit() else None
         if lg:
             chius.setdefault(r["msg_id"], {}).setdefault(lg, []).append(r)
+    # esiti dichiarati da Cedric (TP1/TP2/TP3 HIT, STOP LOSS): si collegano al segnale a cui rispondono; se il messaggio non è una risposta, al segnale precedente più vicino
+    res_by_sig, order = {}, sorted(sigs.items(), key=lambda kv: kv[1]["t"])
+    all_sigs = []
+    for r in _read_csv("canale_segnali.csv"):
+        try:
+            all_sigs.append((datetime.strptime(r["time_utc"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc), r["msg_id"]))
+        except (KeyError, ValueError):
+            pass
+    all_sigs.sort()
+    for r in _read_csv("canale_esiti.csv"):
+        try:
+            t = datetime.strptime(r["time_utc"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        except (KeyError, ValueError):
+            continue
+        target, inferred = r.get("reply_to") or "", False
+        if not target:
+            prev = [mid for ts, mid in all_sigs if ts <= t]
+            target, inferred = (prev[-1] if prev else ""), True
+        if target in sigs:
+            res_by_sig.setdefault(target, []).append({"tipo": r["tipo"], "pips": r.get("pips"), "t": t.isoformat(), "dedotto": inferred})
     needed = {}                                                                 # posizioni aperte dall'app per i segnali del giorno: se ne legge lo stato vero da MT5
     for mid in sigs:
         for lg, e in esiti.get(mid, {}).items():
@@ -175,7 +195,8 @@ def signals_day(date: str, tz_min: int) -> dict:
             per[lg] = c
         n_open = sum(1 for c in per.values() if c["stato"] in ("aperto", "stop"))
         rows.append({"id": mid, "t": g["t"], "side": g.get("side") or "", "symbol": g.get("symbol") or "", "entry": g.get("entry"), "sl": g.get("sl"),
-                     "tp1": g.get("tp1"), "tp2": g.get("tp2"), "tp3": g.get("tp3"), "errore": g.get("errore") or "", "conti": per, "aperti": n_open})
+                     "tp1": g.get("tp1"), "tp2": g.get("tp2"), "tp3": g.get("tp3"), "errore": g.get("errore") or "", "conti": per, "aperti": n_open,
+                     "cedric": sorted(res_by_sig.get(mid, []), key=lambda x: x["t"])})
     return {"date": date, "conti": [{"login": lg, "target": a.get("tp_target") or 1} for lg, a in accs.items()], "segnali": rows}
 
 
