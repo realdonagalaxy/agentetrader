@@ -526,7 +526,7 @@ $("ssync").onclick = async () => {
     for (let i = 0; i < 40 && !r.ts; i++) { await new Promise(x => setTimeout(x, 1500)); r = await api("/api/signals-sync-info"); }
     if (!r.ts) toast("Nessuna risposta dal programma dei segnali: controlla che sia attivo e collegato al canale.", 9000);
     else if (!r.ok) toast(r.msg, 9000);
-    else toast(`Letti ${r.messaggi} messaggi del giorno: ${r.nuovi} segnali nuovi registrati`, 7000);
+    else toast(`Letti ${r.messaggi} messaggi del giorno: ${r.nuovi} segnali nuovi e ${r.esiti ?? 0} esiti di Cedric (TP/SL) registrati`, 8000);
     await loadSignals();
   } catch (e) { toast(e.message, 8000); }
   b.disabled = false;

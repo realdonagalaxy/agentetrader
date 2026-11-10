@@ -296,12 +296,14 @@ def start_channel_feed(name: str, q, notify=None) -> None:
                             req.unlink()
                             start, end = datetime.fromtimestamp(r["start"], tz=timezone.utc), datetime.fromtimestamp(r["end"], tz=timezone.utc)
                             new = seen_n = new_res = 0
-                            async for m in client.iter_messages(ent, offset_date=end, limit=2000):
+                            from datetime import timedelta
+                            async for m in client.iter_messages(ent, offset_date=end + timedelta(days=1), limit=3000):      # gli esiti (TP/SL) di un segnale possono arrivare il giorno dopo
                                 if m.date < start:
                                     break
-                                seen_n += 1
-                                if record_signal(m.message or "", m.date, m.id):
-                                    new += 1
+                                if m.date < end:
+                                    seen_n += 1
+                                    if record_signal(m.message or "", m.date, m.id):
+                                        new += 1
                                 if record_result(m):
                                     new_res += 1
                             res = {"ok": True, "messaggi": seen_n, "nuovi": new, "esiti": new_res}
