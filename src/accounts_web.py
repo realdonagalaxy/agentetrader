@@ -75,6 +75,53 @@ def day_range(date: str, tz_min: int):
     return d0, d0 + timedelta(days=1)
 
 
+def _closures_from_mt5(needed: dict) -> dict:
+    """Stato reale delle posizioni aperte dall'app, letto dalla cronologia di MT5: needed = {login: [ticket,...]} -> {(login, ticket): {"chiusura": "tp"|"sl"|"altra", "pips": float} oppure {} se ancora aperta}.
+    Le posizioni già chiuse restano in una cache (journal/chiusure_cache.json) per non ricollegarsi a MT5 ogni volta. Un conto che non si collega viene saltato."""
+    cache_f = ma.DATA_DIR / "chiusure_cache.json"
+    try:
+        cache = json.loads(cache_f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cache = {}
+    out, changed = {}, False
+    by_login = {str(a["login"]): a for a in ma.list_accounts()}
+    for lg, tickets in needed.items():
+        todo = [t for t in tickets if f"{lg}:{t}" not in cache]
+        for t in tickets:
+            if f"{lg}:{t}" in cache:
+                out[(lg, t)] = cache[f"{lg}:{t}"]
+        if not todo or lg not in by_login:
+            continue
+        try:
+            with ma.session(by_login[lg]) as m:
+                for t in todo:
+                    deals = m.history_deals_get(position=int(t)) or []
+                    op = [d for d in deals if d.entry == m.DEAL_ENTRY_IN]
+                    cl = [d for d in deals if d.entry == m.DEAL_ENTRY_OUT]
+                    if not cl:
+                        out[(lg, t)] = {}                                          # ancora aperta (o non trovata)
+                        continue
+                    d, o = cl[-1], (op[0] if op else None)
+                    reason = "tp" if d.reason == m.DEAL_REASON_TP else "sl" if d.reason == m.DEAL_REASON_SL else "altra"
+                    pip = 0.10 if str(d.symbol).upper().startswith(("XAU", "GOLD")) else 10 * ((m.symbol_info(d.symbol).point) if m.symbol_info(d.symbol) else 0.00001)
+                    sign = 1 if (o is not None and o.type == 0) else -1      # DEAL_TYPE_BUY = 0
+                    pips_ = round(sign * (d.price - o.price) / pip, 1) if o is not None else 0.0
+                    res = {"chiusura": reason, "pips": pips_, "profitto": round(float(d.profit), 2)}
+                    out[(lg, t)] = res
+                    cache[f"{lg}:{t}"] = res
+                    changed = True
+        except Exception as e:                                                      # conto non collegato: le sue posizioni restano «non verificate»
+            print("Cronologia MT5", lg, str(e)[:120], flush=True)
+            for t in todo:
+                out[(lg, t)] = {"errore": str(e)[:80]}
+    if changed:
+        try:
+            cache_f.write_text(json.dumps(cache), encoding="utf-8")
+        except OSError:
+            pass
+    return out
+
+
 def signals_day(date: str, tz_min: int) -> dict:
     """Segnali del canale in un giorno (canale_segnali.csv) e cosa ha fatto l'app per ciascuno e per ogni conto: aperto / rifiutato (motivo) / chiuso a TP o SL (segnali_esiti.csv, segnali_chiusure.csv)."""
     from datetime import datetime, timezone
@@ -97,6 +144,12 @@ def signals_day(date: str, tz_min: int) -> dict:
         lg = by_id.get(int(r["conto_id"])) if str(r.get("conto_id", "")).isdigit() else None
         if lg:
             chius.setdefault(r["msg_id"], {}).setdefault(lg, []).append(r)
+    needed = {}                                                                 # posizioni aperte dall'app per i segnali del giorno: se ne legge lo stato vero da MT5
+    for mid in sigs:
+        for lg, e in esiti.get(mid, {}).items():
+            if e.get("esito") == "aperto" and e.get("ticket"):
+                needed.setdefault(lg, []).append(str(e["ticket"]).split(",")[0].strip())
+    real = _closures_from_mt5(needed) if needed else {}
     rows = []
     for mid, g in sorted(sigs.items(), key=lambda kv: kv[1]["t"]):
         per = {}
@@ -110,10 +163,15 @@ def signals_day(date: str, tz_min: int) -> dict:
                 c["dettaglio"] = (e.get("dettaglio") or "").split("Non apro:")[-1].strip()[:140]
                 if e["esito"] == "aperto":
                     c["prezzo"] = e.get("prezzo_apertura")
+                    rr = real.get((lg, str(e.get("ticket") or "").split(",")[0].strip())) or {}
                     cl = chius.get(mid, {}).get(lg) or []
-                    if cl:
+                    if rr.get("chiusura"):                                          # cronologia di MT5: la fonte più affidabile
+                        c["chiusura"], c["pips"] = rr["chiusura"], rr["pips"]
+                    elif cl:
                         c["chiusura"] = cl[-1]["esito"]
                         c["pips"] = sum(float(x["pips"] or 0) for x in cl)
+                    elif rr.get("errore"):
+                        c["non_verificata"] = True
             per[lg] = c
         n_open = sum(1 for c in per.values() if c["stato"] in ("aperto", "stop"))
         rows.append({"id": mid, "t": g["t"], "side": g.get("side") or "", "symbol": g.get("symbol") or "", "entry": g.get("entry"), "sl": g.get("sl"),
