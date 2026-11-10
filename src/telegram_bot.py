@@ -22,7 +22,10 @@ class TelegramBot:
         self.chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID", "")
 
     def _call(self, method: str, **payload) -> dict:
-        r = requests.post(API.format(token=self.token, method=method), json=payload, timeout=15)
+        try:
+            r = requests.post(API.format(token=self.token, method=method), json=payload, timeout=15)
+        except requests.RequestException as e:                       # il testo originale contiene l'URL col token del bot: non deve finire nei registri
+            raise RuntimeError(f"Telegram {method}: {type(e).__name__} (rete non raggiungibile o timeout)") from None
         return self._result(r, method)
 
     def _result(self, r: requests.Response, method: str) -> dict:
