@@ -171,6 +171,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
       <input type="date" id="sdate" aria-label="Giorno" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit">
       <button class="btn sm sec" id="sload">Aggiorna</button><button class="btn sm" id="ssync" title="Chiede al programma dei segnali di leggere dal canale tutti i messaggi di quel giorno e di registrarli (senza aprire nulla)">Scarica dal canale</button></span></h2>
     <div class="kpis" id="skpis" style="padding:0 16px 8px"></div>
+    <div class="kpis" id="sgain" style="padding:0 16px 8px"></div>
     <div class="tw" style="padding:0 16px 16px"><table class="acctable" id="stable"><thead id="shead"></thead><tbody id="srows"></tbody></table></div>
     <div id="sorf" class="sub" style="padding:0 16px 8px;color:var(--ink)"></div>
     <div id="sinfo" class="sub" style="padding:0 16px 12px"></div>
@@ -497,6 +498,16 @@ async function loadSignals() {
     const hm = new Date(x.t).toLocaleTimeString("it-IT", {hour: "2-digit", minute: "2-digit"});
     return `<span class="badge ${x.tipo === "sl" ? "b-err" : "b-ok"}">${x.tipo === "sl" ? "SL" : x.tipo.toUpperCase()}${x.pips !== "" && x.pips != null ? " " + Math.round(+x.pips) + "p" : ""} · ${hm} · risposta a #${esc(x.reply_to || "?")}</span>`;
   }).join(" ") : "";
+  const gains = accs.map(a => {                                           // guadagno del giorno per conto: posizioni chiuse (netto di commissioni e swap) + P/L di quelle ancora aperte
+    let usd = 0, pips = 0, tp = 0, sl = 0, op = 0, n = 0;
+    S.forEach(s => { const c = s.conti[a.login]; if (!c || !["aperto", "stop"].includes(c.stato)) return; n++;
+      usd += +(c.netto != null ? c.netto : (c.profitto != null ? c.profitto : (c.pl || 0)));
+      if (c.chiusura) { pips += +c.pips || 0; if (c.chiusura === "tp") tp++; else if (c.chiusura === "sl") sl++; } else op++; });
+    return {login: a.login, target: a.target, usd, pips, tp, sl, op, n};
+  });
+  const tot = gains.reduce((x, g) => x + g.usd, 0), totp = gains.reduce((x, g) => x + g.pips, 0), sgn = v => (v > 0 ? "+" : "") + v.toFixed(2);
+  $("sgain").innerHTML = `<div class="kpi"><div class="l">Guadagno del giorno</div><div class="v" style="color:var(${tot >= 0 ? "--gain" : "--loss"})">${sgn(tot)} $</div><div class="s">${totp >= 0 ? "+" : ""}${Math.round(totp)} pips chiusi · tutti i conti</div></div>` +
+    gains.map(g => `<div class="kpi"><div class="l">${esc(g.login)} · TP${g.target}</div><div class="v" style="color:var(${g.usd >= 0 ? "--gain" : "--loss"})">${sgn(g.usd)} $</div><div class="s">${g.n} posizioni: ${g.tp} TP · ${g.sl} SL · ${g.op} aperte · ${g.pips >= 0 ? "+" : ""}${Math.round(g.pips)} pips</div></div>`).join("");
   $("shead").innerHTML = `<tr><th>Ora</th><th>Segnale</th><th class="r">Entry</th><th class="r">SL</th><th class="r">TP1</th><th class="r">TP2</th><th class="r">TP3</th><th>Esito Cedric</th>${accs.map(a => `<th>${esc(a.login)} · TP${a.target}</th>`).join("")}</tr>`;
   const cedric = s => {
     if (!s.cedric.length) return `<span class="badge b-off" title="Nessun messaggio di TP o SL di Cedric registrato per questo segnale">—</span>`;
