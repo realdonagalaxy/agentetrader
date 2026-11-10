@@ -134,6 +134,8 @@ def signals_day(date: str, tz_min: int) -> dict:
             t = datetime.strptime(r["time_utc"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
         except (KeyError, ValueError):
             continue
+        if r.get("errore") and not r.get("entry") and re.search(r"IN\s+ARRIVO", r.get("testo") or "", re.I):
+            continue                                                            # annuncio «SEGNALE DI SELL IN ARRIVO»: non è un segnale (registrato dalle versioni precedenti)
         if d0 <= t < d1:
             sigs[r["msg_id"]] = {**r, "t": t.isoformat()}
     esiti, chius = {}, {}

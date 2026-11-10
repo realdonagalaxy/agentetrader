@@ -96,6 +96,15 @@ tr.acc.off .name{opacity:.6}
   #rows > tr.acc > td[data-l="Stato"],#rows > tr.acc > td[data-l=""]{grid-column:1/-1}
   #rows > tr.acc > td[data-l=""]::before{display:none}
   #rows > tr.acc > td[data-l=""] .actions{justify-content:flex-start}
+  #srows > tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 12px;padding:12px 14px;border-bottom:1px solid var(--line)}
+  #srows > tr > td{display:block;border:0;padding:0;text-align:left!important;min-width:0;overflow-wrap:anywhere}
+  #srows > tr > td::before{content:attr(data-l);display:block;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink3);margin-bottom:1px}
+  #srows > tr > td.wide{grid-column:1/-1}
+  #srows > tr > td[data-l="Segnale"]{grid-column:span 2;font-size:15px}
+  #srows > tr > td[data-l="Ora"]{grid-column:span 1}
+  #stable{display:block}
+  #tab-seg .panel > h2{flex-wrap:wrap;row-gap:8px}
+  #tab-seg .panel > h2 > span{margin-left:0!important;flex-wrap:wrap}
   #rows > tr.det,#rows > tr.det > td{display:block}
   #rows > tr.det > td{padding:10px 14px}
 }
@@ -503,7 +512,8 @@ async function loadSignals() {
   $("srows").innerHTML = S.length ? S.map(s => {
     const t = new Date(s.t), hh = t.toLocaleTimeString("it-IT", {hour: "2-digit", minute: "2-digit"});
     const dir = s.side ? s.side.toUpperCase() + " " + esc(s.symbol) : `<span class="err">${esc(s.errore || "non letto")}</span>`;
-    return `<tr><td>${hh}</td><td><b>${dir}</b></td><td class="r">${esc(s.entry || "")}</td><td class="r">${esc(s.sl || "")}</td><td class="r">${esc(s.tp1 || "")}</td><td class="r">${esc(s.tp2 || "")}</td><td class="r">${esc(s.tp3 || "")}</td><td>${cedric(s)}</td>${accs.map(a => `<td>${cell(s.conti[a.login])}</td>`).join("")}</tr>`;
+    const nz = v => v === "" || v == null ? "—" : esc(String(Math.round(+v * 100) / 100));          // niente 4098.469999999999
+    return `<tr><td data-l="Ora">${hh}</td><td data-l="Segnale"><b>${dir}</b></td><td class="r" data-l="Entry">${nz(s.entry)}</td><td class="r" data-l="SL">${nz(s.sl)}</td><td class="r" data-l="TP1">${nz(s.tp1)}</td><td class="r" data-l="TP2">${nz(s.tp2)}</td><td class="r" data-l="TP3">${nz(s.tp3)}</td><td class="wide" data-l="Esito Cedric">${cedric(s)}</td>${accs.map(a => `<td class="wide" data-l="Conto ${esc(a.login)} · TP${a.target}">${cell(s.conti[a.login])}</td>`).join("")}</tr>`;
   }).join("") : `<tr><td colspan="${8 + accs.length}" class="sub" style="padding:14px">Nessun segnale registrato per questo giorno. Se sai che ce ne sono stati, premi «Scarica dal canale».</td></tr>`;
 }
 $("sload").onclick = loadSignals; $("sdate").onchange = loadSignals;
