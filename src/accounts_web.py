@@ -86,9 +86,9 @@ def _closures_from_mt5(needed: dict) -> dict:
     out, changed = {}, False
     by_login = {str(a["login"]): a for a in ma.list_accounts()}
     for lg, tickets in needed.items():
-        todo = [t for t in tickets if f"{lg}:{t}" not in cache]
+        todo = [t for t in tickets if "p_open" not in cache.get(f"{lg}:{t}", {})]       # le voci della cache senza i prezzi (versioni precedenti) si rileggono da MT5
         for t in tickets:
-            if f"{lg}:{t}" in cache:
+            if t not in todo:
                 out[(lg, t)] = cache[f"{lg}:{t}"]
         if not todo or lg not in by_login:
             continue
@@ -98,15 +98,25 @@ def _closures_from_mt5(needed: dict) -> dict:
                     deals = m.history_deals_get(position=int(t)) or []
                     op = [d for d in deals if d.entry == m.DEAL_ENTRY_IN]
                     cl = [d for d in deals if d.entry == m.DEAL_ENTRY_OUT]
-                    if not cl:
-                        out[(lg, t)] = {}                                          # ancora aperta (o non trovata)
+                    orders = m.history_orders_get(position=int(t)) or ()
+                    first = orders[0] if orders else None
+                    base = {"p_open": float(op[0].price) if op else (float(first.price_open) if first is not None else None),
+                            "sl": float(first.sl) if first is not None and first.sl else None, "tp": float(first.tp) if first is not None and first.tp else None}
+                    if not cl:                                                      # ancora aperta: livelli e prezzo di adesso dalla posizione
+                        pos = [x for x in (m.positions_get(ticket=int(t)) or ())]
+                        if pos:
+                            x = pos[0]
+                            out[(lg, t)] = {**base, "aperta": True, "p_open": float(x.price_open), "sl": float(x.sl) if x.sl else base["sl"], "tp": float(x.tp) if x.tp else base["tp"],
+                                            "p_now": float(x.price_current), "pl": round(float(x.profit), 2)}
+                        else:
+                            out[(lg, t)] = {}                                       # non trovata (cronologia non ancora aggiornata)
                         continue
                     d, o = cl[-1], (op[0] if op else None)
                     reason = "tp" if d.reason == m.DEAL_REASON_TP else "sl" if d.reason == m.DEAL_REASON_SL else "altra"
                     pip = 0.10 if str(d.symbol).upper().startswith(("XAU", "GOLD")) else 10 * ((m.symbol_info(d.symbol).point) if m.symbol_info(d.symbol) else 0.00001)
                     sign = 1 if (o is not None and o.type == 0) else -1      # DEAL_TYPE_BUY = 0
                     pips_ = round(sign * (d.price - o.price) / pip, 1) if o is not None else 0.0
-                    res = {"chiusura": reason, "pips": pips_, "profitto": round(float(d.profit), 2)}
+                    res = {**base, "chiusura": reason, "pips": pips_, "profitto": round(float(d.profit), 2), "p_close": float(d.price)}
                     out[(lg, t)] = res
                     cache[f"{lg}:{t}"] = res
                     changed = True
@@ -203,6 +213,9 @@ def signals_day(date: str, tz_min: int) -> dict:
                         c["pips"] = sum(float(x["pips"] or 0) for x in cl)
                     elif rr.get("errore"):
                         c["non_verificata"] = True
+                    for k in ("p_open", "p_close", "sl", "tp", "p_now", "pl"):               # prezzi reali letti da MT5: apertura, chiusura, livelli e prezzo attuale
+                        if rr.get(k) is not None:
+                            c[k] = rr[k]
             per[lg] = c
         n_open = sum(1 for c in per.values() if c["stato"] in ("aperto", "stop"))
         rows.append({"id": mid, "t": g["t"], "side": g.get("side") or "", "symbol": g.get("symbol") or "", "entry": g.get("entry"), "sl": g.get("sl"),
