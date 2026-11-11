@@ -107,7 +107,7 @@ def _closures_from_mt5(needed: dict) -> dict:
                         if pos:
                             x = pos[0]
                             out[(lg, t)] = {**base, "aperta": True, "p_open": float(x.price_open), "sl": float(x.sl) if x.sl else base["sl"], "tp": float(x.tp) if x.tp else base["tp"],
-                                            "p_now": float(x.price_current), "pl": round(float(x.profit), 2), "netto": round(float(x.profit) + float(getattr(x, "swap", 0) or 0), 2)}
+                                            "p_now": float(x.price_current), "pl": round(float(x.profit), 2), "vol": float(getattr(x, "volume", 0) or 0), "netto": round(float(x.profit) + float(getattr(x, "swap", 0) or 0), 2)}
                         else:
                             out[(lg, t)] = {}                                       # non trovata (cronologia non ancora aggiornata)
                         continue
@@ -116,7 +116,7 @@ def _closures_from_mt5(needed: dict) -> dict:
                     pip = 0.10 if str(d.symbol).upper().startswith(("XAU", "GOLD")) else 10 * ((m.symbol_info(d.symbol).point) if m.symbol_info(d.symbol) else 0.00001)
                     sign = 1 if (o is not None and o.type == 0) else -1      # DEAL_TYPE_BUY = 0
                     pips_ = round(sign * (d.price - o.price) / pip, 1) if o is not None else 0.0
-                    res = {**base, "chiusura": reason, "pips": pips_, "profitto": round(float(d.profit), 2), "p_close": float(d.price),
+                    res = {**base, "chiusura": reason, "pips": pips_, "profitto": round(float(d.profit), 2), "p_close": float(d.price), "vol": float(getattr(o, "volume", 0) or 0) if o is not None else None,
                                        "netto": round(sum(float(getattr(x, "profit", 0) or 0) + float(getattr(x, "commission", 0) or 0) + float(getattr(x, "swap", 0) or 0) + float(getattr(x, "fee", 0) or 0) for x in deals), 2)}
                     out[(lg, t)] = res
                     cache[f"{lg}:{t}"] = res
@@ -190,7 +190,7 @@ def signals_day(date: str, tz_min: int) -> dict:
     for mid in sigs:
         for lg, e in esiti.get(mid, {}).items():
             if e.get("esito") == "aperto" and e.get("ticket"):
-                needed.setdefault(lg, []).append(str(e["ticket"]).split(",")[0].strip())
+                needed.setdefault(lg, []).extend(x.strip() for x in str(e["ticket"]).split(",") if x.strip())      # con la parzializzazione i ticket sono due
     real = _closures_from_mt5(needed) if needed else {}
     rows = []
     for mid, g in sorted(sigs.items(), key=lambda kv: kv[1]["t"]):
@@ -205,9 +205,30 @@ def signals_day(date: str, tz_min: int) -> dict:
                 c["dettaglio"] = (e.get("dettaglio") or "").split("Non apro:")[-1].strip()[:140]
                 if e["esito"] == "aperto":
                     c["prezzo"] = e.get("prezzo_apertura")
-                    rr = real.get((lg, str(e.get("ticket") or "").split(",")[0].strip())) or {}
+                    tks = [x.strip() for x in str(e.get("ticket") or "").split(",") if x.strip()]
+                    rrs = [real.get((lg, t)) or {} for t in tks]
+                    rr = rrs[0] if rrs else {}
+                    if len(rrs) > 1 and any(r_.get("errore") for r_ in rrs):
+                        c["non_verificata"] = True
+                    elif len(rrs) > 1:                                              # parzializzazione: una parte a TP1, il resto al TP scelto
+                        c["parti"] = []
+                        for r_ in rrs:
+                            if r_.get("chiusura"):
+                                be = r_["chiusura"] == "sl" and abs(r_.get("pips") or 0) <= 6          # SL a pareggio (BE): chiusa vicino al prezzo di apertura
+                                c["parti"].append({"txt": ("BE" if be else {"tp": "TP", "sl": "SL"}.get(r_["chiusura"], "chiusa")) + f" {r_['pips']:+.0f}p", "netto": r_.get("netto") or 0.0, "chiusa": True})
+                            else:
+                                c["parti"].append({"txt": "in corso", "netto": r_.get("netto") or 0.0, "chiusa": False})
+                        known = [r_ for r_ in rrs if r_]
+                        if known and len(known) == len(rrs):
+                            c["netto"] = round(sum(x["netto"] for x in c["parti"]), 2)
+                            if all(p_["chiusa"] for p_ in c["parti"]):
+                                c["chiusura"] = rrs[-1]["chiusura"]
+                                tv = sum(r_.get("vol") or 0 for r_ in rrs) or 1
+                                c["pips"] = round(sum((r_.get("pips") or 0) * (r_.get("vol") or 0) for r_ in rrs) / tv, 1)
+                            rr = {k: v for k, v in rrs[-1].items() if k not in ("netto",)}
+                            rr["p_open"] = rrs[0].get("p_open")
                     cl = chius.get(mid, {}).get(lg) or []
-                    if rr.get("chiusura"):                                          # cronologia di MT5: la fonte più affidabile
+                    if rr.get("chiusura") and "parti" not in c:                       # cronologia di MT5: la fonte più affidabile
                         c["chiusura"], c["pips"], c["profitto"] = rr["chiusura"], rr["pips"], rr.get("profitto")
                     elif cl:
                         c["chiusura"] = cl[-1]["esito"]

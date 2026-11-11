@@ -42,8 +42,6 @@ MAX_POSITIONS = 6                 # posizioni aperte da questo programma per con
 ENTRY_ORDER = os.environ.get("ENTRY_ORDER", "market").lower()            # "market" (default: a mercato, Entry di Vantage convertita con lo scarto) oppure "stop" (BUY/SELL STOP all'Entry del segnale)
 MIN_REMAINING_PIPS = float(os.environ.get("MIN_REMAINING_PIPS") or 45)  # a mercato si entra solo se, calcolata l'Entry su ActivTrades con lo scarto, al TP1 mancano PIÙ di questi pips
 MARKET_MIN_PIPS = float(os.environ.get("MARKET_MIN_PIPS") or 40)       # Entry già superata: si entra a mercato solo se al TP1 mancano PIÙ di questi pips
-PARTIAL_ENABLED = os.environ.get("PARTIAL_TP2") == "1"    # parzializzazione SPENTA (decisione 05/11/2026: tutto chiuso a TP1); per riaccenderla: PARTIAL_TP2=1 in config.env
-PARTIAL_FRACTION = 0.6            # parte di lotti chiusa a TP1 (0,03 su 0,05); il resto va a pareggio e corre verso TP2
 MAX_SPREAD = float(os.environ.get("MAX_SPREAD") or 1.00)            # $: oltre questo spread non si apre (rollover, notizie). Cambiabile in config.env
 MAX_SPREAD_PCT = float(os.environ.get("MAX_SPREAD_PCT") or 0.20)    # frazione della distanza del TP1: lo spread non deve mangiarne più di così
 MAX_AGE_S = 120
@@ -141,29 +139,34 @@ def filling(mt5, info) -> int:
     return mt5.ORDER_FILLING_IOC if m & 2 else mt5.ORDER_FILLING_FOK if m & 1 else mt5.ORDER_FILLING_RETURN
 
 
-def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "", target: int = 1) -> tuple[str, list]:
-    """Apre il segnale con il TP scelto per il conto (target 1, 2 o 3): se il segnale non contiene quel TP non apre. Con target > 1 niente parzializzazione.
-    Internamente il TP scelto passa come «tp1» e nei messaggi la dicitura TP1 diventa TP{target}."""
+def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "", target: int = 1, partial: float = 0.0) -> tuple[str, list]:
+    """Apre il segnale con il TP scelto per il conto (target 1, 2 o 3): se il segnale non contiene quel TP non apre.
+    partial (0-1, solo con target > 1): quota dei lotti che si chiude a TP1; il resto passa a pareggio (BE) quando TP1 viene toccato e corre fino al TP scelto.
+    Servono un conto in modalità hedging e lotti divisibili, altrimenti si apre un'unica posizione con il TP scelto e il messaggio lo dice.
+    Internamente il TP scelto passa come «tp1» (controlli e filtri valgono per quello) e «tp_parz» è il TP1 vero del segnale."""
     if target not in (1, 2, 3):
         target = 1
     if target == 1:
-        return _execute(mt5, sig, dry, lots, tag)
+        return _execute(mt5, {**sig, "_target": 1}, dry, lots, tag)
     chosen = sig.get(f"tp{target}")
     if chosen is None:
         raise ValueError(f"il segnale non contiene TP{target}: su questo conto non apro (obiettivo scelto TP{target})")
     buy = sig["side"] == "buy"
     if not ((chosen > sig["tp1"]) if buy else (chosen < sig["tp1"])):
         raise ValueError(f"TP{target} {chosen} non coerente con TP1 {sig['tp1']} per un {sig['side'].upper()}: non apro")
+    s2 = {**sig, "tp1": chosen, "tp2": None, "_target": target}
+    if partial and 0 < partial < 1:
+        s2["tp_parz"] = sig["tp1"]
     try:
-        text, trks = _execute(mt5, {**sig, "tp1": chosen, "tp2": None}, dry, lots, tag)
+        text, trks = _execute(mt5, s2, dry, lots, tag, partial if "tp_parz" in s2 else 0.0)
     except ValueError as e:
         raise ValueError(str(e).replace("TP1", f"TP{target}")) from None
     for t in trks:
-        t["target"] = target
-    return text.replace("TP1", f"TP{target}"), trks
+        t["target"] = 1 if t.get("part") == "tp1" else target
+    return text, trks
 
 
-def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "") -> tuple[str, list]:
+def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "", partial: float = 0.0) -> tuple[str, list]:
     """Valida e (se non dry) invia l'ordine. Restituisce (testo di risposta, elenco delle posizioni da seguire: una, oppure due se il segnale ha il TP2); solleva ValueError se rifiutato."""
     ti = mt5.terminal_info()
     if ti is not None and getattr(ti, "trade_allowed", True) is False:
@@ -210,7 +213,7 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
             if (buy and sl_at >= tick.bid) or (not buy and sl_at <= tick.bid):
                 raise ValueError(f"il prezzo ({tick.bid:.2f}) ha già superato lo SL convertito ({sl_at:.2f}): non apro.")
             sl, tp = (sl_at, tp_at) if buy else (sl_at + (tick.ask - tick.bid), tp_at + (tick.ask - tick.bid))
-            note_off = f" · Entry su ActivTrades {e_at:.2f} (scarto {off:+.2f}, {src}) · al TP1 mancano {remaining:.0f} pips"
+            note_off = f" · Entry su ActivTrades {e_at:.2f} (scarto {off:+.2f}, {src}) · al TP{sig.get('_target', 1)} mancano {remaining:.0f} pips"
         else:                                              # nessuno scarto disponibile: distanze dall'Entry sul prezzo di adesso, filtro dei pips non applicabile
             sl, tp = (ref - sl_d, ref + tp_d) if buy else (ref + sl_d, ref - tp_d)
             note_off = f" · filtro dei {MIN_REMAINING_PIPS:.0f} pips NON applicato: scarto non disponibile ({src})"
@@ -221,30 +224,40 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
     else:
         check_levels(sig, tick.bid, tick.ask)
         sl, tp, scarto = sig["sl"], sig["tp1"], 0.0
-    # parzializzazione: con TP2 nel segnale, conto in modalità hedging e lotti divisibili si aprono DUE posizioni (PARTIAL_FRACTION a TP1, il resto a TP2)
+    # parzializzazione (per conto): con hedging e lotti divisibili si aprono DUE posizioni: una chiude a TP1 (quota «partial»), il resto corre fino al TP scelto e a TP1 va a pareggio
     step = getattr(info, "volume_step", 0.01) or 0.01
     vmin = getattr(info, "volume_min", step)
-    v1 = round(round(lots * PARTIAL_FRACTION / step) * step, 2)
-    v2 = round(lots - v1, 2)
     hedging = getattr(acc, "margin_mode", None) == getattr(mt5, "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING", 2)
-    split = PARTIAL_ENABLED and relative_levels() and sig.get("tp2") is not None and hedging and v1 >= vmin - 1e-9 and v2 >= vmin - 1e-9
-    parts = [(v1, tp, "tp1")]
+    split, why, v1, v2 = False, "", 0.0, 0.0
+    if partial and sig.get("tp_parz") is not None:
+        v1 = round(int(lots * partial / step + 0.5 + 1e-9) * step, 2)                  # arrotonda per eccesso a metà (come l'anteprima della pagina)
+        v2 = round(lots - v1, 2)
+        if not hedging:
+            why = "conto non in modalità hedging"
+        elif v1 < vmin - 1e-9 or v2 < vmin - 1e-9:
+            why = f"lotti non divisibili ({lots} con passo {step:g})"
+        elif not relative_levels():
+            why = "livelli assoluti"
+        else:
+            split = True
+    parts = [(lots, tp, None)]
     if split:
-        tp2_d = abs(sig["tp2"] - sig["entry"])
+        tpz_d = abs(sig["tp_parz"] - sig["entry"])
         off2 = current_offset()[0]
-        tp2_lv = (sig["tp2"] + off2 + (0 if buy else tick.ask - tick.bid)) if off2 is not None else (ref + tp2_d if buy else ref - tp2_d)
-        parts.append((v2, tp2_lv, "tp2"))
-    else:
-        parts = [(lots, tp, None)]
+        tpz_lv = (sig["tp_parz"] + off2 + (0 if buy else tick.ask - tick.bid)) if off2 is not None else (ref + tpz_d if buy else ref - tpz_d)
+        parts = [(v1, tpz_lv, "tp1"), (v2, tp, "tp2")]
     reqs = [{"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": v, "type": mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL,
              "price": px, "sl": round(sl, d), "tp": round(t, d), "deviation": DEVIATION, "magic": MAGIC,
              "comment": "tg-signal" + (f"-{name}" if name else ""), "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling(mt5, info)} for v, t, name in parts]
-    base = f"{sig['side'].upper()} {sym} " + (f"{v1}+{v2} lotti" if split else f"{lots} lotti") + f" a mercato ~{px} · SL {reqs[0]['sl']} ({abs(px - reqs[0]['sl']):.2f} $) · TP1 {reqs[0]['tp']} ({abs(reqs[0]['tp'] - px):.2f} $)"
-    summary = base
+    FT = f"TP{sig.get('_target', 1)}"
+    base = f"{sig['side'].upper()} {sym} " + (f"{v1}+{v2} lotti" if split else f"{lots} lotti") + f" a mercato ~{px} · SL {reqs[0]['sl']} ({abs(px - reqs[0]['sl']):.2f} $)"
     if split:
-        summary += f" · TP2 {reqs[1]['tp']} ({abs(reqs[1]['tp'] - px):.2f} $): a TP1 il resto va a pareggio"
-    elif PARTIAL_ENABLED and sig.get("tp2") is not None:
-        summary += " · TP2 ignorato: " + ("conto non in modalità hedging" if not hedging else "lotti non divisibili")
+        base += f" · TP1 {reqs[0]['tp']} ({abs(reqs[0]['tp'] - px):.2f} $) con {v1} lotti, poi {FT} {reqs[1]['tp']} ({abs(reqs[1]['tp'] - px):.2f} $) con {v2}: a TP1 il resto va a pareggio"
+    else:
+        base += f" · {FT} {reqs[0]['tp']} ({abs(reqs[0]['tp'] - px):.2f} $)"
+    summary = base
+    if partial and sig.get("tp_parz") is not None and not split:
+        summary += f" · parzializzazione NON applicata: {why}"
     if relative_levels():
         summary += note_off + f" · scarto misurato {scarto:+.2f} · spread {tick.ask - tick.bid:.2f}"
         hist = [v for _, v in read_scarti()[:-1]]                       # esclude quello appena registrato
@@ -425,7 +438,7 @@ def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
         sgn = n if (d.price - t["open"]) * sign >= 0 else -n               # pips con segno (guadagno o perdita reali)
         part, sib = t.get("part"), [(k2, t2) for k2, t2 in pending.items() if t2.get("group") and t2.get("group") == t.get("group") and k2 != key]
         if d.reason == mt5.DEAL_REASON_TP:
-            lab = f"{'TP2' if part == 'tp2' else 'TP' + str(t.get('target', 1))} {sgn:+.0f} pips · prezzo {price}"
+            lab = f"TP{t.get('target', 2 if part == 'tp2' else 1)} {sgn:+.0f} pips · prezzo {price}"
             announce(bot, mt5, t, deals, d, f"✅ {lab}", lab)
             if part == "tp1":                                           # parte a TP1 incassata: lo stop del resto va a pareggio
                 for k2, t2 in sib:
@@ -819,7 +832,7 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
                     try:
                         if acc:
                             with ma.session(acc) as mt:
-                                res, trks = execute(mt, sig, dry, acc["lots"], acc["login"] and str(acc["login"]), acc.get("tp_target") or 1)
+                                res, trks = execute(mt, sig, dry, acc["lots"], acc["login"] and str(acc["login"]), acc.get("tp_target") or 1, (acc.get("partial_pct") or 0) / 100)
                         else:
                             if legacy is None:
                                 from src.mt5_feed import connect

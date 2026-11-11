@@ -65,6 +65,10 @@ def db() -> sqlite3.Connection:
         con.execute("ALTER TABLE accounts ADD COLUMN tp_target INTEGER DEFAULT 1")   # quale TP del segnale usa il conto: 1, 2 o 3
     except sqlite3.OperationalError:
         pass
+    try:
+        con.execute("ALTER TABLE accounts ADD COLUMN partial_pct INTEGER DEFAULT 0")   # % dei lotti chiusa a TP1 (con il resto a pareggio); 0 = nessuna parzializzazione
+    except sqlite3.OperationalError:
+        pass
     return con
 
 
@@ -152,7 +156,19 @@ def clean(d: dict) -> dict:
         raise ValueError(f"i lotti devono stare tra 0,01 e {MAX_LOTS:g}")
     return {"name": name[:60], "login": login, "server": server[:80], "terminal_path": norm_terminal(str(d.get("terminal_path") or "")),
             "lots": round(lots, 2), "enabled": 1 if d.get("enabled", True) else 0, "use_signals": 1 if d.get("use_signals", True) else 0, "note": str(d.get("note") or "")[:300],
-            "tp_target": int(d.get("tp_target") or 1) if str(d.get("tp_target") or 1) in ("1", "2", "3") else 1}
+            "tp_target": int(d.get("tp_target") or 1) if str(d.get("tp_target") or 1) in ("1", "2", "3") else 1,
+            "partial_pct": _pct(d.get("partial_pct"))}
+
+
+def _pct(v) -> int:
+    """Percentuale di lotti da chiudere a TP1: 0 (spento) oppure da 10 a 90."""
+    try:
+        n = int(float(str(v or 0).replace(",", ".")))
+    except ValueError:
+        raise ValueError("la percentuale da parzializzare deve essere un numero")
+    if n and not 10 <= n <= 90:
+        raise ValueError("la percentuale da parzializzare deve stare tra 10 e 90 (0 = nessuna parzializzazione)")
+    return n
 
 
 def out(r: sqlite3.Row) -> dict:
@@ -209,14 +225,14 @@ def save_account(d: dict, aid: int | None = None) -> int:
         set_password(c["login"], c["server"], pw)
     con = db()
     if old is None:
-        cur = con.execute("INSERT INTO accounts (name,login,server,terminal_path,lots,enabled,use_signals,note,tp_target,created_at) VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))",
-                          (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["note"], c["tp_target"]))
+        cur = con.execute("INSERT INTO accounts (name,login,server,terminal_path,lots,enabled,use_signals,note,tp_target,partial_pct,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'))",
+                          (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["note"], c["tp_target"], c["partial_pct"]))
         aid = cur.lastrowid
     else:
         if (old["login"], old["server"]) != (c["login"], c["server"]):
             del_password(old["login"], old["server"])                  # la vecchia password non vale più
-        con.execute("UPDATE accounts SET name=?,login=?,server=?,terminal_path=?,lots=?,enabled=?,use_signals=?,note=?,tp_target=? WHERE id=?",
-                    (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["note"], c["tp_target"], aid))
+        con.execute("UPDATE accounts SET name=?,login=?,server=?,terminal_path=?,lots=?,enabled=?,use_signals=?,note=?,tp_target=?,partial_pct=? WHERE id=?",
+                    (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["note"], c["tp_target"], c["partial_pct"], aid))
     if first:                                                          # tipo e società li conosciamo già dal primo collegamento
         con.execute("UPDATE accounts SET kind=?, broker=COALESCE(NULLIF(?, ''), broker) WHERE id=?",
                     ("demo" if first.get("demo") else "real", first.get("company", ""), aid))

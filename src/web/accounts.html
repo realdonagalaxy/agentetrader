@@ -211,6 +211,11 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
       <label>Nota<input type="text" id="note" maxlength="300"></label>
     </div>
     <label>Obiettivo del segnale <span class="hint">(quale TP del canale usa questo conto)</span><select id="tp_target"><option value="1">TP1</option><option value="2">TP2</option><option value="3">TP3</option></select></label>
+    <label class="chk"><input type="checkbox" id="partial_on"><span>A TP1 parzializza e porta il resto a pareggio (BE)</span></label>
+    <div id="partbox" class="row2" hidden>
+      <label>Quota chiusa a TP1 (%) <span class="hint">(da 10 a 90)</span><input type="number" id="partial_pct" min="10" max="90" step="5" value="60"></label>
+      <div class="sub" id="partnote" style="align-self:end;padding-bottom:8px"></div>
+    </div>
     <label class="chk"><input type="checkbox" id="enabled" checked><span>Conto attivo (viene monitorato)</span></label>
     <label class="chk"><input type="checkbox" id="use_signals" checked><span>Usa per i segnali del canale (apre le operazioni; solo se il conto è demo)</span></label>
   </div>
@@ -260,7 +265,7 @@ function render() {
     const pl = ok ? `<span class="${cls(s.profit)}">${money(s.profit, s.currency)}</span>` : "—";
     let h = `<tr class="acc${on ? "" : " off"}" data-id="${a.id}"><td data-l="Conto"><div class="name num" title="${esc(((s && s.company) || a.broker || a.name) + (a.terminal_path ? " · Terminale: " + a.terminal_path : ""))}">${esc(a.login)}</div></td><td data-l="Tipo">${typ}</td><td data-l="Stato">${state}</td>
       <td data-l="Saldo" class="r num">${ok ? money(s.balance, s.currency) : "—"}</td><td data-l="Equity" class="r num">${ok ? money(s.equity, s.currency) : "—"}</td><td data-l="P&amp;L aperto" class="r num">${pl}</td><td data-l="Posizioni" class="r num">${n}</td>
-      <td data-l="Segnali">${a.use_signals && on && !(s && s.connected && !s.demo) ? `<span class="badge b-sig">${a.lots} lotti · TP${a.tp_target || 1}</span>` : a.use_signals && !(s && s.connected && !s.demo) ? `<span class="badge b-off">Sospeso</span>` : `<span class="badge b-off">No</span>`}</td>
+      <td data-l="Segnali">${a.use_signals && on && !(s && s.connected && !s.demo) ? `<span class="badge b-sig">${a.lots} lotti · TP${a.tp_target || 1}${a.partial_pct ? ` · parz. ${a.partial_pct}%` : ""}</span>` : a.use_signals && !(s && s.connected && !s.demo) ? `<span class="badge b-off">Sospeso</span>` : `<span class="badge b-off">No</span>`}</td>
       <td data-l="Attivo"><label class="sw" title="${on ? "Conto attivo: disattivalo per fermare monitoraggio e segnali" : "Conto disattivato: attivalo per monitorarlo e usarlo per i segnali"}"><input type="checkbox" role="switch" data-act="toggle" ${on ? "checked" : ""} aria-label="Attiva o disattiva il conto ${esc(a.login)}"><span></span></label></td>
       <td data-l=""><div class="actions"><button class="btn sm sec" data-act="edit">Modifica</button><button class="btn sm del" data-act="del">Elimina</button></div></td></tr>`;
     if (open.has(a.id) && ok) h += detail(a, s);
@@ -340,12 +345,21 @@ function edit(a) {
   for (const k of ["login", "server", "lots", "note"]) $(k).value = a ? a[k] : (k === "lots" ? 0.05 : "");
   $("password").value = ""; $("password").placeholder = a && a.has_password ? "•••••• (lascia vuoto per non cambiarla)" : "";
   $("tp_target").value = a ? (a.tp_target || 1) : 1;
+  $("partial_on").checked = !!(a && a.partial_pct); $("partial_pct").value = a && a.partial_pct ? a.partial_pct : 60; partUi();
   $("enabled").checked = a ? a.enabled : true; $("use_signals").checked = a ? a.use_signals : true;
   $("tpl").hidden = !a; $("terminal_path").value = a ? (a.terminal_path || "Terminale predefinito di MT5") : "";
   $("dlg").showModal(); $("login").focus();
 }
+function partUi() {                                                    // la parzializzazione ha senso solo se il TP scelto è TP2 o TP3
+  const ok = +$("tp_target").value > 1;
+  $("partial_on").disabled = !ok; if (!ok) $("partial_on").checked = false;
+  $("partbox").hidden = !$("partial_on").checked;
+  const lots = +$("lots").value || 0, pct = +$("partial_pct").value || 0, a = Math.round(lots * pct) / 100;
+  $("partnote").textContent = ok && $("partial_on").checked ? `${a.toFixed(2)} lotti a TP1, ${(Math.round((lots - a) * 100) / 100).toFixed(2)} fino al TP${$("tp_target").value} (con SL a BE dopo TP1). Serve un conto hedging e lotti divisibili.` : (ok ? "" : "Disponibile con obiettivo TP2 o TP3.");
+}
+["tp_target", "partial_on", "partial_pct", "lots"].forEach(id => $(id).addEventListener("input", partUi));
 const form = () => ({name: editing ? (accounts.find(x => x.id === editing) || {}).name || "" : "", login: $("login").value, server: $("server").value, password: $("password").value, terminal_path: editing ? (accounts.find(x => x.id === editing) || {}).terminal_path || "" : "",
-  lots: $("lots").value, note: $("note").value, create_terminal: !editing, enabled: $("enabled").checked, use_signals: $("use_signals").checked, tp_target: $("tp_target").value});
+  lots: $("lots").value, note: $("note").value, create_terminal: !editing, enabled: $("enabled").checked, use_signals: $("use_signals").checked, tp_target: $("tp_target").value, partial_pct: $("partial_on").checked && +$("tp_target").value > 1 ? $("partial_pct").value : 0});
 $("add").onclick = () => edit(null);
 $("cancel").onclick = () => $("dlg").close();
 $("refresh").onclick = refresh;
@@ -521,8 +535,9 @@ async function loadSignals() {
     if (!c || c.stato === "nessuno") return `<span class="badge b-off" title="Nessun esito registrato: il programma non ha applicato questo segnale a questo conto">non aperto</span>`;
     if (c.stato === "aperto" || c.stato === "stop") {
       const ch = c.chiusura;
-      const res = ch ? ` · ${ch === "tp" ? "TP" : ch === "sl" ? "SL" : "chiusa"} ${c.pips >= 0 ? "+" : ""}${Math.round(c.pips)}p` : c.non_verificata ? " · stato non verificabile (conto non collegato)" : " · in corso";
-      const cls = !ch ? "b-ok" : ch === "tp" ? "b-ok" : ch === "sl" ? "b-err" : (c.pips >= 0 ? "b-ok" : "b-err");       // SL rosso, TP verde, in corso neutro; chiusa a mano: dal segno dei pips
+      const parti = c.parti && c.parti.length ? ` · ${c.parti.map(x => x.txt).join(" + ")}` : "";
+      const res = parti ? parti : ch ? ` · ${ch === "tp" ? "TP" : ch === "sl" ? "SL" : "chiusa"} ${c.pips >= 0 ? "+" : ""}${Math.round(c.pips)}p` : c.non_verificata ? " · stato non verificabile (conto non collegato)" : " · in corso";
+      const cls = c.parti && c.parti.length ? (c.netto != null && c.netto < 0 ? "b-err" : "b-ok") : !ch ? "b-ok" : ch === "tp" ? "b-ok" : ch === "sl" ? "b-err" : (c.pips >= 0 ? "b-ok" : "b-err");       // SL rosso, TP verde, in corso neutro; chiusa a mano: dal segno dei pips
       const f = v => v == null ? "—" : esc(String(Math.round(+v * 100) / 100));
       const det = [`Apertura <b>${f(c.p_open != null ? c.p_open : c.prezzo)}</b>`, c.p_close != null ? `Chiusura <b>${f(c.p_close)}</b>` : (c.p_now != null ? `Ora <b>${f(c.p_now)}</b>` : ""),
         `TP <b>${f(c.tp)}</b>`, `SL <b>${f(c.sl)}</b>`, c.profitto != null ? `P/L <b>${c.profitto} $</b>` : (c.pl != null ? `P/L <b>${c.pl} $</b>` : "")].filter(Boolean).join(" · ");

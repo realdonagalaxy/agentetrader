@@ -164,8 +164,8 @@ def _fake_trades(login):
 
 def _deals_of(t):
     pid, to, tc, ty, p0, p1, pl, reason = t
-    return [N(ticket=pid * 2, position_id=pid, time=to, type=ty, entry=DEAL_ENTRY_IN, reason=DEAL_REASON_CLIENT, price=p0, profit=0.0, commission=-0.35, swap=0.0, fee=0.0, symbol="GOLD"),
-            N(ticket=pid * 2 + 1, position_id=pid, time=tc, type=1 - ty, entry=DEAL_ENTRY_OUT, reason=reason, price=p1, profit=pl, commission=-0.35, swap=0.0, fee=0.0, symbol="GOLD")]
+    return [N(ticket=pid * 2, position_id=pid, time=to, type=ty, entry=DEAL_ENTRY_IN, reason=DEAL_REASON_CLIENT, price=p0, volume=0.03, profit=0.0, commission=-0.35, swap=0.0, fee=0.0, symbol="GOLD"),
+            N(ticket=pid * 2 + 1, position_id=pid, time=tc, type=1 - ty, entry=DEAL_ENTRY_OUT, reason=reason, price=p1, volume=0.03, profit=pl, commission=-0.35, swap=0.0, fee=0.0, symbol="GOLD")]
 
 
 def history_orders_get(*a, position=None, **kw):
