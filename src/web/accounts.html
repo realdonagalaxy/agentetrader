@@ -522,10 +522,11 @@ async function loadSignals() {
     if (c.stato === "aperto" || c.stato === "stop") {
       const ch = c.chiusura;
       const res = ch ? ` · ${ch === "tp" ? "TP" : ch === "sl" ? "SL" : "chiusa"} ${c.pips >= 0 ? "+" : ""}${Math.round(c.pips)}p` : c.non_verificata ? " · stato non verificabile (conto non collegato)" : " · in corso";
+      const cls = !ch ? "b-ok" : ch === "tp" ? "b-ok" : ch === "sl" ? "b-err" : (c.pips >= 0 ? "b-ok" : "b-err");       // SL rosso, TP verde, in corso neutro; chiusa a mano: dal segno dei pips
       const f = v => v == null ? "—" : esc(String(Math.round(+v * 100) / 100));
       const det = [`Apertura <b>${f(c.p_open != null ? c.p_open : c.prezzo)}</b>`, c.p_close != null ? `Chiusura <b>${f(c.p_close)}</b>` : (c.p_now != null ? `Ora <b>${f(c.p_now)}</b>` : ""),
         `TP <b>${f(c.tp)}</b>`, `SL <b>${f(c.sl)}</b>`, c.profitto != null ? `P/L <b>${c.profitto} $</b>` : (c.pl != null ? `P/L <b>${c.pl} $</b>` : "")].filter(Boolean).join(" · ");
-      return `<span class="badge b-ok" title="Aperto a ${esc(c.prezzo || "")}${c.profitto != null ? " · profitto " + c.profitto + " $" : ""}">aperto${res}</span><div class="sub" style="margin-top:4px;line-height:1.5">${det}</div>`;
+      return `<span class="badge ${cls}" title="Aperto a ${esc(c.prezzo || "")}${c.profitto != null ? " · profitto " + c.profitto + " $" : ""}">aperto${res}</span><div class="sub" style="margin-top:4px;line-height:1.5">${det}</div>`;
     }
     return `<span class="badge b-err" title="${esc(c.dettaglio || "")}">${c.stato === "rifiutato" ? "rifiutato" : "errore"}</span> <span class="sub">${esc((c.dettaglio || "").slice(0, 60))}</span>`;
   };
