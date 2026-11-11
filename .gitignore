@@ -24,3 +24,4 @@ journal/telegram.session*
 journal/canale_messaggi.csv
 journal/canale_segnali.csv
 journal/canale_stato.json
+backup_gestione_conti_*.zip
