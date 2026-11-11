@@ -343,7 +343,7 @@ def follow_orders(mt5, pending: dict, bot, only=None) -> None:
             continue
         if list(mt5.orders_get(ticket=tk) or ()):
             tick = mt5.symbol_info_tick(t["symbol"])
-            if (tick.bid >= t["tp"]) if buy else (tick.ask <= t["tp"]):          # il movimento è partito senza lo stop: setup non più valido
+            if not t.get("keep") and ((tick.bid >= t["tp"]) if buy else (tick.ask <= t["tp"])):          # il movimento è partito senza lo stop: setup non più valido (gli ordini manuali restano: decide l'utente)
                 res = mt5.order_send({"action": mt5.TRADE_ACTION_REMOVE, "order": tk})
                 if res is not None and res.retcode == mt5.TRADE_RETCODE_DONE:
                     say(bot, f"🚫 Ordine annullato: il prezzo ha toccato il TP1 ({fmt(t['tp'])}) senza attivare lo stop", t["msg_id"])
@@ -786,6 +786,12 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
             if feed.empty():
                 time.sleep(5)
                 continue
+        try:                                                          # trade discrezionali inseriti dalla pagina «Manuale»: stessa gestione (TP del conto, parzializzazione, BE)
+            from src import manual_trade
+            if manual_trade.process_requests(pending, bot, say, save_pending):
+                print("Trade manuale elaborato.", flush=True)
+        except Exception as e:
+            print("Trade manuale:", type(e).__name__, str(e)[:200], flush=True)
         manual = JOURNAL_DIR / "segnale_manuale.json"                 # segnale passato a mano con: python -m src.telegram_reader --canale ... --apri-ultimo-segnale
         if manual.exists():
             try:

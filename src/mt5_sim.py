@@ -8,6 +8,7 @@ ACCOUNT_TRADE_MODE_DEMO, ACCOUNT_TRADE_MODE_REAL = 0, 2
 TRADE_ACTION_DEAL = 1
 TRADE_ACTION_SLTP = 2
 TRADE_ACTION_PENDING, TRADE_ACTION_REMOVE = 5, 8
+ORDER_TYPE_BUY_LIMIT, ORDER_TYPE_SELL_LIMIT = 2, 3
 ORDER_TYPE_BUY_STOP, ORDER_TYPE_SELL_STOP = 4, 5
 ORDER_TIME_DAY = 1
 TRADE_RETCODE_PLACED = 10008
@@ -91,7 +92,7 @@ def symbols_get(*a, **kw):
 
 
 def symbol_info(sym):
-    return N(digits=2, filling_mode=3, point=0.01, trade_stops_level=0, expiration_mode=15) if sym in ("GOLD", "XAUUSD") else None
+    return N(digits=2, filling_mode=3, point=0.01, trade_stops_level=0, expiration_mode=15, trade_tick_value=1.0, trade_tick_size=0.01, volume_min=0.01, volume_step=0.01, volume_max=100.0) if sym in ("GOLD", "XAUUSD") else None
 
 
 def symbol_info_tick(sym):
@@ -137,9 +138,9 @@ def orders_get(ticket=None, **kw):
     return tuple(o for o in _state["orders"].values() if o.login == _state["login"] and (ticket is None or o.ticket == ticket))
 
 
-def positions_get(**kw):
+def positions_get(ticket=None, **kw):
     _tick_positions()
-    return tuple(p for p in _state["positions"].values() if p.login == _state["login"])
+    return tuple(p for p in _state["positions"].values() if p.login == _state["login"] and (ticket is None or p.ticket == ticket))
 
 
 _fake = {}

@@ -68,6 +68,51 @@ def _read_csv(name: str) -> list[dict]:
         return []
 
 
+def _manual_accounts(ids) -> list:
+    out = []
+    for i in ids:
+        a = ma.get_account(int(i))
+        if not a.get("manual_ok"):
+            raise ValueError(f"il conto {a['login']} non è abilitato ai trade manuali (Modifica → «Usa per i trade manuali»)")
+        out.append(a)
+    if not out:
+        raise ValueError("scegli almeno un conto")
+    return out
+
+
+def manual_preview(d: dict) -> dict:
+    """Anteprima: per ogni conto scelto, lotti, livelli e controlli, SENZA inviare ordini (si collega a MT5 in sola lettura)."""
+    from src import manual_trade as mt
+    req = mt.parse_request(d)
+    res = []
+    for a in _manual_accounts(d.get("accounts") or []):
+        try:
+            with ma.session(a) as m:
+                text, _ = mt.execute_manual(m, req, a, dry=True)
+            res.append({"conto": a["login"], "ok": True, "testo": text, "reale": text.startswith("[ANTEPRIMA, nessun ordine inviato] [CONTO REALE]")})
+        except Exception as e:
+            res.append({"conto": a["login"], "ok": False, "testo": str(e)[:400]})
+    return {"req": req, "risultati": res}
+
+
+def manual_send(d: dict) -> dict:
+    """Accoda il trade per il programma in ascolto. Con conti reali serve confirm_real (la pagina lo chiede digitando REALE) e un'anteprima senza errori."""
+    from src import manual_trade as mt
+    req = mt.parse_request(d)
+    accs = _manual_accounts(d.get("accounts") or [])
+    if not listener_running():
+        raise ValueError("L'ascolto dei segnali non è attivo: è lui che apre e gestisce i trade. Avvialo e riprova.")
+    prev = manual_preview(d)
+    bad = [r for r in prev["risultati"] if not r["ok"]]
+    reali = [r for r in prev["risultati"] if r.get("reale")]
+    if reali and not d.get("confirm_real"):
+        raise ValueError("Tra i conti c'è un conto REALE: serve la conferma esplicita.")
+    if bad:
+        raise ValueError("Non apro: " + " | ".join(f"{r['conto']}: {r['testo']}" for r in bad))
+    mid = mt.write_request(req, [a["id"] for a in accs], bool(d.get("confirm_real")))
+    return {"id": mid, "anteprima": prev["risultati"]}
+
+
 def day_range(date: str, tz_min: int):
     """Intervallo UTC (epoch) del giorno locale dell'utente: tz_min = JS getTimezoneOffset() (minuti, positivo a ovest di UTC)."""
     from datetime import datetime, timedelta, timezone
@@ -109,7 +154,9 @@ def _closures_from_mt5(needed: dict) -> dict:
                             out[(lg, t)] = {**base, "aperta": True, "p_open": float(x.price_open), "sl": float(x.sl) if x.sl else base["sl"], "tp": float(x.tp) if x.tp else base["tp"],
                                             "p_now": float(x.price_current), "pl": round(float(x.profit), 2), "vol": float(getattr(x, "volume", 0) or 0), "netto": round(float(x.profit) + float(getattr(x, "swap", 0) or 0), 2)}
                         else:
-                            out[(lg, t)] = {}                                       # non trovata (cronologia non ancora aggiornata)
+                            od = list(m.orders_get(ticket=int(t)) or ())             # ordine LIMIT/STOP non ancora scattato
+                            out[(lg, t)] = {**base, "in_attesa": True, "p_open": float(od[0].price_open), "sl": float(od[0].sl) if od[0].sl else base["sl"],
+                                            "tp": float(od[0].tp) if od[0].tp else base["tp"]} if od else {}        # {} = non trovata (cronologia non ancora aggiornata o ordine annullato)
                         continue
                     d, o = cl[-1], (op[0] if op else None)
                     reason = "tp" if d.reason == m.DEAL_REASON_TP else "sl" if d.reason == m.DEAL_REASON_SL else "altra"
@@ -133,14 +180,15 @@ def _closures_from_mt5(needed: dict) -> dict:
     return out
 
 
-def signals_day(date: str, tz_min: int) -> dict:
-    """Segnali del canale in un giorno (canale_segnali.csv) e cosa ha fatto l'app per ciascuno e per ogni conto: aperto / rifiutato (motivo) / chiuso a TP o SL (segnali_esiti.csv, segnali_chiusure.csv)."""
+def signals_day(date: str, tz_min: int, manual: bool = False) -> dict:
+    """Segnali del canale in un giorno (canale_segnali.csv) e cosa ha fatto l'app per ciascuno e per ogni conto: aperto / rifiutato (motivo) / chiuso a TP o SL (segnali_esiti.csv, segnali_chiusure.csv).
+    manual=True: stessa struttura per i trade DISCREZIONALI (manuali.csv, manuali_esiti.csv), senza gli esiti di Cedric."""
     from datetime import datetime, timezone
     d0, d1 = day_range(date, tz_min)
-    accs = {str(a["login"]): a for a in ma.list_accounts() if a.get("use_signals")}
+    accs = {str(a["login"]): a for a in ma.list_accounts() if (a.get("manual_ok") if manual else a.get("use_signals"))}
     by_id = {a["id"]: str(a["login"]) for a in ma.list_accounts()}
     sigs = {}
-    for r in _read_csv("canale_segnali.csv"):                                  # un messaggio può comparire due volte (creato e poi modificato): vale l'ultima riga
+    for r in _read_csv("manuali.csv" if manual else "canale_segnali.csv"):                                  # un messaggio può comparire due volte (creato e poi modificato): vale l'ultima riga
         try:
             t = datetime.strptime(r["time_utc"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
         except (KeyError, ValueError):
@@ -150,7 +198,7 @@ def signals_day(date: str, tz_min: int) -> dict:
         if d0 <= t < d1:
             sigs[r["msg_id"]] = {**r, "t": t.isoformat()}
     esiti, chius = {}, {}
-    for r in _read_csv("segnali_esiti.csv"):
+    for r in _read_csv("manuali_esiti.csv" if manual else "segnali_esiti.csv"):
         if r.get("esito") != "prova":
             esiti.setdefault(r["msg_id"], {})[r["conto"]] = r                  # per ogni conto vale l'ultimo esito
     for r in _read_csv("segnali_chiusure.csv"):
@@ -160,13 +208,13 @@ def signals_day(date: str, tz_min: int) -> dict:
     # esiti dichiarati da Cedric (TP1/TP2/TP3 HIT, STOP LOSS): si collegano al segnale a cui rispondono; se il messaggio non è una risposta, al segnale precedente più vicino
     res_by_sig, order = {}, sorted(sigs.items(), key=lambda kv: kv[1]["t"])
     all_sigs = []
-    for r in _read_csv("canale_segnali.csv"):
+    for r in ([] if manual else _read_csv("canale_segnali.csv")):
         try:
             all_sigs.append((datetime.strptime(r["time_utc"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc), r["msg_id"]))
         except (KeyError, ValueError):
             pass
     all_sigs.sort()
-    for r in _read_csv("canale_esiti.csv"):
+    for r in ([] if manual else _read_csv("canale_esiti.csv")):
         try:
             t = datetime.strptime(r["time_utc"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
         except (KeyError, ValueError):
@@ -179,7 +227,7 @@ def signals_day(date: str, tz_min: int) -> dict:
             res_by_sig.setdefault(target, []).append({"tipo": r["tipo"], "pips": r.get("pips"), "t": t.isoformat(), "dedotto": inferred})
     linked = {mid for mid in res_by_sig}
     orfani = []                                                                 # esiti di Cedric del giorno il cui segnale non è nell'elenco: si mostrano comunque
-    for r in _read_csv("canale_esiti.csv"):
+    for r in ([] if manual else _read_csv("canale_esiti.csv")):
         try:
             t = datetime.strptime(r["time_utc"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
         except (KeyError, ValueError):
@@ -217,7 +265,7 @@ def signals_day(date: str, tz_min: int) -> dict:
                                 be = r_["chiusura"] == "sl" and abs(r_.get("pips") or 0) <= 6          # SL a pareggio (BE): chiusa vicino al prezzo di apertura
                                 c["parti"].append({"txt": ("BE" if be else {"tp": "TP", "sl": "SL"}.get(r_["chiusura"], "chiusa")) + f" {r_['pips']:+.0f}p", "netto": r_.get("netto") or 0.0, "chiusa": True})
                             else:
-                                c["parti"].append({"txt": "in corso", "netto": r_.get("netto") or 0.0, "chiusa": False})
+                                c["parti"].append({"txt": "in attesa" if r_.get("in_attesa") else "in corso", "netto": r_.get("netto") or 0.0, "chiusa": False, "attesa": bool(r_.get("in_attesa"))})
                         known = [r_ for r_ in rrs if r_]
                         if known and len(known) == len(rrs):
                             c["netto"] = round(sum(x["netto"] for x in c["parti"]), 2)
@@ -235,6 +283,8 @@ def signals_day(date: str, tz_min: int) -> dict:
                         c["pips"] = sum(float(x["pips"] or 0) for x in cl)
                     elif rr.get("errore"):
                         c["non_verificata"] = True
+                    if rr.get("in_attesa") or (c.get("parti") and all(p_.get("attesa") for p_ in c["parti"])):
+                        c["in_attesa"] = True
                     for k in ("p_open", "p_close", "sl", "tp", "p_now", "pl", "netto"):               # prezzi reali letti da MT5: apertura, chiusura, livelli e prezzo attuale
                         if rr.get(k) is not None:
                             c[k] = rr[k]
@@ -242,7 +292,7 @@ def signals_day(date: str, tz_min: int) -> dict:
         n_open = sum(1 for c in per.values() if c["stato"] in ("aperto", "stop"))
         rows.append({"id": mid, "t": g["t"], "side": g.get("side") or "", "symbol": g.get("symbol") or "", "entry": g.get("entry"), "sl": g.get("sl"),
                      "tp1": g.get("tp1"), "tp2": g.get("tp2"), "tp3": g.get("tp3"), "errore": g.get("errore") or "", "conti": per, "aperti": n_open,
-                     "cedric": sorted(res_by_sig.get(mid, []), key=lambda x: x["t"])})
+                     "cedric": sorted(res_by_sig.get(mid, []), key=lambda x: x["t"]), "tipo": g.get("tipo") or "", "rischio": g.get("rischio") or "", "nota": g.get("nota") or ""})
     return {"date": date, "conti": [{"login": lg, "target": a.get("tp_target") or 1} for lg, a in accs.items()], "segnali": rows, "esiti_orfani": orfani}
 
 
@@ -431,6 +481,16 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/signals-day":
                 q = parse_qs(urlparse(self.path).query)
                 return self._json(signals_day((q.get("date") or [datetime.now().strftime("%Y-%m-%d")])[0], int((q.get("tz") or ["0"])[0])))
+            if path == "/api/manual-day":
+                q = parse_qs(urlparse(self.path).query)
+                return self._json(signals_day((q.get("date") or [datetime.now().strftime("%Y-%m-%d")])[0], int((q.get("tz") or ["0"])[0]), manual=True))
+            if path == "/api/manual-result":
+                q = parse_qs(urlparse(self.path).query)
+                mid = re.sub(r"[^A-Za-z0-9]", "", (q.get("id") or [""])[0])
+                try:
+                    return self._json(json.loads((ma.DATA_DIR / "manuali" / f"{mid}.result.json").read_text(encoding="utf-8")))
+                except (OSError, ValueError):
+                    return self._json({})
             if path == "/api/signals-sync-info":
                 try:
                     return self._json(json.loads((ma.DATA_DIR / "giorno_info.json").read_text(encoding="utf-8")))
@@ -478,6 +538,15 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/accounts" and method == "POST":
                 aid = ma.save_account(self._data())
                 return self._json({"id": aid, "terminal_path": ma.get_account(aid)["terminal_path"]}, 201)
+            if path == "/api/manual-parse" and method == "POST":                  # legge un testo nel formato di Cedric e ne ricava i campi del modulo
+                from src import mt5_orders as mo
+                text = mo.clean_text(str(self._data().get("text") or ""))
+                sg = mo.parse_signal(text)
+                return self._json({k: sg.get(k) for k in ("symbol", "side", "entry", "sl", "tp1", "tp2", "tp3")})
+            if path == "/api/manual-preview" and method == "POST":
+                return self._json(manual_preview(self._data()))
+            if path == "/api/manual-send" and method == "POST":
+                return self._json(manual_send(self._data()))
             if path == "/api/signals-sync" and method == "POST":                   # «Scarica dal canale»: il programma dei segnali registra tutti i segnali di quel giorno (senza eseguirli)
                 d = self._data()
                 d0, d1 = day_range(str(d.get("date")), int(d.get("tz") or 0))

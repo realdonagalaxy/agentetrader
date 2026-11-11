@@ -20,6 +20,7 @@ Sei l'agente quantitativo di sviluppo e monitoraggio trading. Il tuo compito è:
 
 ## Sicurezza operativa
 - Non eseguire ordini su conto `live` senza conferma esplicita. Default: `CTRADER_ENV=demo`.
+- Parte AUTOMATICA (segnali del canale): solo conti demo, sempre. Parte MANUALE (trade discrezionali, scheda «Manuale» di Gestione Conti): conti reali solo se il conto è abilitato ai manuali, rischio max 2% (`MANUAL_MAX_RISK_REAL`) e conferma a ogni apertura digitando REALE (decisione dell'utente 11/11/2026).
 - Mai committare `config.env` o credenziali (usa `config.env.example`).
 - Ogni segnale riporta: simbolo, direzione, entry, SL, TP, R:R e motivazione.
 - Valida le strategie con `src/backtest_engine.py` prima di usarle per segnali reali.
