@@ -198,8 +198,11 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
         <label>TP1<input type="text" inputmode="decimal" id="mtp1"></label>
       </div>
       <div class="row2">
-        <label>TP2 <span class="hint">(facoltativo)</span><input type="text" inputmode="decimal" id="mtp2"></label>
-        <label>TP3 <span class="hint">(facoltativo)</span><input type="text" inputmode="decimal" id="mtp3"></label>
+        <label>TP2 <span class="hint">(dove chiudi il resto; vuoto = tutto a TP1)</span><input type="text" inputmode="decimal" id="mtp2"></label>
+        <div>
+          <label class="chk" style="margin-top:22px"><input type="checkbox" id="mparz_on" checked><span>A TP1 parzializza e porta il resto a pareggio (BE)</span></label>
+          <label id="mparzbox" style="margin-top:6px">Quota chiusa a TP1 (%) <span class="hint">(10-90)</span><input type="text" inputmode="numeric" id="mparz" value="60"></label>
+        </div>
       </div>
       <div class="row2">
         <label>Rischio per trade (% del saldo)<input type="text" inputmode="decimal" id="mrisk" value="0.5"></label>
@@ -599,7 +602,7 @@ function renderSig(r, ids, manual) {
     const t = new Date(s.t), hh = t.toLocaleTimeString("it-IT", {hour: "2-digit", minute: "2-digit"});
     const dir = s.side ? s.side.toUpperCase() + " " + esc(s.symbol) : `<span class="err">${esc(s.errore || "non letto")}</span>`;
     const nz = v => v === "" || v == null ? "—" : esc(String(Math.round(+v * 100) / 100));          // niente 4098.469999999999
-    return `<tr><td data-l="Ora">${hh}</td><td data-l="Segnale"><b>${dir}</b></td><td class="r" data-l="Entry">${nz(s.entry)}</td><td class="r" data-l="SL">${nz(s.sl)}</td><td class="r" data-l="TP1">${nz(s.tp1)}</td><td class="r" data-l="TP2">${nz(s.tp2)}</td><td class="r" data-l="TP3">${nz(s.tp3)}</td><td class="wide" data-l="${manual ? "Ingresso · rischio" : "Esito Cedric"}">${manual ? `<span class="badge b-off">${({market: "mercato", limit: "limit", stop: "stop"})[s.tipo] || esc(s.tipo)}</span> ${esc(s.rischio)}%${s.nota ? ` <span class="sub">${esc(s.nota)}</span>` : ""}` : cedric(s)}</td>${accs.map(a => `<td class="wide" data-l="Conto ${esc(a.login)} · TP${a.target}">${cell(s.conti[a.login])}</td>`).join("")}</tr>`;
+    return `<tr><td data-l="Ora">${hh}</td><td data-l="Segnale"><b>${dir}</b></td><td class="r" data-l="Entry">${nz(s.entry)}</td><td class="r" data-l="SL">${nz(s.sl)}</td><td class="r" data-l="TP1">${nz(s.tp1)}</td><td class="r" data-l="TP2">${nz(s.tp2)}</td><td class="r" data-l="TP3">${nz(s.tp3)}</td><td class="wide" data-l="${manual ? "Ingresso · rischio" : "Esito Cedric"}">${manual ? `<span class="badge b-off">${({market: "mercato", limit: "limit", stop: "stop"})[s.tipo] || esc(s.tipo)}</span> ${esc(s.rischio)}%${s.parz ? ` · parz. ${esc(s.parz)}% a TP1` : ""}${s.nota ? ` <span class="sub">${esc(s.nota)}</span>` : ""}` : cedric(s)}</td>${accs.map(a => `<td class="wide" data-l="Conto ${esc(a.login)} · TP${a.target}">${cell(s.conti[a.login])}</td>`).join("")}</tr>`;
   }).join("") : `<tr><td colspan="${8 + accs.length}" class="sub" style="padding:14px">${manual ? "Nessun trade manuale per questo giorno." : "Nessun segnale registrato per questo giorno. Se sai che ce ne sono stati, premi «Scarica dal canale»."}</td></tr>`;
 }
 $("sload").onclick = loadSignals; $("sdate").onchange = loadSignals;
@@ -632,12 +635,12 @@ async function loadManualAccounts() {
     return `<label class="chk"><input type="checkbox" class="macc" value="${a.id}" ${real ? "" : "checked"}><span><b>${esc(a.login)}</b> · TP${a.tp_target || 1}${a.partial_pct ? ` · parz. ${a.partial_pct}%` : ""}${real ? ` <span class="badge b-err">REALE</span>` : ""}</span></label>`;
   }).join("") : `<span class="sub">Nessun conto abilitato ai trade manuali: spunta «Usa per i trade manuali» in Modifica.</span>`;
 }
-const mform = () => ({symbol: $("msym").value, side: $("mside").value, tipo: $("mtipo").value, entry: $("mentry").value, sl: $("msl").value, tp1: $("mtp1").value, tp2: $("mtp2").value, tp3: $("mtp3").value,
+const mform = () => ({symbol: $("msym").value, side: $("mside").value, tipo: $("mtipo").value, entry: $("mentry").value, sl: $("msl").value, tp1: $("mtp1").value, tp2: $("mtp2").value, parz: $("mparz_on").checked && $("mtp2").value.trim() ? $("mparz").value : 0,
   rischio: $("mrisk").value, nota: $("mnota").value, accounts: [...document.querySelectorAll(".macc:checked")].map(x => +x.value)});
 $("mread").onclick = async () => {
   try {
     const r = await api("/api/manual-parse", "POST", {text: $("mtext").value});
-    $("msym").value = r.symbol || "XAUUSD"; $("mside").value = r.side; $("mentry").value = r.entry; $("msl").value = r.sl; $("mtp1").value = r.tp1; $("mtp2").value = r.tp2 ?? ""; $("mtp3").value = r.tp3 ?? "";
+    $("msym").value = r.symbol || "XAUUSD"; $("mside").value = r.side; $("mentry").value = r.entry; $("msl").value = r.sl; $("mtp1").value = r.tp1; $("mtp2").value = r.tp2 ?? "";
     toast("Testo letto: controlla i valori nel modulo", 4000);
   } catch (e) { toast("Non riesco a leggere il testo: " + e.message, 8000); }
 };

@@ -292,7 +292,7 @@ def signals_day(date: str, tz_min: int, manual: bool = False) -> dict:
         n_open = sum(1 for c in per.values() if c["stato"] in ("aperto", "stop"))
         rows.append({"id": mid, "t": g["t"], "side": g.get("side") or "", "symbol": g.get("symbol") or "", "entry": g.get("entry"), "sl": g.get("sl"),
                      "tp1": g.get("tp1"), "tp2": g.get("tp2"), "tp3": g.get("tp3"), "errore": g.get("errore") or "", "conti": per, "aperti": n_open,
-                     "cedric": sorted(res_by_sig.get(mid, []), key=lambda x: x["t"]), "tipo": g.get("tipo") or "", "rischio": g.get("rischio") or "", "nota": g.get("nota") or ""})
+                     "cedric": sorted(res_by_sig.get(mid, []), key=lambda x: x["t"]), "tipo": g.get("tipo") or "", "rischio": g.get("rischio") or "", "parz": g.get("parz") or "", "nota": g.get("nota") or ""})
     return {"date": date, "conti": [{"login": lg, "target": a.get("tp_target") or 1} for lg, a in accs.items()], "segnali": rows, "esiti_orfani": orfani}
 
 

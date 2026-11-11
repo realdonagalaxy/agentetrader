@@ -1,6 +1,8 @@
 """Parte MANUALE di Gestione Conti: trading discrezionale. I dati del trade li scrive l'utente (modulo o testo incollato); il programma apre gli ordini e li gestisce con la STESSA logica
 della parte automatica: TP scelto per conto, parzializzazione a TP1 con il resto a pareggio (BE), controllo dei risultati nella pagina.
 
+Gestione del trade (decisa nel modulo, per ogni trade, uguale su tutti i conti scelti): TP1 = dove si parzializza, TP2 = dove si chiude il resto. Con «parzializza» attivo si aprono due posizioni
+(quota % a TP1, il resto a TP2); quando TP1 viene toccato lo SL del resto va a pareggio (BE). Senza parzializzazione una posizione sola, chiusa al TP finale (TP2 se c'è, altrimenti TP1).
 Differenze rispetto ai segnali del canale (parte automatica):
 - i prezzi sono QUELLI DEL TUO CONTO: nessuna conversione dello scarto tra broker, nessun filtro dei 45 pips;
 - ingresso a scelta per ogni trade: mercato, LIMIT o STOP al prezzo scritto;
@@ -23,7 +25,7 @@ MAN_ESITI = DIR / "manuali_esiti.csv"
 MAX_RISK = float(os.environ.get("MANUAL_MAX_RISK") or 5.0)              # % massimo del saldo rischiato in un trade (conti demo)
 MAX_RISK_REAL = float(os.environ.get("MANUAL_MAX_RISK_REAL") or 2.0)    # % massimo sui conti REALI
 MAX_LOTS = float(os.environ.get("MANUAL_MAX_LOTS") or 5.0)              # lotti massimi per trade
-MAN_COLS = ["time_utc", "msg_id", "symbol", "side", "entry", "sl", "tp1", "tp2", "tp3", "tipo", "rischio", "nota", "errore", "testo"]
+MAN_COLS = ["time_utc", "msg_id", "symbol", "side", "entry", "sl", "tp1", "tp2", "tp3", "tipo", "rischio", "parz", "nota", "errore", "testo"]
 ESITI_COLS = ["quando_utc", "msg_id", "conto", "esito", "lotti", "bid", "ask", "spread", "scarto_usato", "fonte_scarto", "pips_al_tp1", "ticket", "prezzo_apertura", "dettaglio"]
 TIPI = ("market", "limit", "stop")
 
@@ -51,6 +53,12 @@ def parse_request(d: dict) -> dict:
     r = {"symbol": str(d.get("symbol") or "XAUUSD").strip().upper(), "side": side, "tipo": tipo, "entry": _num(d.get("entry"), "Entry"), "sl": _num(d.get("sl"), "SL"),
          "tp1": _num(d.get("tp1"), "TP1"), "tp2": _num(d.get("tp2"), "TP2", False), "tp3": _num(d.get("tp3"), "TP3", False),
          "rischio": _num(d.get("rischio"), "il rischio %"), "nota": str(d.get("nota") or "")[:300]}
+    pz = _num(d.get("parz"), "la quota da parzializzare", False) or 0.0
+    if pz and not 10 <= pz <= 90:
+        raise ValueError("la quota da chiudere a TP1 deve stare tra 10 e 90% (vuoto o 0 = nessuna parzializzazione)")
+    r["parz"] = int(round(pz))
+    if r["parz"] and r["tp2"] is None:
+        raise ValueError("per parzializzare serve il TP2 (TP1 = dove chiudi la quota, TP2 = dove chiudi il resto)")
     if not r["symbol"].replace(".", "").replace("_", "").isalnum():
         raise ValueError("simbolo non valido")
     if not 0 < r["rischio"] <= MAX_RISK:
@@ -105,12 +113,10 @@ def execute_manual(mt5, req: dict, acc: dict, dry: bool = False, confirm_real: b
     tick = mt5.symbol_info_tick(sym)
     buy, d, tipo = req["side"] == "buy", info.digits, req["tipo"]
     stops = (getattr(info, "trade_stops_level", 0) or 0) * (getattr(info, "point", 0.01) or 0.01)
-    # --- obiettivo e parzializzazione del conto (stessa logica dell'automatico)
-    target = int(acc.get("tp_target") or 1)
-    chosen = req.get(f"tp{target}")
-    if chosen is None:
-        raise ValueError(f"il trade non ha TP{target}: su questo conto (obiettivo TP{target}) non apro")
-    partial = (acc.get("partial_pct") or 0) / 100 if target > 1 else 0.0
+    # --- obiettivo e parzializzazione: dal trade (TP1 = parziale, TP2 = chiusura del resto), uguali su ogni conto
+    partial = req["parz"] / 100 if req.get("parz") else 0.0
+    target = 2 if req.get("tp2") is not None else 1
+    chosen = req["tp2"] if target == 2 else req["tp1"]
     # --- prezzo di riferimento e controlli sul tipo di ingresso
     px_mkt = tick.ask if buy else tick.bid
     if tipo == "market":
@@ -166,7 +172,7 @@ def execute_manual(mt5, req: dict, acc: dict, dry: bool = False, confirm_real: b
     desc = (f"{req['side'].upper()} {sym} {lots:g} lotti ({req['rischio']:g}% = {risk_amount:.2f} {ai.currency}) {lab} {px_txt} · SL {reqs[0]['sl']} "
             f"({abs(ref - reqs[0]['sl']):.2f})")
     if split:
-        desc += f" · TP1 {reqs[0]['tp']} con {v1:g} lotti, poi TP{target} {reqs[1]['tp']} con {v2:g}: a TP1 il resto va a pareggio"
+        desc += f" · TP1 {reqs[0]['tp']} con {v1:g} lotti, poi TP2 {reqs[1]['tp']} con {v2:g}: a TP1 il resto va a pareggio (BE)"
     else:
         desc += f" · TP{target} {reqs[0]['tp']} ({abs(ref - reqs[0]['tp']):.2f})"
         if partial:
@@ -207,7 +213,7 @@ def _append(path: Path, cols: list, row: dict) -> None:
 
 def log_manual(mid: str, req: dict) -> None:
     _append(MAN_CSV, MAN_COLS, {"time_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), "msg_id": mid, "symbol": req["symbol"], "side": req["side"], "entry": req["entry"],
-                                "sl": req["sl"], "tp1": req["tp1"], "tp2": req["tp2"] or "", "tp3": req["tp3"] or "", "tipo": req["tipo"], "rischio": req["rischio"], "nota": req["nota"]})
+                                "sl": req["sl"], "tp1": req["tp1"], "tp2": req["tp2"] or "", "tp3": req["tp3"] or "", "tipo": req["tipo"], "rischio": req["rischio"], "parz": req.get("parz") or "", "nota": req["nota"]})
 
 
 def log_esito(mid: str, conto, kind: str, lots, trks: list, text: str) -> None:
