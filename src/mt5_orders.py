@@ -817,6 +817,7 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
                       f"campi: {[k for k in m if k not in ('chat', 'date', 'message_id', 'chan_id', 'force', 'sender_chat')]}, testo: {text[:80]!r}", flush=True)
                 continue
             if not m.get("force") and time.time() - m.get("date", 0) > MAX_AGE_S:
+                print(f"Messaggio scartato: pubblicato {time.time() - m.get('date', 0):.0f} s fa (limite {MAX_AGE_S} s): {text[:60]!r}", flush=True)
                 say(bot, "⚠️ Messaggio troppo vecchio (> 2 minuti): ignorato.")
                 continue
             if m.get("chan_id"):                                       # dal canale: te lo inoltro subito sul tuo Telegram, poi lo applico

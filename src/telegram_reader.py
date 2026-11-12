@@ -146,9 +146,10 @@ def is_signal_text(text: str) -> bool:
     return looks_like_signal(t) and bool(re.search(r"Entry\s*[:=]?\s*\d", t, re.I))
 
 
-def handle_message(msg, edited: bool, seen: set, acted: set, q=None, max_age: float = 120.0) -> str:
+def handle_message(msg, edited: bool, seen: set, acted: set, q=None, max_age: float = 120.0, skew: float = 0.0) -> str:
     """Un messaggio nuovo o MODIFICATO del canale. Cedric pubblica il segnale come foto e ne scrive il testo pochi secondi dopo modificando il messaggio:
-    alla creazione il testo è vuoto, quindi si agisce anche sulle modifiche. Ogni messaggio-segnale viene aperto una sola volta (acted)."""
+    alla creazione il testo è vuoto, quindi si agisce anche sulle modifiche. Ogni messaggio-segnale viene aperto una sola volta (acted).
+    skew = secondi di anticipo (+) o ritardo (-) dell'orologio del PC rispetto a quello di Telegram: l'età del messaggio si calcola con l'ora di Telegram, così un PC con l'ora sbagliata non scarta i segnali."""
     import time
     text = msg.message or ""
     print(f"[canale] {'modifica' if edited else 'nuovo'} id={msg.id} {msg.date.astimezone():%H:%M:%S} testo={text[:70]!r}", flush=True)     # traccia di ogni evento ricevuto: nel registro si vede se il messaggio è arrivato
@@ -157,8 +158,14 @@ def handle_message(msg, edited: bool, seen: set, acted: set, q=None, max_age: fl
             return "gia_visto"
         acted.add(msg.id)
         process(text, msg.date, msg.id, None)                           # registro: anche se il messaggio era già stato visto senza testo
-        if q is not None and time.time() - msg.date.timestamp() <= max_age:
-            q.put((text, msg.id, msg.date.timestamp()))
+        ts = msg.date.timestamp() + skew                                  # ora del messaggio espressa nell'orologio del PC
+        age = time.time() - ts
+        if q is not None:
+            if age <= max_age:
+                q.put((text, msg.id, ts))
+                print(f"[canale] segnale #{msg.id} in coda ({age:.0f} s dalla pubblicazione)", flush=True)
+            else:
+                print(f"[canale] segnale #{msg.id} SCARTATO: pubblicato {age:.0f} s fa (limite {max_age:.0f} s)", flush=True)
         return "segnale"
     if record_result(msg):                                              # «TP1 HIT» / «STOP LOSS»: si collega al segnale per la pagina Segnali
         return "esito"
@@ -266,15 +273,23 @@ def start_channel_feed(name: str, q, notify=None) -> None:
             write_status(state="collegato", title=title, detail="")
 
             from src.mt5_orders import MAX_AGE_S
+            try:                                                              # ora di Telegram: serve a non scartare i segnali se l'orologio del PC è sfasato
+                from telethon import functions
+                cfg = await client(functions.help.GetConfigRequest())
+                state["skew"] = time.time() - cfg.date.timestamp()
+                if abs(state["skew"]) > 5:
+                    tell(f"ATTENZIONE: l'orologio del PC è sfasato di {state['skew']:+.0f} s rispetto a Telegram: correggi data e ora di Windows (la differenza viene compensata, ma può dare problemi con MT5).")
+            except Exception as e:
+                print("Orologio di Telegram non leggibile:", type(e).__name__, flush=True)
 
             @client.on(events.NewMessage(chats=ent))
             async def handler(ev):
-                r = handle_message(ev.message, False, seen, acted, q, MAX_AGE_S)
+                r = handle_message(ev.message, False, seen, acted, q, MAX_AGE_S, state.get("skew", 0.0))
                 write_status(last_msg=ev.message.date.timestamp(), last_signal=(r == "segnale") or None)
 
             @client.on(events.MessageEdited(chats=ent))
             async def handler_edit(ev):
-                r = handle_message(ev.message, True, seen, acted, q, MAX_AGE_S)
+                r = handle_message(ev.message, True, seen, acted, q, MAX_AGE_S, state.get("skew", 0.0))
                 if r == "segnale":
                     write_status(last_msg=ev.message.date.timestamp(), last_signal=True)
 
