@@ -57,6 +57,7 @@ INFO: dict = {}                                                                 
 JOURNAL_DIR = Path(os.environ.get("JOURNAL_DIR", "journal"))
 HEARTBEAT = Path(os.environ.get("JOURNAL_DIR", "journal")) / "mt5_orders.heartbeat"       # battito: Gestione Conti lo legge per mostrare se l'ascolto è attivo
 NUM = r"([0-9]+(?:[.,][0-9]+)?)"
+SYMBOL_ALIAS = {"GOLD": "XAUUSD", "ORO": "XAUUSD", "XAU": "XAUUSD"}          # nomi usati da alcune sale per l'oro
 
 
 def clean_text(text: str) -> str:
@@ -68,19 +69,29 @@ def clean_text(text: str) -> str:
 
 def looks_like_signal(text: str) -> bool:
     """Messaggio che sembra un segnale: ha BUY/SELL, oppure i tre livelli Entry, SL e TP1 con i loro numeri. Gli annunci «SEGNALE DI BUY IN ARRIVO SU XAUUSD» NON sono segnali: si ignorano."""
-    if re.search(r"\bIN\s+ARRIVO\b", text, re.I) and not re.search(r"Entry\s*[:=]?\s*\d", text, re.I):
+    if re.search(r"\bIN\s+ARRIVO\b", text, re.I) and not re.search(r"\b(?:Entry|EP)\s*[:=]?\s*\d", text, re.I):
         return False
     if re.search(r"\b(BUY|SELL)\b", text, re.I):
         return True
-    return all(re.search(pat + r"\s*[:=]?\s*" + NUM, text, re.I) for pat in (r"Entry", r"SL", r"TP\s*1"))
+    return all(re.search(pat + r"\s*[:=]?\s*" + NUM, text, re.I) for pat in (r"\b(?:Entry|EP)\b", r"SL", r"TP\s*1"))
 
 
 def parse_signal(text: str) -> dict:
     """Estrae side, symbol, entry, sl, tp1. Se manca la riga «BUY/SELL SIMBOLO» la direzione si deduce dai livelli (SL sopra l'Entry e TP1 sotto = SELL; il contrario = BUY) e lo
     strumento è XAUUSD; in quel caso sig['inferred'] è True. Solleva ValueError con il motivo se manca o è ambiguo qualcosa."""
     head = re.search(r"\b(BUY|SELL)\s+([A-Za-z0-9._]+)", text, re.I)
-    out = {"side": head.group(1).lower(), "symbol": head.group(2).upper(), "inferred": False} if head else {}
-    for key, pat in (("entry", r"Entry"), ("sl", r"SL"), ("tp1", r"TP\s*1")):
+    out = {"side": head.group(1).lower(), "symbol": SYMBOL_ALIAS.get(head.group(2).upper(), head.group(2).upper()), "inferred": False} if head else {}
+    ent = re.findall(r"\b(?:Entry|EP)\s*[:=]?\s*" + NUM + r"(?:\s*[-–—]\s*" + NUM + r")?", text, re.I)          # «Entry: 3906.39» oppure zona «EP: 3928 - 3921»
+    if len(ent) != 1:
+        raise ValueError(f"ENTRY {'mancante' if not ent else 'presente più volte'}")
+    a = float(ent[0][0].replace(",", "."))
+    if ent[0][1]:
+        b = float(ent[0][1].replace(",", "."))
+        out["zone"] = (min(a, b), max(a, b))                                   # zona d'ingresso: come Entry di riferimento si usa il centro
+        out["entry"] = round((a + b) / 2, 5)
+    else:
+        out["entry"] = a
+    for key, pat in (("sl", r"SL"), ("tp1", r"TP\s*1")):
         found = re.findall(pat + r"\s*[:=]?\s*" + NUM, text, re.I)
         if len(found) != 1:
             raise ValueError(f"{key.upper()} {'mancante' if not found else 'presente più volte'}")
@@ -195,7 +206,7 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
     buy = sig["side"] == "buy"
     px = tick.ask if buy else tick.bid
     d = info.digits
-    note_off = ""
+    note_off, zone_note = "", ""
     if relative_levels():
         check_message(sig)
         sl_d, tp_d = abs(sig["entry"] - sig["sl"]), abs(sig["tp1"] - sig["entry"])
@@ -208,15 +219,21 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
             remaining = ((tp_at - tick.bid) if buy else (tick.bid - tp_at)) / pip
             INFO.update(offset=round(off, 3), src=src, remaining=round(remaining, 1))
             if remaining <= MIN_REMAINING_PIPS:
-                raise ValueError(f"al TP1 mancano solo {remaining:.0f} pips (minimo {MIN_REMAINING_PIPS:.0f}): non apro. Entry di Vantage {sig['entry']} = {e_at:.2f} su ActivTrades "
+                raise ValueError(f"al TP1 mancano solo {remaining:.0f} pips (minimo {MIN_REMAINING_PIPS:.0f}): non apro. Entry della sala {sig['entry']} = {e_at:.2f} su ActivTrades "
                                  f"(scarto {off:+.2f}, {src}), TP1 {tp_at:.2f}, prezzo ora {tick.bid:.2f}.")
             if (buy and sl_at >= tick.bid) or (not buy and sl_at <= tick.bid):
                 raise ValueError(f"il prezzo ({tick.bid:.2f}) ha già superato lo SL convertito ({sl_at:.2f}): non apro.")
+            if sig.get("zone"):                              # sala con zona d'ingresso (es. «EP: 3928 - 3921»): a mercato solo se il prezzo è dentro la zona convertita
+                lo_at, hi_at = sig["zone"][0] + off, sig["zone"][1] + off
+                pxz = tick.ask if buy else tick.bid
+                if not lo_at <= pxz <= hi_at:
+                    raise ValueError(f"il prezzo ({pxz:.2f}) è fuori dalla zona d'ingresso {lo_at:.2f}-{hi_at:.2f} (zona della sala {sig['zone'][0]:g}-{sig['zone'][1]:g}, scarto {off:+.2f}, {src}): non apro")
+                zone_note = f" · dentro la zona {lo_at:.2f}-{hi_at:.2f}"
             sl, tp = (sl_at, tp_at) if buy else (sl_at + (tick.ask - tick.bid), tp_at + (tick.ask - tick.bid))
-            note_off = f" · Entry su ActivTrades {e_at:.2f} (scarto {off:+.2f}, {src}) · al TP{sig.get('_target', 1)} mancano {remaining:.0f} pips"
+            note_off = f" · Entry su ActivTrades {e_at:.2f} (scarto {off:+.2f}, {src}) · al TP{sig.get('_target', 1)} mancano {remaining:.0f} pips" + zone_note
         else:                                              # nessuno scarto disponibile: distanze dall'Entry sul prezzo di adesso, filtro dei pips non applicabile
             sl, tp = (ref - sl_d, ref + tp_d) if buy else (ref + sl_d, ref - tp_d)
-            note_off = f" · filtro dei {MIN_REMAINING_PIPS:.0f} pips NON applicato: scarto non disponibile ({src})"
+            note_off = f" · filtro dei {MIN_REMAINING_PIPS:.0f} pips NON applicato: scarto non disponibile ({src})" + (f" · zona {sig['zone'][0]:g}-{sig['zone'][1]:g} NON verificata (scarto da misurare)" if sig.get("zone") else "")
         try:
             log_scarto(tag, sig, tick, scarto)
         except OSError:
@@ -538,10 +555,22 @@ def log_chiusura(t: dict, d, reason: str, pips_signed: float) -> None:
                 [now_iso(), t.get("sig_id") or t.get("msg_id", ""), t.get("account", ""), t["symbol"], t["side"], t.get("part") or "", reason, t["open"], d.price, round(pips_signed, 1), d.profit, int(d.time)])
 
 
+def _sala() -> str:
+    """Identificativo della sala da cui arrivano i segnali (da TELEGRAM_CANALE): ogni sala ha il suo scarto di prezzo, perché ogni sala quota un broker diverso."""
+    return re.sub(r"[^a-z0-9]+", "-", os.environ.get("TELEGRAM_CANALE", "").lower()).strip("-")
+
+
+def scarti_path() -> Path:
+    """Cedric (e i segnali senza sala) usano journal/scarti.csv come sempre; ogni altra sala ha il suo file journal/scarti_<sala>.csv."""
+    s = _sala()
+    return SCARTI if (not s or "cedric" in s) else SCARTI.with_name(f"scarti_{s}.csv")
+
+
 def log_scarto(tag: str, sig: dict, tick, scarto: float) -> None:
     SCARTI.parent.mkdir(exist_ok=True)
-    new = not SCARTI.exists()
-    with SCARTI.open("a", newline="", encoding="utf-8") as f:
+    f_ = scarti_path()
+    new = not f_.exists()
+    with f_.open("a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         if new:
             w.writerow(["quando_utc", "conto", "lato", "entry_canale", "bid", "ask", "spread", "scarto"])
@@ -551,10 +580,10 @@ def log_scarto(tag: str, sig: dict, tick, scarto: float) -> None:
 def current_offset() -> tuple[float | None, str]:
     """Scarto tra il prezzo di ActivTrades e quello di Vantage (ActivTrades - Vantage), per convertire i livelli del segnale. Fonte: SCARTO_ACTIVTRADES in config.env, altrimenti la mediana
     degli scarti dei segnali già eseguiti (almeno 10). Nessuna fonte: (None, motivo)."""
-    env = os.environ.get("SCARTO_ACTIVTRADES")
+    env = os.environ.get("SCARTO_ACTIVTRADES") if scarti_path() == SCARTI else os.environ.get("SCARTO_SALA")     # lo scarto fisso vale per la sala in uso: SCARTO_ACTIVTRADES per Cedric, SCARTO_SALA per le altre
     if env not in (None, ""):
         try:
-            return float(env.replace(",", ".")), "SCARTO_ACTIVTRADES"
+            return float(env.replace(",", ".")), "SCARTO_ACTIVTRADES" if scarti_path() == SCARTI else "SCARTO_SALA"
         except ValueError:
             pass
     import statistics as st
@@ -568,15 +597,15 @@ def read_scarti() -> list[tuple[str, float]]:
     """(conto, scarto) dai segnali registrati: journal/scarti.csv più, se presenti, gli scarti scritti nei vecchi messaggi di journal/ordini_mt5.csv."""
     import re
     out, seen = [], set()
-    if SCARTI.exists():
-        with SCARTI.open(encoding="utf-8", newline="") as f:
+    if scarti_path().exists():
+        with scarti_path().open(encoding="utf-8", newline="") as f:
             for r in csv.DictReader(f):
                 try:
                     out.append((r["conto"], float(r["scarto"])))
                     seen.add(r["quando_utc"][:16])
                 except (KeyError, ValueError):
                     pass
-    if LOG.exists():
+    if LOG.exists() and scarti_path() == SCARTI:                      # lo storico vecchio vale solo per Cedric
         with LOG.open(encoding="utf-8", newline="") as f:
             for r in csv.DictReader(f):
                 m = re.search(r"scarto (?:dal canale|del tuo broker dal canale) ([+-]?\d+\.\d+)", r.get("esito", ""))

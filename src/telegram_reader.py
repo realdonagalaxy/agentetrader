@@ -143,7 +143,7 @@ def is_signal_text(text: str) -> bool:
     """Un vero segnale ha i livelli (Entry compreso): l'annuncio «SEGNALE DI SELL IN ARRIVO» contiene SELL ma non va aperto."""
     import re
     t = clean_text(text or "")
-    return looks_like_signal(t) and bool(re.search(r"Entry\s*[:=]?\s*\d", t, re.I))
+    return looks_like_signal(t) and bool(re.search(r"\b(?:Entry|EP)\s*[:=]?\s*\d", t, re.I))
 
 
 def handle_message(msg, edited: bool, seen: set, acted: set, q=None, max_age: float = 120.0, skew: float = 0.0) -> str:
