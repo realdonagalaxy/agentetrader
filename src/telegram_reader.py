@@ -384,10 +384,17 @@ def main() -> None:
     ap.add_argument("--canale", help="titolo, @username o id del canale")
     ap.add_argument("--ultimo", action="store_true", help="mostra l'ultimo messaggio del canale e lo manda al tuo bot Telegram (chat TELEGRAM_CHAT_ID)")
     ap.add_argument("--apri-ultimo-segnale", action="store_true", help="trova l'ultimo segnale del canale (Entry, SL, TP) e lo passa al listener in esecuzione, che lo applica ai conti demo (controlli di prezzo e spread compresi, senza il limite dei 2 minuti)")
+    ap.add_argument("--prova", type=int, nargs="?", const=5, default=0, metavar="N", help="PROVA DI LETTURA: mostra gli ultimi N messaggi (5 se omesso) con il testo e dice se il programma li riconosce come segnale e come li legge. Non salva e non apre nulla.")
     ap.add_argument("--storico", type=int, default=0, help="scarica gli ultimi N messaggi invece di ascoltare")
     a = ap.parse_args()
+    try:
+        from dotenv import load_dotenv
+        load_dotenv("config.env")
+    except ImportError:
+        pass
+    a.canale = a.canale or os.environ.get("TELEGRAM_CANALE", "").strip() or None             # senza --canale si usa quello di config.env
     if not a.elenca and not a.canale:
-        ap.error("serve --elenca oppure --canale")
+        ap.error("serve --elenca oppure --canale (o TELEGRAM_CANALE in config.env)")
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     from telethon import events
@@ -403,6 +410,28 @@ def main() -> None:
         ent = await _find(client, a.canale)
         title = getattr(ent, "title", None) or a.canale
         seen = seen_ids()
+        if a.prova:
+            from src.mt5_orders import parse_signal
+            msgs = [m async for m in client.iter_messages(ent, limit=a.prova)]
+            print(f"Sala «{title}»: ultimi {len(msgs)} messaggi (l’ultimo in fondo è il più recente)\n")
+            for m in reversed(msgs):
+                txt = clean_text(m.message or "")
+                when = m.date.astimezone().strftime("%d/%m %H:%M")
+                print(f"--- #{m.id} · {when} ---")
+                print(txt if txt else "(nessun testo: immagine o altro)")
+                if is_signal_text(txt):
+                    try:
+                        sg = parse_signal(txt)
+                        zona = f" zona {sg['zone'][0]:g}-{sg['zone'][1]:g}" if sg.get("zone") else ""
+                        print(f"=> SEGNALE LETTO: {sg['side'].upper()} {sg['symbol']} entry {sg['entry']:g}{zona} SL {sg['sl']:g} TP1 {sg['tp1']:g}" + (f" TP2 {sg['tp2']:g}" if sg.get("tp2") else "") + (f" TP3 {sg['tp3']:g}" if sg.get("tp3") else ""))
+                    except ValueError as e:
+                        print(f"=> sembra un segnale ma NON si legge: {e}")
+                elif parse_result(txt):
+                    print(f"=> esito riconosciuto: {parse_result(txt)}")
+                else:
+                    print("=> non è un segnale")
+                print()
+            return
         if a.apri_ultimo_segnale:
             import json
             import time
@@ -432,10 +461,11 @@ def main() -> None:
             print(text)
             from dotenv import load_dotenv
             load_dotenv("config.env")
-            from src.telegram_bot import TelegramBot
-            bot = TelegramBot()
-            bot._call("sendMessage", chat_id=bot.chat_id, text=text)
-            print("Inviato al tuo bot Telegram.")
+            if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"):
+                from src.telegram_bot import TelegramBot
+                bot = TelegramBot()
+                bot._call("sendMessage", chat_id=bot.chat_id, text=text)
+                print("Inviato al tuo bot Telegram.")
             return
         if a.storico:
             counts = {}
