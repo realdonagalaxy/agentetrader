@@ -68,52 +68,6 @@ def _read_csv(name: str) -> list[dict]:
         return []
 
 
-def _manual_accounts(ids) -> list:
-    out = []
-    for i in ids:
-        a = ma.get_account(int(i))
-        if not a.get("manual_ok"):
-            raise ValueError(f"il conto {a['login']} non è abilitato ai trade manuali (Modifica → «Usa per i trade manuali»)")
-        out.append(a)
-    if not out:
-        raise ValueError("scegli almeno un conto")
-    return out
-
-
-def manual_preview(d: dict) -> dict:
-    """Anteprima: per ogni conto scelto, lotti, livelli e controlli, SENZA inviare ordini (si collega a MT5 in sola lettura)."""
-    from src import manual_trade as mt
-    req = mt.parse_request(d)
-    res = []
-    for a in _manual_accounts(d.get("accounts") or []):
-        try:
-            det: dict = {}
-            with ma.session(a) as m:
-                text, _ = mt.execute_manual(m, req, a, dry=True, detail=det)
-            res.append({"conto": a["login"], "ok": True, "testo": text, "reale": text.startswith("[ANTEPRIMA, nessun ordine inviato] [CONTO REALE]"), "dettagli": det})
-        except Exception as e:
-            res.append({"conto": a["login"], "ok": False, "testo": str(e)[:400]})
-    return {"req": req, "risultati": res}
-
-
-def manual_send(d: dict) -> dict:
-    """Accoda il trade per il programma in ascolto. Con conti reali serve confirm_real (la pagina lo chiede digitando REALE) e un'anteprima senza errori."""
-    from src import manual_trade as mt
-    req = mt.parse_request(d)
-    accs = _manual_accounts(d.get("accounts") or [])
-    if not listener_running():
-        raise ValueError("L'ascolto dei segnali non è attivo: è lui che apre e gestisce i trade. Avvialo e riprova.")
-    prev = manual_preview(d)
-    bad = [r for r in prev["risultati"] if not r["ok"]]
-    reali = [r for r in prev["risultati"] if r.get("reale")]
-    if reali and not d.get("confirm_real"):
-        raise ValueError("Tra i conti c'è un conto REALE: serve la conferma esplicita.")
-    if bad:
-        raise ValueError("Non apro: " + " | ".join(f"{r['conto']}: {r['testo']}" for r in bad))
-    mid = mt.write_request(req, [a["id"] for a in accs], bool(d.get("confirm_real")))
-    return {"id": mid, "anteprima": prev["risultati"]}
-
-
 def day_range(date: str, tz_min: int):
     """Intervallo UTC (epoch) del giorno locale dell'utente: tz_min = JS getTimezoneOffset() (minuti, positivo a ovest di UTC)."""
     from datetime import datetime, timedelta, timezone
@@ -482,19 +436,6 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/signals-day":
                 q = parse_qs(urlparse(self.path).query)
                 return self._json(signals_day((q.get("date") or [datetime.now().strftime("%Y-%m-%d")])[0], int((q.get("tz") or ["0"])[0])))
-            if path == "/api/manual-assets":
-                from src import manual_trade as mt
-                return self._json({"assets": mt.ASSETS})
-            if path == "/api/manual-day":
-                q = parse_qs(urlparse(self.path).query)
-                return self._json(signals_day((q.get("date") or [datetime.now().strftime("%Y-%m-%d")])[0], int((q.get("tz") or ["0"])[0]), manual=True))
-            if path == "/api/manual-result":
-                q = parse_qs(urlparse(self.path).query)
-                mid = re.sub(r"[^A-Za-z0-9]", "", (q.get("id") or [""])[0])
-                try:
-                    return self._json(json.loads((ma.DATA_DIR / "manuali" / f"{mid}.result.json").read_text(encoding="utf-8")))
-                except (OSError, ValueError):
-                    return self._json({})
             if path == "/api/signals-sync-info":
                 try:
                     return self._json(json.loads((ma.DATA_DIR / "giorno_info.json").read_text(encoding="utf-8")))
@@ -515,6 +456,12 @@ class Handler(BaseHTTPRequestHandler):
                 q = parse_qs(urlparse(self.path).query)
                 png = ma.trade_chart_png(ma.get_account(int((q.get("account") or ["0"])[0])), int((q.get("position") or ["0"])[0]), int((q.get("deal") or ["0"])[0]))
                 return self._send(200, png, "image/png")
+            if path == "/api/trades":                                              # elenco dei trade letti da MT5 (aperti, pendenti, chiusi nel mese)
+                q = parse_qs(urlparse(self.path).query)
+                month = (q.get("month") or [datetime.now().strftime("%Y-%m")])[0]
+                if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+                    raise ValueError("mese non valido (formato AAAA-MM)")
+                return self._json(ma.trade_list(ma.get_account(int((q.get("account") or ["0"])[0])), month))
             if path == "/api/calendar":
                 q = parse_qs(urlparse(self.path).query)
                 month = (q.get("month") or [datetime.now().strftime("%Y-%m")])[0]
@@ -542,15 +489,6 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/accounts" and method == "POST":
                 aid = ma.save_account(self._data())
                 return self._json({"id": aid, "terminal_path": ma.get_account(aid)["terminal_path"]}, 201)
-            if path == "/api/manual-parse" and method == "POST":                  # legge un testo nel formato di Cedric e ne ricava i campi del modulo
-                from src import mt5_orders as mo
-                text = mo.clean_text(str(self._data().get("text") or ""))
-                sg = mo.parse_signal(text)
-                return self._json({k: sg.get(k) for k in ("symbol", "side", "entry", "sl", "tp1", "tp2", "tp3")})
-            if path == "/api/manual-preview" and method == "POST":
-                return self._json(manual_preview(self._data()))
-            if path == "/api/manual-send" and method == "POST":
-                return self._json(manual_send(self._data()))
             if path == "/api/signals-sync" and method == "POST":                   # «Scarica dal canale»: il programma dei segnali registra tutti i segnali di quel giorno (senza eseguirli)
                 d = self._data()
                 d0, d1 = day_range(str(d.get("date")), int(d.get("tz") or 0))

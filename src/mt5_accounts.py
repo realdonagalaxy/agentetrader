@@ -586,6 +586,36 @@ def calendar_month(acc: dict, month: str) -> dict:
     return {"month": month, "currency": cur, "days": days, "total": tot}
 
 
+ORDER_NAMES = {2: "BUY LIMIT", 3: "SELL LIMIT", 4: "BUY STOP", 5: "SELL STOP", 6: "BUY STOP LIMIT", 7: "SELL STOP LIMIT"}
+
+
+def trade_list(acc: dict, month: str) -> dict:
+    """Elenco dei trade letti da MT5 (sola lettura): posizioni aperte ora, ordini pendenti e operazioni chiuse nel mese (YYYY-MM), qualunque sia il modo in cui sono state aperte.
+    Per ogni operazione chiusa: SL e TP iniziali (dall'ordine di apertura), pips, R (chiusura - apertura divisa per la distanza dello SL iniziale) e netto di commissioni e swap."""
+    from datetime import datetime
+    y, m = (int(x) for x in month.split("-"))
+    t0, t1 = datetime(y, m, 1), datetime(y + (m == 12), m % 12 + 1, 1)
+    with session(acc) as mt5:
+        cur = mt5.account_info().currency
+        closed = _closed_trades(mt5, t0, t1)
+        for r in closed:
+            orders = sorted(mt5.history_orders_get(position=r["position"]) or (), key=lambda o: getattr(o, "time_setup", 0))
+            first = orders[0] if orders else None
+            sl = float(first.sl) if first is not None and getattr(first, "sl", 0) else None
+            tp = float(first.tp) if first is not None and getattr(first, "tp", 0) else None
+            sign = 1 if r["side"] == "buy" else -1
+            r["sl"], r["tp"] = sl, tp
+            r["r"] = round(sign * (r["close_price"] - r["open_price"]) / abs(r["open_price"] - sl), 2) if sl and abs(r["open_price"] - sl) > 0 else None
+        opens = []
+        for p in (mt5.positions_get() or []):
+            d = _pos(p)
+            d["r"] = round((1 if d["side"] == "buy" else -1) * (d["price"] - d["open"]) / abs(d["open"] - d["sl"]), 2) if d["sl"] and abs(d["open"] - d["sl"]) > 0 else None
+            opens.append(d)
+        pend = [{"ticket": int(o.ticket), "symbol": o.symbol, "tipo": ORDER_NAMES.get(int(o.type), f"tipo {o.type}"), "volume": getattr(o, "volume_current", None) or getattr(o, "volume", None),
+                 "price": o.price_open, "sl": o.sl or None, "tp": o.tp or None, "time": int(getattr(o, "time_setup", 0)), "comment": getattr(o, "comment", "")} for o in (mt5.orders_get() or [])]
+    return {"month": month, "currency": cur, "open": opens, "pending": pend, "closed": sorted(closed, key=lambda r: -r["close_time"])}
+
+
 def day_trades(acc: dict, day: str) -> dict:
     """Le operazioni chiuse in un giorno (YYYY-MM-DD), una per riga, per il dettaglio del calendario."""
     from datetime import datetime, timedelta

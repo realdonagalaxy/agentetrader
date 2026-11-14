@@ -815,12 +815,6 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
             if feed.empty():
                 time.sleep(5)
                 continue
-        try:                                                          # trade discrezionali inseriti dalla pagina «Manuale»: stessa gestione (TP del conto, parzializzazione, BE)
-            from src import manual_trade
-            if manual_trade.process_requests(pending, bot, say, save_pending):
-                print("Trade manuale elaborato.", flush=True)
-        except Exception as e:
-            print("Trade manuale:", type(e).__name__, str(e)[:200], flush=True)
         manual = JOURNAL_DIR / "segnale_manuale.json"                 # segnale passato a mano con: python -m src.telegram_reader --canale ... --apri-ultimo-segnale
         if manual.exists():
             try:
