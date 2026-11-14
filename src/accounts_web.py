@@ -481,6 +481,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/signals-day":
                 q = parse_qs(urlparse(self.path).query)
                 return self._json(signals_day((q.get("date") or [datetime.now().strftime("%Y-%m-%d")])[0], int((q.get("tz") or ["0"])[0])))
+            if path == "/api/manual-assets":
+                from src import manual_trade as mt
+                return self._json({"assets": mt.ASSETS})
             if path == "/api/manual-day":
                 q = parse_qs(urlparse(self.path).query)
                 return self._json(signals_day((q.get("date") or [datetime.now().strftime("%Y-%m-%d")])[0], int((q.get("tz") or ["0"])[0]), manual=True))

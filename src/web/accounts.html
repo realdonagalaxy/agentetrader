@@ -179,30 +179,30 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
   </div>
 </div>
 <div id="tab-man" hidden style="display:grid;gap:16px">
-  <div class="panel"><h2>Trade discrezionale <span class="sub" style="margin-left:auto;text-transform:none;letter-spacing:0">stessa gestione dell'automatico: TP del conto, parzializzazione e BE</span></h2>
+  <div class="panel"><h2>Trade discrezionale <span class="sub" style="margin-left:auto;text-transform:none;letter-spacing:0">parzializzazione a TP1 e BE come nell'automatico, ma decisa per ogni trade</span></h2>
     <div class="body">
       <div class="row2" style="align-items:end">
         <label>Incolla il testo (come quello di Cedric) <textarea id="mtext" rows="3" placeholder="SELL XAUUSD&#10;Entry: 4073.1&#10;SL: 4088.1&#10;TP1: 4068.1&#10;TP2: 4063.1&#10;TP3: 4033.1" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);font:inherit"></textarea></label>
         <div><button class="btn sec" id="mread">Leggi il testo nel modulo</button></div>
       </div>
       <div class="row2">
-        <label>Simbolo<input type="text" id="msym" value="XAUUSD"></label>
-        <label>Direzione<select id="mside"><option value="buy">BUY</option><option value="sell">SELL</option></select></label>
+        <label>1. Asset<select id="msym"></select></label>
+        <label>2. Tipo di entry<select id="mtipo">
+          <option value="buy:limit">BUY LIMIT</option><option value="sell:limit">SELL LIMIT</option>
+          <option value="buy:stop">BUY STOP</option><option value="sell:stop">SELL STOP</option>
+          <option value="buy:market">BUY · esecuzione diretta a mercato</option><option value="sell:market">SELL · esecuzione diretta a mercato</option></select></label>
       </div>
       <div class="row2">
-        <label>Ingresso<select id="mtipo"><option value="market">A mercato (subito)</option><option value="limit">Ordine LIMIT all'Entry</option><option value="stop">Ordine STOP all'Entry</option></select></label>
-        <label>Entry <span class="hint">(prezzo del tuo conto)</span><input type="text" inputmode="decimal" id="mentry"></label>
-      </div>
-      <div class="row2">
+        <label id="mentrybox">Entry <span class="hint">(prezzo dell'ordine, come sul tuo conto)</span><input type="text" inputmode="decimal" id="mentry"></label>
         <label>SL<input type="text" inputmode="decimal" id="msl"></label>
-        <label>TP1<input type="text" inputmode="decimal" id="mtp1"></label>
       </div>
       <div class="row2">
-        <label>TP2 <span class="hint">(dove chiudi il resto; vuoto = tutto a TP1)</span><input type="text" inputmode="decimal" id="mtp2"></label>
-        <div>
-          <label class="chk" style="margin-top:22px"><input type="checkbox" id="mparz_on" checked><span>A TP1 parzializza e porta il resto a pareggio (BE)</span></label>
-          <label id="mparzbox" style="margin-top:6px">Quota chiusa a TP1 (%) <span class="hint">(10-90)</span><input type="text" inputmode="numeric" id="mparz" value="60"></label>
-        </div>
+        <label>TP1 <span class="hint">(primo target: se parzializzi, qui chiudi la quota)</span><input type="text" inputmode="decimal" id="mtp1"></label>
+        <label>TP2 <span class="hint">(secondo target: chiude il resto, o tutto se scrivi solo questo)</span><input type="text" inputmode="decimal" id="mtp2"></label>
+      </div>
+      <div class="row2">
+        <label class="chk" style="margin-top:4px"><input type="checkbox" id="mparz_on" checked><span>Parzializza a TP1 e porta il resto a pareggio (BE) <span class="hint">(servono TP1 e TP2)</span></span></label>
+        <label id="mparzbox">Quota chiusa a TP1 (%) <span class="hint">(10-90)</span><input type="text" inputmode="numeric" id="mparz" value="60"></label>
       </div>
       <div class="row2">
         <label>Rischio per trade (% del saldo)<input type="text" inputmode="decimal" id="mrisk" value="0.5"></label>
@@ -635,12 +635,29 @@ async function loadManualAccounts() {
     return `<label class="chk"><input type="checkbox" class="macc" value="${a.id}" ${real ? "" : "checked"}><span><b>${esc(a.login)}</b> · TP${a.tp_target || 1}${a.partial_pct ? ` · parz. ${a.partial_pct}%` : ""}${real ? ` <span class="badge b-err">REALE</span>` : ""}</span></label>`;
   }).join("") : `<span class="sub">Nessun conto abilitato ai trade manuali: spunta «Usa per i trade manuali» in Modifica.</span>`;
 }
-const mform = () => ({symbol: $("msym").value, side: $("mside").value, tipo: $("mtipo").value, entry: $("mentry").value, sl: $("msl").value, tp1: $("mtp1").value, tp2: $("mtp2").value, parz: $("mparz_on").checked && $("mtp2").value.trim() ? $("mparz").value : 0,
-  rischio: $("mrisk").value, nota: $("mnota").value, accounts: [...document.querySelectorAll(".macc:checked")].map(x => +x.value)});
+const mform = () => {
+  const [side, tipo] = $("mtipo").value.split(":");
+  const two = $("mtp1").value.trim() && $("mtp2").value.trim();
+  return {symbol: $("msym").value, side, tipo, entry: tipo === "market" ? "" : $("mentry").value, sl: $("msl").value, tp1: $("mtp1").value, tp2: $("mtp2").value,
+    parz: $("mparz_on").checked && two ? $("mparz").value : 0, rischio: $("mrisk").value, nota: $("mnota").value, accounts: [...document.querySelectorAll(".macc:checked")].map(x => +x.value)};
+};
+function mUi() {                                                          // l'Entry serve solo per gli ordini LIMIT e STOP; la parzializzazione solo con TP1 e TP2
+  $("mentrybox").hidden = $("mtipo").value.endsWith(":market");
+  const two = $("mtp1").value.trim() && $("mtp2").value.trim();
+  $("mparz_on").disabled = !two; $("mparzbox").hidden = !two || !$("mparz_on").checked;
+}
+["mtipo", "mtp1", "mtp2", "mparz_on"].forEach(id => $(id).addEventListener("input", mUi));
+async function loadManualAssets() {
+  if ($("msym").options.length) return;
+  try { const r = await api("/api/manual-assets"); $("msym").innerHTML = r.assets.map(x => `<option>${esc(x)}</option>`).join(""); } catch (e) { toast(e.message, 5000); }
+  mUi();
+}
 $("mread").onclick = async () => {
   try {
     const r = await api("/api/manual-parse", "POST", {text: $("mtext").value});
-    $("msym").value = r.symbol || "XAUUSD"; $("mside").value = r.side; $("mentry").value = r.entry; $("msl").value = r.sl; $("mtp1").value = r.tp1; $("mtp2").value = r.tp2 ?? "";
+    const asset = r.symbol || "XAUUSD"; if (![...$("msym").options].some(o => o.value === asset)) $("msym").add(new Option(asset)); $("msym").value = asset;
+    $("mtipo").value = r.side + ":" + ($("mtipo").value.split(":")[1] || "market");                   // direzione dal testo, tipo di entry quello scelto
+    $("mentry").value = r.entry; $("msl").value = r.sl; $("mtp1").value = r.tp1; $("mtp2").value = r.tp2 ?? ""; mUi();
     toast("Testo letto: controlla i valori nel modulo", 4000);
   } catch (e) { toast("Non riesco a leggere il testo: " + e.message, 8000); }
 };
@@ -680,7 +697,7 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = async () => {
   $("tab-conti").hidden = b.dataset.tab !== "conti"; $("tab-ris").hidden = b.dataset.tab !== "ris"; $("tab-seg").hidden = b.dataset.tab !== "seg"; $("tab-man").hidden = b.dataset.tab !== "man";
   if (b.dataset.tab === "ris") fillSources();
   if (b.dataset.tab === "seg") loadSignals();
-  if (b.dataset.tab === "man") { await loadManualAccounts(); loadManualDay(); }
+  if (b.dataset.tab === "man") { await loadManualAssets(); await loadManualAccounts(); loadManualDay(); }
 });
 refresh(); setInterval(() => { if (!document.querySelector("dialog[open]") && !document.hidden) refresh(); }, 20000);
 </script>

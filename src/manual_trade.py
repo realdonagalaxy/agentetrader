@@ -28,6 +28,10 @@ MAX_LOTS = float(os.environ.get("MANUAL_MAX_LOTS") or 5.0)              # lotti 
 MAN_COLS = ["time_utc", "msg_id", "symbol", "side", "entry", "sl", "tp1", "tp2", "tp3", "tipo", "rischio", "parz", "nota", "errore", "testo"]
 ESITI_COLS = ["quando_utc", "msg_id", "conto", "esito", "lotti", "bid", "ask", "spread", "scarto_usato", "fonte_scarto", "pips_al_tp1", "ticket", "prezzo_apertura", "dettaglio"]
 TIPI = ("market", "limit", "stop")
+# Asset selezionabili nella pagina (gli stessi del journal) e nomi con cui di solito compaiono sui broker. In config.env SIMBOLO_<ASSET>=nome (es. SIMBOLO_NASDAQ=USTEC) forza il nome sul tuo broker.
+ASSETS = ["XAUUSD", "EURUSD", "AUDUSD", "EURAUD", "AUDCAD", "NASDAQ", "SP500", "US30", "GER30", "DAX", "BTCUSD", "ETHUSD", "SOLUSD"]
+ALIAS = {"XAUUSD": ["XAUUSD", "GOLD"], "NASDAQ": ["NASDAQ", "USTEC", "US100", "NAS100", "NDX100", "USTECH100", "NQ100"], "SP500": ["SP500", "US500", "SPX500", "USA500", "US500Cash"],
+         "US30": ["US30", "DJ30", "DJI30", "WS30", "USA30", "DOW30"], "GER30": ["GER30", "GER40", "DE30", "DE40", "DAX40", "DAX"], "DAX": ["DAX", "GER40", "GER30", "DE40", "DE30", "DAX40"]}
 
 
 def _num(v, name: str, required: bool = True):
@@ -42,6 +46,21 @@ def _num(v, name: str, required: bool = True):
         raise ValueError(f"{name} non è un numero: {v!r}")
 
 
+def resolve_symbol(mt5, asset: str) -> str:
+    """Nome dell'asset sul broker del conto collegato: prima SIMBOLO_<ASSET> (config.env), poi MT5_SYMBOL per l'oro, poi i nomi comuni; il primo che MT5 conosce vince."""
+    cands = []
+    forced = os.environ.get(f"SIMBOLO_{asset}", "").strip()
+    if forced:
+        cands.append(forced)
+    if asset == "XAUUSD" and os.environ.get("MT5_SYMBOL", "").strip():
+        cands.append(os.environ["MT5_SYMBOL"].strip())
+    cands += ALIAS.get(asset, [asset])
+    for c in dict.fromkeys(cands):
+        if mt5.symbol_info(c) is not None:
+            return c
+    raise ValueError(f"l'asset {asset} non si trova su questo broker (provati: {', '.join(dict.fromkeys(cands))}): in config.env scrivi SIMBOLO_{asset}=nome esatto del simbolo in MT5")
+
+
 def parse_request(d: dict) -> dict:
     """Valida i dati del trade. Livelli coerenti con la direzione: BUY SL < Entry < TP1 < TP2 < TP3, SELL al contrario (TP2/TP3 facoltativi)."""
     side = str(d.get("side") or "").strip().lower()
@@ -50,28 +69,29 @@ def parse_request(d: dict) -> dict:
     tipo = str(d.get("tipo") or "market").strip().lower()
     if tipo not in TIPI:
         raise ValueError("il tipo di ingresso deve essere mercato, limit o stop")
-    r = {"symbol": str(d.get("symbol") or "XAUUSD").strip().upper(), "side": side, "tipo": tipo, "entry": _num(d.get("entry"), "Entry"), "sl": _num(d.get("sl"), "SL"),
-         "tp1": _num(d.get("tp1"), "TP1"), "tp2": _num(d.get("tp2"), "TP2", False), "tp3": _num(d.get("tp3"), "TP3", False),
+    r = {"symbol": str(d.get("symbol") or "XAUUSD").strip().upper(), "side": side, "tipo": tipo, "entry": _num(d.get("entry"), "Entry", tipo != "market"), "sl": _num(d.get("sl"), "SL"),
+         "tp1": _num(d.get("tp1"), "TP1", False), "tp2": _num(d.get("tp2"), "TP2", False), "tp3": _num(d.get("tp3"), "TP3", False),
          "rischio": _num(d.get("rischio"), "il rischio %"), "nota": str(d.get("nota") or "")[:300]}
+    if not r["symbol"].replace(".", "").replace("_", "").isalnum():
+        raise ValueError("simbolo non valido")
+    if r["tp1"] is None and r["tp2"] is None:
+        raise ValueError("scrivi almeno un target: TP1 oppure TP2")
+    if not 0 < r["rischio"] <= MAX_RISK:
+        raise ValueError(f"il rischio deve stare tra 0 e {MAX_RISK:g}% del saldo")
     pz = _num(d.get("parz"), "la quota da parzializzare", False) or 0.0
     if pz and not 10 <= pz <= 90:
         raise ValueError("la quota da chiudere a TP1 deve stare tra 10 e 90% (vuoto o 0 = nessuna parzializzazione)")
     r["parz"] = int(round(pz))
-    if r["parz"] and r["tp2"] is None:
-        raise ValueError("per parzializzare serve il TP2 (TP1 = dove chiudi la quota, TP2 = dove chiudi il resto)")
-    if not r["symbol"].replace(".", "").replace("_", "").isalnum():
-        raise ValueError("simbolo non valido")
-    if not 0 < r["rischio"] <= MAX_RISK:
-        raise ValueError(f"il rischio deve stare tra 0 e {MAX_RISK:g}% del saldo")
-    levels = [r["sl"], r["entry"], r["tp1"]] + [x for x in (r["tp2"], r["tp3"]) if x is not None]
-    if r["tp3"] is not None and r["tp2"] is None:
-        raise ValueError("c'è TP3 ma manca TP2")
+    if r["parz"] and (r["tp1"] is None or r["tp2"] is None):
+        raise ValueError("per parzializzare servono TP1 (dove chiudi la quota) e TP2 (dove chiudi il resto)")
+    levels = [r["sl"]] + ([r["entry"]] if r["entry"] is not None else []) + [x for x in (r["tp1"], r["tp2"], r["tp3"]) if x is not None]
     asc = all(a < b for a, b in zip(levels, levels[1:]))
     desc = all(a > b for a, b in zip(levels, levels[1:]))
+    nomi = "SL < " + ("Entry < " if r["entry"] is not None else "") + " < ".join(n for n, v in (("TP1", r["tp1"]), ("TP2", r["tp2"]), ("TP3", r["tp3"])) if v is not None)
     if side == "buy" and not asc:
-        raise ValueError("BUY: servono SL < Entry < TP1 < TP2 < TP3 (TP2 e TP3 se presenti)")
+        raise ValueError(f"BUY: i livelli devono salire: {nomi}")
     if side == "sell" and not desc:
-        raise ValueError("SELL: servono SL > Entry > TP1 > TP2 > TP3 (TP2 e TP3 se presenti)")
+        raise ValueError(f"SELL: i livelli devono scendere: {nomi.replace('<', '>')}")
     return r
 
 
@@ -106,7 +126,7 @@ def execute_manual(mt5, req: dict, acc: dict, dry: bool = False, confirm_real: b
             raise ValueError("conto REALE: manca la conferma esplicita")
         if req["rischio"] > MAX_RISK_REAL:
             raise ValueError(f"conto REALE: rischio massimo {MAX_RISK_REAL:g}% (richiesto {req['rischio']:g}%)")
-    sym = mo.broker_symbol(req["symbol"])
+    sym = resolve_symbol(mt5, req["symbol"])
     info = mt5.symbol_info(sym)
     if info is None or not mt5.symbol_select(sym, True):
         raise ValueError(f"simbolo {sym!r} non trovato su MT5")
@@ -121,8 +141,10 @@ def execute_manual(mt5, req: dict, acc: dict, dry: bool = False, confirm_real: b
     px_mkt = tick.ask if buy else tick.bid
     if tipo == "market":
         ref = px_mkt
-        if (buy and not (req["sl"] < tick.bid and chosen > tick.ask)) or (not buy and not (req["sl"] > tick.ask and chosen < tick.bid)):
-            raise ValueError(f"a mercato i livelli non sono coerenti con il prezzo di adesso ({tick.bid:.{d}f}/{tick.ask:.{d}f}): SL {req['sl']}, TP{target} {chosen}")
+        tps = [x for x in (req["tp1"], req["tp2"]) if x is not None]
+        near = min(tps) if buy else max(tps)                                    # il target più vicino deve stare ancora davanti al prezzo
+        if (buy and not (req["sl"] < tick.bid and near > tick.ask)) or (not buy and not (req["sl"] > tick.ask and near < tick.bid)):
+            raise ValueError(f"a mercato i livelli non sono coerenti con il prezzo di adesso ({tick.bid:.{d}f}/{tick.ask:.{d}f}): SL {req['sl']}, primo target {near}")
     else:
         ref = req["entry"]
         ok = {("buy", "limit"): req["entry"] < tick.ask - stops, ("buy", "stop"): req["entry"] > tick.ask + stops,
@@ -212,8 +234,8 @@ def _append(path: Path, cols: list, row: dict) -> None:
 
 
 def log_manual(mid: str, req: dict) -> None:
-    _append(MAN_CSV, MAN_COLS, {"time_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), "msg_id": mid, "symbol": req["symbol"], "side": req["side"], "entry": req["entry"],
-                                "sl": req["sl"], "tp1": req["tp1"], "tp2": req["tp2"] or "", "tp3": req["tp3"] or "", "tipo": req["tipo"], "rischio": req["rischio"], "parz": req.get("parz") or "", "nota": req["nota"]})
+    _append(MAN_CSV, MAN_COLS, {"time_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), "msg_id": mid, "symbol": req["symbol"], "side": req["side"], "entry": "" if req["entry"] is None else req["entry"],
+                                "sl": req["sl"], "tp1": "" if req["tp1"] is None else req["tp1"], "tp2": req["tp2"] or "", "tp3": req["tp3"] or "", "tipo": req["tipo"], "rischio": req["rischio"], "parz": req.get("parz") or "", "nota": req["nota"]})
 
 
 def log_esito(mid: str, conto, kind: str, lots, trks: list, text: str) -> None:
