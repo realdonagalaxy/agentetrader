@@ -575,6 +575,15 @@ def _balance_flows(mt5, t0) -> list[tuple]:
     return out
 
 
+def _add_pct(trades: list, flows: list, bal_now: float) -> None:
+    """Aggiunge a ogni operazione chiusa «pct»: netto in % del saldo del conto subito prima della chiusura (saldo ricostruito dal saldo di adesso; depositi e prelievi compresi)."""
+    from datetime import datetime, timezone
+    for r in trades:
+        when = datetime.fromtimestamp(r["close_time"], tz=timezone.utc).replace(tzinfo=None)
+        start = bal_now - sum(v for w, v, _ in flows if w >= when)
+        r["pct"] = round(100 * r["net"] / start, 2) if start > 0 else None
+
+
 def _day_pct(flows, bal_now: float, d0, d1=None):
     """Percentuale guadagnata o persa in [d0, d1) (default: un giorno) rispetto al SALDO a inizio periodo. Il saldo di inizio si ricostruisce dal saldo di adesso togliendo tutti i movimenti
     da d0 in poi (depositi e prelievi compresi). Conta solo il realizzato: operazioni chiuse nel periodo, con commissioni e swap. None se il saldo iniziale non è positivo."""
@@ -621,8 +630,11 @@ def trade_list(acc: dict, month: str) -> dict:
     y, m = (int(x) for x in month.split("-"))
     t0, t1 = datetime(y, m, 1), datetime(y + (m == 12), m % 12 + 1, 1)
     with session(acc) as mt5:
-        cur = mt5.account_info().currency
+        ai = mt5.account_info()
+        cur, bal_now = ai.currency, float(ai.balance)
         closed = _closed_trades(mt5, t0, t1)
+        flows = _balance_flows(mt5, t0)
+        _add_pct(closed, flows, bal_now)
         for r in closed:
             orders = sorted(mt5.history_orders_get(position=r["position"]) or (), key=lambda o: getattr(o, "time_setup", 0))
             first = orders[0] if orders else None
@@ -635,6 +647,7 @@ def trade_list(acc: dict, month: str) -> dict:
         for p in (mt5.positions_get() or []):
             d = _pos(p)
             d["r"] = round((1 if d["side"] == "buy" else -1) * (d["price"] - d["open"]) / abs(d["open"] - d["sl"]), 2) if d["sl"] and abs(d["open"] - d["sl"]) > 0 else None
+            d["pct"] = round(100 * d["profit"] / bal_now, 2) if bal_now > 0 else None                  # P/L di adesso in % del saldo
             opens.append(d)
         pend = [{"ticket": int(o.ticket), "symbol": o.symbol, "tipo": ORDER_NAMES.get(int(o.type), f"tipo {o.type}"), "volume": getattr(o, "volume_current", None) or getattr(o, "volume", None),
                  "price": o.price_open, "sl": o.sl or None, "tp": o.tp or None, "time": int(getattr(o, "time_setup", 0)), "comment": getattr(o, "comment", "")} for o in (mt5.orders_get() or [])]
@@ -646,9 +659,12 @@ def day_trades(acc: dict, day: str) -> dict:
     from datetime import datetime, timedelta
     t0 = datetime.strptime(day, "%Y-%m-%d")
     with session(acc) as mt5:
-        cur = mt5.account_info().currency
+        ai = mt5.account_info()
+        cur, bal_now = ai.currency, float(ai.balance)
         trades = _closed_trades(mt5, t0, t0 + timedelta(days=1))
-    return {"date": day, "currency": cur, "trades": trades}
+        flows = _balance_flows(mt5, t0)
+        _add_pct(trades, flows, bal_now)
+    return {"date": day, "currency": cur, "trades": trades, "pct": _day_pct(flows, bal_now, t0)}
 
 
 def chart_path(login, position: int, deal: int):
