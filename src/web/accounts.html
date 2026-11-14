@@ -461,18 +461,17 @@ async function loadTrades() {
     <div class="kpi"><div class="l">Chiusi nel mese</div><div class="v">${C.length}</div><div class="s">${tp} TP · ${sl} SL · ${C.length - tp - sl} altre</div></div>
     <div class="kpi"><div class="l">Netto del mese</div><div class="v ${cls(net)}">${money(net, j.currency)}</div></div>
     <div class="kpi"><div class="l">R totale</div><div class="v ${cls(rs)}">${r2(rs)}R</div><div class="s">sui trade con SL iniziale</div></div>`;
-  $("trhead").innerHTML = `<tr><th>Stato</th><th>Asset</th><th>Lotti</th><th>Apertura</th><th class="r">Entry</th><th class="r">SL</th><th class="r">TP</th><th class="r">Chiusura / ora</th><th class="r">R</th><th class="r">Risultato</th><th class="r">% del conto</th></tr>`;
+  $("trhead").innerHTML = `<tr><th>Stato</th><th>Asset</th><th>Lotti</th><th>Apertura</th><th class="r">Entry</th><th class="r">SL</th><th class="r">TP</th><th class="r">Chiusura / ora</th><th class="r">R</th><th class="r">Risultato</th></tr>`;
   const side = s => `<span class="badge ${s === "buy" ? "b-ok" : "b-err"}">${s.toUpperCase()}</span>`;
-  const row = (stato, sym, lots, when, entry, sl_, tp_, last, r, res, pc) => `<tr><td data-l="Stato">${stato}</td><td data-l="Asset"><b>${esc(sym)}</b></td><td class="r" data-l="Lotti">${lots ?? "—"}</td><td data-l="Apertura">${when}</td>
-    <td class="r" data-l="Entry">${entry}</td><td class="r" data-l="SL">${sl_}</td><td class="r" data-l="TP">${tp_}</td><td class="r" data-l="Chiusura / ora">${last}</td><td class="r" data-l="R">${r}</td><td class="r" data-l="Risultato">${res}</td><td class="r" data-l="% del conto">${pc}</td></tr>`;
-  const pc = v => v == null ? "—" : `<b class="${cls(v)}">${(v > 0 ? "+" : "") + Number(v).toFixed(2).replace(".", ",")}%</b>`;
+  const row = (stato, sym, lots, when, entry, sl_, tp_, last, r, res) => `<tr><td data-l="Stato">${stato}</td><td data-l="Asset"><b>${esc(sym)}</b></td><td class="r" data-l="Lotti">${lots ?? "—"}</td><td data-l="Apertura">${when}</td>
+    <td class="r" data-l="Entry">${entry}</td><td class="r" data-l="SL">${sl_}</td><td class="r" data-l="TP">${tp_}</td><td class="r" data-l="Chiusura / ora">${last}</td><td class="r" data-l="R">${r}</td><td class="r" data-l="Risultato">${res}</td></tr>`;
   const rows = [];
   j.open.forEach(p => rows.push(row(`${side(p.side)} <span class="badge b-sig">aperto</span>`, p.symbol, p.volume, tm(p.time), px(p.open), px(p.sl), px(p.tp), px(p.price),
-    `<span class="${cls(p.r)}">${r2(p.r)}</span>`, `<b class="${cls(p.profit)}">${money(p.profit, j.currency)}</b>`, pc(p.pct))));
-  j.pending.forEach(o => rows.push(row(`<span class="badge b-off">${esc(o.tipo)}</span>`, o.symbol, o.volume, tm(o.time), px(o.price), px(o.sl), px(o.tp), "—", "—", `<span class="sub">in attesa</span>`, "—")));
+    `<span class="${cls(p.r)}">${r2(p.r)}</span>`, `<b class="${cls(p.profit)}">${money(p.profit, j.currency)}</b>`)));
+  j.pending.forEach(o => rows.push(row(`<span class="badge b-off">${esc(o.tipo)}</span>`, o.symbol, o.volume, tm(o.time), px(o.price), px(o.sl), px(o.tp), "—", "—", `<span class="sub">in attesa</span>`)));
   C.forEach(t => rows.push(row(`${side(t.side)} ${t.reason === "tp" ? `<span class="badge b-ok">TP</span>` : t.reason === "sl" ? `<span class="badge b-err">SL</span>` : `<span class="badge b-off">chiusa</span>`}`, t.symbol, t.volume, tm(t.open_time), px(t.open_price),
-    px(t.sl), px(t.tp), `${px(t.close_price)}<div class="sub">${tm(t.close_time)}</div>`, `<span class="${cls(t.r)}">${r2(t.r)}</span>`, `<b class="${cls(t.net)}">${money(t.net, j.currency)}</b>`, pc(t.pct))));
-  $("trrows").innerHTML = rows.join("") || `<tr><td colspan="11" class="sub" style="padding:14px">Nessun trade per questo conto e questo mese.</td></tr>`;
+    px(t.sl), px(t.tp), `${px(t.close_price)}<div class="sub">${tm(t.close_time)}</div>`, `<span class="${cls(t.r)}">${r2(t.r)}</span>`, `<b class="${cls(t.net)}">${money(t.net, j.currency)}</b>`)));
+  $("trrows").innerHTML = rows.join("") || `<tr><td colspan="10" class="sub" style="padding:14px">Nessun trade per questo conto e questo mese.</td></tr>`;
 }
 async function loadCalendar() {
   $("cmonth").textContent = calMonth.toLocaleDateString("it-IT", {month: "long", year: "numeric"});
