@@ -33,12 +33,12 @@ NET_MODE = False            # True: ascolta sulla rete (cellulare) e chiede il P
 PIN = ""
 SESSIONS: dict[str, float] = {}      # token di sessione -> scadenza
 FAILS: dict[str, tuple[int, float]] = {}     # indirizzo -> (tentativi errati, bloccato fino a)
-LOGIN_HTML = """<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Gestione Conti</title>
-<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0e1621;color:#e6ebf2;font:16px system-ui,-apple-system,Segoe UI,sans-serif;padding:16px}
+LOGIN_HTML = """<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Gestione Conti · donatrader</title><link rel="icon" type="image/png" href="/favicon.png">
+<style>.lg{background:#fff;border-radius:8px;padding:8px 14px;justify-self:center}.lg img{height:38px;width:auto;display:block}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0e1621;color:#e6ebf2;font:16px system-ui,-apple-system,Segoe UI,sans-serif;padding:16px}
 form{background:#141e2b;border:1px solid #263548;border-radius:10px;padding:24px;width:min(340px,100%);display:grid;gap:14px}h1{font-size:18px;margin:0}
 input{font:inherit;padding:12px;border-radius:6px;border:1px solid #263548;background:#0e1621;color:inherit;width:100%;box-sizing:border-box}
 button{font:inherit;font-weight:600;padding:12px;border:0;border-radius:6px;background:#7aa3d6;color:#0b1420;cursor:pointer}#m{color:#e57f78;font-size:14px;min-height:18px}</style></head>
-<body><form id="f"><h1>Gestione Conti</h1><input id="p" type="password" inputmode="numeric" autocomplete="current-password" placeholder="PIN" autofocus><button>Entra</button><div id="m"></div></form>
+<body><form id="f"><div class="lg"><img src="/logo.png" alt="donatrader"></div><h1>Gestione Conti</h1><input id="p" type="password" inputmode="numeric" autocomplete="current-password" placeholder="PIN" autofocus><button>Entra</button><div id="m"></div></form>
 <script>document.getElementById("f").onsubmit=async e=>{e.preventDefault();const m=document.getElementById("m");m.textContent="";
 const r=await fetch("/login",{method:"POST",headers:{"Content-Type":"application/json","X-Requested-With":"accounts"},body:JSON.stringify({pin:document.getElementById("p").value})});
 if(r.ok)location.reload();else{const j=await r.json().catch(()=>({}));m.textContent=j.error||"PIN errato";}};</script></body></html>"""
@@ -422,6 +422,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._ok_host():
             return self._send(403, b"host non consentito", "text/plain")
         path = urlparse(self.path).path
+        if path in ("/logo.png", "/favicon.png"):                       # il logo si vede anche nella pagina del PIN (nessun dato sensibile)
+            return self._send(200, (WEB / path[1:]).read_bytes(), "image/png")
         if not self._authed():
             if path in ("/", "/index.html"):
                 return self._send(200, LOGIN_HTML.encode(), "text/html; charset=utf-8")

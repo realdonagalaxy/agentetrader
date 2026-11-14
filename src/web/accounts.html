@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Gestione Conti</title>
+<title>Gestione Conti · donatrader</title>
+<link rel="icon" type="image/png" href="/favicon.png">
 <style>
 /* Layout: barra titolo con schede, riepilogo KPI, tabella dei conti con riga espandibile (posizioni aperte), finestra di modifica. Palette e tipografia come il journal. */
 :root{
@@ -22,6 +23,10 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);pa
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
 header.top{position:sticky;top:0;z-index:20;background:var(--hdr);color:var(--hdr-ink);box-shadow:0 0 0 100vmax var(--hdr);clip-path:inset(0 -100vmax);padding:14px 0;display:flex;gap:10px 20px;align-items:center;flex-wrap:wrap}
 h1{font-size:18px;font-weight:600;margin:0}
+.brand{display:flex;align-items:center;gap:14px;min-width:0}
+.logo{background:#fff;border-radius:8px;padding:5px 12px;display:flex;flex:none}
+.logo img{height:42px;width:auto;display:block}
+@media (max-width:520px){.logo{padding:4px 8px}.logo img{height:30px}.hsub{display:none}}
 .hsub{color:var(--hdr-mute);font-size:12px}
 nav{display:flex;gap:2px;background:rgba(255,255,255,.07);padding:3px;border-radius:6px;margin-left:auto}
 nav button{background:transparent;color:#b9c6d6;border:0;padding:7px 16px;border-radius:4px;font:500 13px var(--sans);cursor:pointer}
@@ -141,7 +146,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
 <body>
 <div class="wrap">
 <header class="top">
-  <div><h1>Gestione Conti</h1><div class="hsub" id="upd">Monitoraggio e gestione dei conti MetaTrader 5</div></div>
+  <div class="brand"><span class="logo"><img src="/logo.png" alt="donatrader"></span><div><h1>Gestione Conti</h1><div class="hsub" id="upd">Monitoraggio e gestione dei conti MetaTrader 5</div></div></div>
   <nav role="tablist"><button role="tab" aria-selected="true" data-tab="conti">Conti</button><button role="tab" aria-selected="false" data-tab="ris">Risultati</button><button role="tab" aria-selected="false" data-tab="seg" hidden>Automatico</button></nav>
   <button class="btn sec" id="refresh" style="color:#fff;border-color:rgba(255,255,255,.3)">Aggiorna</button>
   <button class="btn sec" id="imp" style="color:#fff;border-color:rgba(255,255,255,.3)" title="Aggiunge il conto a cui il terminale MT5 aperto è collegato adesso">Importa da MT5</button>
