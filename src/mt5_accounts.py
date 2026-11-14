@@ -564,6 +564,27 @@ def _closed_trades(mt5, t0, t1) -> list[dict]:
     return sorted(out, key=lambda r: r["close_time"])
 
 
+def _balance_flows(mt5, t0) -> list[tuple]:
+    """Tutti i movimenti del conto da t0 a oggi: (quando, importo netto, è_operazione). Netto = profitto + commissione + swap (+ fee); is_trade=False per depositi, prelievi, crediti."""
+    from datetime import datetime, timedelta, timezone
+    deals = mt5.history_deals_get(t0 - timedelta(days=1), datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=2)) or ()
+    out = []
+    for d in deals:
+        when = datetime.fromtimestamp(d.time, tz=timezone.utc).replace(tzinfo=None)
+        out.append((when, float(d.profit) + float(getattr(d, "commission", 0.0)) + float(getattr(d, "swap", 0.0)) + float(getattr(d, "fee", 0.0)), d.type in (0, 1)))
+    return out
+
+
+def _day_pct(flows, bal_now: float, d0, d1=None):
+    """Percentuale guadagnata o persa in [d0, d1) (default: un giorno) rispetto al SALDO a inizio periodo. Il saldo di inizio si ricostruisce dal saldo di adesso togliendo tutti i movimenti
+    da d0 in poi (depositi e prelievi compresi). Conta solo il realizzato: operazioni chiuse nel periodo, con commissioni e swap. None se il saldo iniziale non è positivo."""
+    from datetime import timedelta
+    d1 = d1 or d0 + timedelta(days=1)
+    start = bal_now - sum(v for w, v, _ in flows if w >= d0)
+    pnl = sum(v for w, v, trade in flows if trade and d0 <= w < d1)
+    return round(100 * pnl / start, 2) if start > 0 else None
+
+
 def calendar_month(acc: dict, month: str) -> dict:
     """Operazioni CHIUSE del conto nel mese (YYYY-MM), raggruppate per giorno di chiusura (orario del server del broker):
     numero di TP, di SL, di altre chiusure (a mano, copia...), somma dei PIPS e profitto netto. TP/SL = motivo di chiusura registrato da MT5."""
@@ -571,8 +592,10 @@ def calendar_month(acc: dict, month: str) -> dict:
     y, m = (int(x) for x in month.split("-"))
     t0, t1 = datetime(y, m, 1), datetime(y + (m == 12), m % 12 + 1, 1)
     with session(acc) as mt5:
-        cur = mt5.account_info().currency
+        ai = mt5.account_info()
+        cur, bal_now = ai.currency, float(ai.balance)
         trades = _closed_trades(mt5, t0, t1)
+        flows = _balance_flows(mt5, t0)
     days = {}
     for r in trades:
         c = days.setdefault(r["day"], {"tp": 0, "sl": 0, "altre": 0, "pips": 0.0, "trade": 0, "netto": 0.0})
@@ -580,9 +603,11 @@ def calendar_month(acc: dict, month: str) -> dict:
         c["pips"] += r["pips"]
         c["trade"] += 1
         c["netto"] += r["net"]
-    for c in days.values():
+    for key, c in days.items():
         c["pips"], c["netto"] = round(c["pips"], 1), round(c["netto"], 2)
+        c["pct"] = _day_pct(flows, bal_now, datetime.strptime(key, "%Y-%m-%d"))
     tot = {k: round(sum(c[k] for c in days.values()), 2) for k in ("tp", "sl", "altre", "pips", "trade", "netto")}
+    tot["pct"] = _day_pct(flows, bal_now, t0, t1)
     return {"month": month, "currency": cur, "days": days, "total": tot}
 
 

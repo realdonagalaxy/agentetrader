@@ -142,7 +142,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
 <div class="wrap">
 <header class="top">
   <div><h1>Gestione Conti</h1><div class="hsub" id="upd">Monitoraggio e gestione dei conti MetaTrader 5</div></div>
-  <nav role="tablist"><button role="tab" aria-selected="true" data-tab="conti">Conti</button><button role="tab" aria-selected="false" data-tab="ris">Risultati</button><button role="tab" aria-selected="false" data-tab="seg">Automatico</button></nav>
+  <nav role="tablist"><button role="tab" aria-selected="true" data-tab="conti">Conti</button><button role="tab" aria-selected="false" data-tab="ris">Risultati</button><button role="tab" aria-selected="false" data-tab="seg" hidden>Automatico</button></nav>
   <button class="btn sec" id="refresh" style="color:#fff;border-color:rgba(255,255,255,.3)">Aggiorna</button>
   <button class="btn sec" id="imp" style="color:#fff;border-color:rgba(255,255,255,.3)" title="Aggiunge il conto a cui il terminale MT5 aperto è collegato adesso">Importa da MT5</button>
   <button class="btn" id="add" style="background:#fff;color:#14233a">+ Nuovo conto</button>
@@ -188,7 +188,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
     </div>
     <div style="padding:0 16px 16px">
       <div id="cal" class="cal"></div>
-      <div class="sub" style="margin-top:10px">Per ogni giorno di chiusura: numero di TP e di SL (dal motivo di chiusura registrato da MT5) e somma dei pips guadagnati o persi (oro: 1 pip = 0,10 $). Le chiusure fatte a mano o dal copiatore non sono né TP né SL: compaiono come «altre» e contano nei pips. Orario del server del broker.</div>
+      <div class="sub" style="margin-top:10px">Per ogni giorno di chiusura: numero di TP e di SL (dal motivo di chiusura registrato da MT5) e la percentuale guadagnata o persa rispetto al saldo a inizio giornata (solo il realizzato, al netto di commissioni e swap; depositi e prelievi non contano). Le chiusure fatte a mano non sono né TP né SL: compaiono come «altre». Orario del server del broker.</div>
     </div>
   </div>
   <div class="panel"><h2>Trade letti da MT5 <span class="sub" style="margin-left:auto;text-transform:none;letter-spacing:0" id="trsub"></span></h2>
@@ -484,13 +484,14 @@ function drawCalendar(R) {
     const key = `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`, v = R.days[key];
     const isT = today.getFullYear() === y && today.getMonth() === m && today.getDate() === d;
     const tip = v ? `${v.trade} operazioni chiuse · netto ${money(v.netto, R.currency)}` : "";
-    h += `<div class="day${isT ? " today" : ""}${v ? (v.pips > 0 ? " win" : v.pips < 0 ? " loss" : "") + " has" : ""}" ${v ? `data-day="${key}" tabindex="0" role="button"` : ""} title="${esc(tip ? tip + " · clicca per i grafici" : "")}"><div class="dn">${d}</div>` + (v ? `
+    const pc = v ? (v.pct != null ? v.pct : v.netto) : 0, pcs = v && v.pct != null ? (v.pct > 0 ? "+" : "") + v.pct.toFixed(2).replace(".", ",") + "%" : "—";
+    h += `<div class="day${isT ? " today" : ""}${v ? (pc > 0 ? " win" : pc < 0 ? " loss" : "") + " has" : ""}" ${v ? `data-day="${key}" tabindex="0" role="button"` : ""} title="${esc(tip ? tip + " · clicca per i grafici" : "")}"><div class="dn">${d}</div>` + (v ? `
       <div class="ln"><span class="gain">TP</span><b class="gain">${v.tp}</b></div><div class="ln"><span class="loss">SL</span><b class="loss">${v.sl}</b></div>` +
-      (v.altre ? `<div class="ln"><span class="sub">altre</span><b>${v.altre}</b></div>` : "") + `<div class="pp ${cls(v.pips)}">${sgn(v.pips)} pips</div>` : "") + `</div>`;
+      (v.altre ? `<div class="ln"><span class="sub">altre</span><b>${v.altre}</b></div>` : "") + `<div class="pp ${cls(pc)}">${pcs}</div>` : "") + `</div>`;
   }
   $("cal").innerHTML = h;
   const t = R.total;
-  $("ctot").innerHTML = t.trade ? `Mese: <b class="gain">${t.tp} TP</b> · <b class="loss">${t.sl} SL</b>${t.altre ? ` · ${t.altre} altre` : ""} · <b class="${cls(t.pips)}">${sgn(t.pips)} pips</b> · netto <b class="${cls(t.netto)}">${money(t.netto, R.currency)}</b>` : "Nessuna operazione chiusa in questo mese.";
+  $("ctot").innerHTML = t.trade ? `Mese: <b class="gain">${t.tp} TP</b> · <b class="loss">${t.sl} SL</b>${t.altre ? ` · ${t.altre} altre` : ""} · <b class="${cls(t.pct != null ? t.pct : t.netto)}">${t.pct != null ? (t.pct > 0 ? "+" : "") + t.pct.toFixed(2).replace(".", ",") + "%" : "—"}</b> del saldo · netto <b class="${cls(t.netto)}">${money(t.netto, R.currency)}</b>` : "Nessuna operazione chiusa in questo mese.";
 }
 let dayToken = 0;
 async function openDay(day) {
