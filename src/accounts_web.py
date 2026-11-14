@@ -87,9 +87,10 @@ def manual_preview(d: dict) -> dict:
     res = []
     for a in _manual_accounts(d.get("accounts") or []):
         try:
+            det: dict = {}
             with ma.session(a) as m:
-                text, _ = mt.execute_manual(m, req, a, dry=True)
-            res.append({"conto": a["login"], "ok": True, "testo": text, "reale": text.startswith("[ANTEPRIMA, nessun ordine inviato] [CONTO REALE]")})
+                text, _ = mt.execute_manual(m, req, a, dry=True, detail=det)
+            res.append({"conto": a["login"], "ok": True, "testo": text, "reale": text.startswith("[ANTEPRIMA, nessun ordine inviato] [CONTO REALE]"), "dettagli": det})
         except Exception as e:
             res.append({"conto": a["login"], "ok": False, "testo": str(e)[:400]})
     return {"req": req, "risultati": res}

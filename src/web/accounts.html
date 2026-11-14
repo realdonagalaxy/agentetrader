@@ -103,6 +103,10 @@ tr.acc.off .name{opacity:.6}
   #srows > tr > td[data-l="Segnale"],#mrows > tr > td[data-l="Trade"]{grid-column:span 2;font-size:15px}
   #srows > tr > td[data-l="Ora"],#mrows > tr > td[data-l="Ora"]{grid-column:span 1}
   #stable,#mtable{display:block}
+  #mprev tbody > tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px;padding:10px 4px;border-bottom:1px solid var(--line)}
+  #mprev tbody > tr > td{display:block;border:0;padding:0;text-align:left!important;min-width:0;overflow-wrap:anywhere}
+  #mprev tbody > tr > td::before{content:attr(data-l);display:block;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink3);margin-bottom:1px}
+  #mprev tbody > tr > td.wide{grid-column:1/-1}
   #tab-seg .panel > h2{flex-wrap:wrap;row-gap:8px}
   #tab-seg .panel > h2 > span{margin-left:0!important;flex-wrap:wrap}
   #rows > tr.det,#rows > tr.det > td{display:block}
@@ -111,6 +115,15 @@ tr.acc.off .name{opacity:.6}
 .cal .day.has{cursor:pointer}
 .cal .day.has:hover{box-shadow:0 0 0 2px var(--accent) inset}
 .cal .day.has:focus-visible{outline:2px solid var(--accent)}
+#mdlg{width:min(780px,calc(100vw - 24px))}
+#mdlg .row2{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+#mdlg .row2>*{min-width:0}
+#mdlg .body{grid-template-columns:minmax(0,1fr)}
+#mprev td.sub{white-space:normal;min-width:160px}
+#mdlg label input:not([type=checkbox]),#mdlg label select{width:100%}
+@media (max-width:520px){#mdlg .row2{grid-template-columns:minmax(0,1fr)}}
+#mdlg .body{overflow-x:hidden}
+#mdlg input:not([type=checkbox]),#mdlg select{max-width:100%;box-sizing:border-box}
 #daydlg{width:min(860px,calc(100vw - 24px));max-height:92vh;display:none;flex-direction:column}
 #daydlg[open]{display:flex}
 #daybody{padding:14px 18px;overflow-y:auto}
@@ -179,46 +192,13 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
   </div>
 </div>
 <div id="tab-man" hidden style="display:grid;gap:16px">
-  <div class="panel"><h2>Trade discrezionale <span class="sub" style="margin-left:auto;text-transform:none;letter-spacing:0">parzializzazione a TP1 e BE come nell'automatico, ma decisa per ogni trade</span></h2>
-    <div class="body">
-      <div class="row2" style="align-items:end">
-        <label>Incolla il testo (come quello di Cedric) <textarea id="mtext" rows="3" placeholder="SELL XAUUSD&#10;Entry: 4073.1&#10;SL: 4088.1&#10;TP1: 4068.1&#10;TP2: 4063.1&#10;TP3: 4033.1" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);font:inherit"></textarea></label>
-        <div><button class="btn sec" id="mread">Leggi il testo nel modulo</button></div>
-      </div>
-      <div class="row2">
-        <label>1. Asset<select id="msym"></select></label>
-        <label>2. Tipo di entry<select id="mtipo">
-          <option value="buy:limit">BUY LIMIT</option><option value="sell:limit">SELL LIMIT</option>
-          <option value="buy:stop">BUY STOP</option><option value="sell:stop">SELL STOP</option>
-          <option value="buy:market">BUY · esecuzione diretta a mercato</option><option value="sell:market">SELL · esecuzione diretta a mercato</option></select></label>
-      </div>
-      <div class="row2">
-        <label id="mentrybox">Entry <span class="hint">(prezzo dell'ordine, come sul tuo conto)</span><input type="text" inputmode="decimal" id="mentry"></label>
-        <label>SL<input type="text" inputmode="decimal" id="msl"></label>
-      </div>
-      <div class="row2">
-        <label>TP1 <span class="hint">(primo target: se parzializzi, qui chiudi la quota)</span><input type="text" inputmode="decimal" id="mtp1"></label>
-        <label>TP2 <span class="hint">(secondo target: chiude il resto, o tutto se scrivi solo questo)</span><input type="text" inputmode="decimal" id="mtp2"></label>
-      </div>
-      <div class="row2">
-        <label class="chk" style="margin-top:4px"><input type="checkbox" id="mparz_on" checked><span>Parzializza a TP1 e porta il resto a pareggio (BE) <span class="hint">(servono TP1 e TP2)</span></span></label>
-        <label id="mparzbox">Quota chiusa a TP1 (%) <span class="hint">(10-90)</span><input type="text" inputmode="numeric" id="mparz" value="60"></label>
-      </div>
-      <div class="row2">
-        <label>Rischio per trade (% del saldo)<input type="text" inputmode="decimal" id="mrisk" value="0.5"></label>
-        <label>Nota<input type="text" id="mnota" maxlength="300"></label>
-      </div>
-      <div><b style="font-size:12px">Conti</b><div id="maccs" style="display:grid;gap:6px;margin-top:6px"></div></div>
-      <div class="actions" style="justify-content:flex-start"><button class="btn sec" id="mprevbtn">Anteprima (lotti e livelli)</button><button class="btn" id="msend">Apri il trade</button></div>
-      <div id="mprev" class="sub" style="color:var(--ink);line-height:1.6"></div>
-    </div>
-  </div>
-  <div class="panel"><h2>Trade manuali del giorno <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
+  <div class="panel"><h2>Trade manuali <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <input type="date" id="mdate" aria-label="Giorno" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit">
-      <button class="btn sm sec" id="mload">Aggiorna</button></span></h2>
+      <button class="btn sm sec" id="mload">Aggiorna</button><button class="btn sm" id="mnew">+ Nuovo trade</button></span></h2>
     <div class="kpis" id="mkpis" style="padding:0 16px 8px"></div>
     <div class="kpis" id="mgain" style="padding:0 16px 8px"></div>
     <div class="tw" style="padding:0 16px 16px"><table class="acctable" id="mtable"><thead id="mhead"></thead><tbody id="mrows"></tbody></table></div>
+    <div class="sub" style="padding:0 16px 16px">Qui compaiono i trade manuali eseguiti o piazzati nel giorno scelto, con lo stato per conto (ordine in attesa, aperto, chiuso a TP o SL) e il guadagno. Per inserirne uno nuovo premi «+ Nuovo trade».</div>
   </div>
 </div>
 <div id="tab-ris" hidden style="display:grid;gap:16px">
@@ -271,6 +251,38 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
 
 <dialog id="daydlg"><div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)"><h3 id="daytitle" style="border:0;padding:0;margin:0;text-transform:capitalize"></h3><span id="daysum" class="sub" style="margin-left:auto"></span>
   <button class="btn sm sec" id="dayclose" aria-label="Chiudi">Chiudi</button></div><div id="daybody"></div></dialog>
+
+<dialog id="mdlg"><div style="display:flex;align-items:center;gap:10px;padding:14px 20px;border-bottom:1px solid var(--line)"><h3 style="border:0;padding:0;margin:0">Nuovo trade manuale</h3>
+  <button type="button" class="btn sm sec" id="mclose" style="margin-left:auto" aria-label="Chiudi">Chiudi</button></div>
+  <div class="body" style="max-height:78vh;overflow-y:auto">
+    <div class="row2">
+      <label>1. Asset<select id="msym"></select></label>
+      <label>2. Tipo di entry<select id="mtipo">
+        <option value="buy:limit">BUY LIMIT</option><option value="sell:limit">SELL LIMIT</option>
+        <option value="buy:stop">BUY STOP</option><option value="sell:stop">SELL STOP</option>
+        <option value="buy:market">BUY · esecuzione diretta a mercato</option><option value="sell:market">SELL · esecuzione diretta a mercato</option></select></label>
+    </div>
+    <div class="row2">
+      <label id="mentrybox">Entry <span class="hint">(prezzo dell'ordine, come sul tuo conto)</span><input type="text" inputmode="decimal" id="mentry"></label>
+      <label>SL<input type="text" inputmode="decimal" id="msl"></label>
+    </div>
+    <div class="row2">
+      <label>TP1 <span class="hint">(primo target)</span><input type="text" inputmode="decimal" id="mtp1"></label>
+      <label>TP2 <span class="hint">(secondo target)</span><input type="text" inputmode="decimal" id="mtp2"></label>
+    </div>
+    <div class="row2">
+      <label class="chk" style="margin-top:4px"><input type="checkbox" id="mparz_on" checked><span>Parzializza a TP1 e porta il resto a pareggio (BE) <span class="hint">(servono TP1 e TP2)</span></span></label>
+      <label id="mparzbox">Quota chiusa a TP1 (%) <span class="hint">(10-90)</span><input type="text" inputmode="numeric" id="mparz" value="60"></label>
+    </div>
+    <div class="row2">
+      <label>Rischio per trade (% del saldo)<input type="text" inputmode="decimal" id="mrisk" value="0.5"></label>
+      <label>Nota<input type="text" id="mnota" maxlength="300"></label>
+    </div>
+    <div><b style="font-size:12px">Conti</b><div id="maccs" style="display:grid;gap:6px;margin-top:6px"></div></div>
+    <div id="mprev" class="sub" style="color:var(--ink);line-height:1.6"></div>
+  </div>
+  <div class="foot"><button type="button" class="btn sec" id="mprevbtn">Calcola il rischio</button><button type="button" class="btn" id="msend">Apri il trade</button></div>
+</dialog>
 
 <dialog id="ask"><form method="dialog">
   <h3 id="atitle">Conferma</h3><div class="body" id="atext"></div>
@@ -625,6 +637,8 @@ $("ssync").onclick = async () => {
 
 // ---------- parte MANUALE (trading discrezionale)
 $("mdate").value = todayStr();
+$("mnew").onclick = async () => { await loadManualAssets(); await loadManualAccounts(); $("mprev").innerHTML = ""; mUi(); $("mdlg").showModal(); $("msl").focus(); };
+$("mclose").onclick = () => $("mdlg").close();
 $("mload").onclick = loadManualDay; $("mdate").onchange = loadManualDay;
 let manAccs = [];
 async function loadManualAccounts() {
@@ -652,16 +666,19 @@ async function loadManualAssets() {
   try { const r = await api("/api/manual-assets"); $("msym").innerHTML = r.assets.map(x => `<option>${esc(x)}</option>`).join(""); } catch (e) { toast(e.message, 5000); }
   mUi();
 }
-$("mread").onclick = async () => {
-  try {
-    const r = await api("/api/manual-parse", "POST", {text: $("mtext").value});
-    const asset = r.symbol || "XAUUSD"; if (![...$("msym").options].some(o => o.value === asset)) $("msym").add(new Option(asset)); $("msym").value = asset;
-    $("mtipo").value = r.side + ":" + ($("mtipo").value.split(":")[1] || "market");                   // direzione dal testo, tipo di entry quello scelto
-    $("mentry").value = r.entry; $("msl").value = r.sl; $("mtp1").value = r.tp1; $("mtp2").value = r.tp2 ?? ""; mUi();
-    toast("Testo letto: controlla i valori nel modulo", 4000);
-  } catch (e) { toast("Non riesco a leggere il testo: " + e.message, 8000); }
+const renderPrev = rs => {
+  const f2 = v => (+v).toLocaleString("it-IT", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const righe = rs.map(x => {
+    if (!x.ok) return `<tr><td class="wide" data-l="Conto"><b>${esc(x.conto)}</b></td><td colspan="5" class="wide" data-l="Esito"><span class="err">⛔ ${esc(x.testo)}</span></td></tr>`;
+    const d = x.dettagli || {};
+    if (d.lots == null) return `<tr><td class="wide" data-l="Conto"><b>${esc(x.conto)}</b></td><td colspan="5" class="wide" data-l="Esito">${esc(x.testo)}</td></tr>`;
+    const lotti = d.split ? `${d.parts[0][0]} + ${d.parts[1][0]}` : d.lots;
+    return `<tr><td class="wide" data-l="Conto"><b>${esc(x.conto)}</b>${x.reale ? ` <span class="badge b-err">REALE</span>` : ""}</td><td class="r" data-l="Lotti">${lotti}</td>
+      <td class="r" data-l="Rischio">${f2(d.risk_real)} ${esc(d.ccy)}<div class="sub">${d.risk_pct_real}% di ${f2(d.balance)}</div></td>
+      <td class="r" data-l="Profitto ai target">${f2(d.gain)} ${esc(d.ccy)}</td><td class="r" data-l="R:R"><b>${d.rr != null ? "1:" + d.rr : "—"}</b></td><td class="sub wide" data-l="Note">SL a ${esc(d.dist_sl)}${d.split ? " · parzializza a TP1, resto a BE" : ""}${d.why ? ` · <span class="err">parzializzazione non applicata: ${esc(d.why)}</span>` : ""}</td></tr>`;
+  }).join("");
+  return `<div class="tw"><table class="acctable"><thead><tr><th>Conto</th><th class="r">Lotti</th><th class="r">Rischio</th><th class="r">Profitto ai target</th><th class="r">R:R</th><th></th></tr></thead><tbody>${righe}</tbody></table></div>`;
 };
-const renderPrev = rs => rs.map(x => `<div>${x.ok ? "✅" : "⛔"} <b>${esc(x.conto)}</b> ${x.reale ? `<span class="badge b-err">REALE</span> ` : ""}${esc(x.testo)}</div>`).join("");
 $("mprevbtn").onclick = async () => {
   $("mprev").textContent = "Calcolo…";
   try { const r = await api("/api/manual-preview", "POST", mform()); $("mprev").innerHTML = renderPrev(r.risultati); }

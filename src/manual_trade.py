@@ -109,7 +109,7 @@ def _loss_per_lot(mt5, info, buy: bool, price: float, sl: float, sym: str) -> fl
     raise ValueError(f"non riesco a calcolare il valore del rischio per {sym}: controlla il simbolo")
 
 
-def execute_manual(mt5, req: dict, acc: dict, dry: bool = False, confirm_real: bool = False) -> tuple[str, list]:
+def execute_manual(mt5, req: dict, acc: dict, dry: bool = False, confirm_real: bool = False, detail: dict | None = None) -> tuple[str, list]:
     """Apre il trade manuale sul conto collegato. Ritorna (testo, posizioni da seguire); solleva ValueError con il motivo se non apre."""
     from src import mt5_orders as mo
     ti = mt5.terminal_info()
@@ -189,6 +189,14 @@ def execute_manual(mt5, req: dict, acc: dict, dry: bool = False, confirm_real: b
         else:
             r.update(action=mt5.TRADE_ACTION_PENDING, price=round(req["entry"], d), type_filling=mt5.ORDER_FILLING_RETURN)
         reqs.append(r)
+    if detail is not None:                                                    # numeri per la finestra «calcola il rischio»
+        dist = abs(ref - req["sl"])
+        unit = per_lot / dist if dist else 0.0                                # perdita (o guadagno) in valuta per lotto e per unità di prezzo
+        gain = sum(v * abs(tp - ref) * unit for v, tp, _ in parts)
+        risk_real = lots * per_lot
+        detail.update(lots=lots, parts=[(v, tp) for v, tp, _ in parts], split=split, balance=balance, ccy=ai.currency, risk_target=risk_amount, risk_real=round(risk_real, 2),
+                    risk_pct_real=round(100 * risk_real / balance, 3), gain=round(gain, 2), rr=round(gain / risk_real, 2) if risk_real else None, dist_sl=round(dist, d),
+                    real=real, why=why if partial and not split else "")
     lab = {"market": "a mercato", "limit": "LIMIT", "stop": "STOP"}[tipo]
     px_txt = f"~{px_mkt:.{d}f}" if tipo == "market" else f"@ {req['entry']:.{d}f}"
     desc = (f"{req['side'].upper()} {sym} {lots:g} lotti ({req['rischio']:g}% = {risk_amount:.2f} {ai.currency}) {lab} {px_txt} · SL {reqs[0]['sl']} "
