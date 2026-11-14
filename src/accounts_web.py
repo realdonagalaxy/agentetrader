@@ -285,6 +285,11 @@ def listener_running() -> bool:
         return False
 
 
+def signals_enabled() -> bool:
+    """Segnali di Cedric (ascolto del canale, apertura sui conti demo, scheda Automatico): SPENTI di default, si riaccendono con SEGNALI=1 in config.env."""
+    return os.environ.get("SEGNALI", "").strip().lower() in ("1", "si", "sì", "true", "on")
+
+
 def code_version() -> str:
     import subprocess
     try:
@@ -312,6 +317,8 @@ def listener_start() -> int:
     """Avvia `python -m src.mt5_orders` in background (stesso Python di questa app). Output in journal/mt5_orders.log."""
     import subprocess
     import sys
+    if not signals_enabled():
+        raise ValueError("I segnali sono disattivati (SEGNALI=1 in config.env per riattivarli).")
     if listener_running():
         raise ValueError("L'ascolto dei segnali è già attivo.")
     log = open(ma.DATA_DIR / "mt5_orders.log", "a", encoding="utf-8")
@@ -432,7 +439,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, (WEB / "accounts.html").read_bytes(), "text/html; charset=utf-8")
         try:
             if path == "/api/accounts":
-                return self._json({"accounts": ma.list_accounts(), "simulator": os.environ.get("MT5_SIMULATOR") == "1"})
+                return self._json({"accounts": ma.list_accounts(), "simulator": os.environ.get("MT5_SIMULATOR") == "1", "signals": signals_enabled()})
             if path == "/api/telegram":
                 return self._json(telegram_status())
             if path == "/api/signals-day":
@@ -592,7 +599,16 @@ def main():
         print("Accesso da cellulare ATTIVO (serve il PIN). Dalla stessa rete Wi-Fi apri uno di questi indirizzi:")
         for ip in sorted(i for i in ips if not i.startswith("127.")):
             print(f"   http://{ip}:{port}")
-    if os.environ.get("AVVIO_ASCOLTO", "1").strip().lower() not in ("0", "no", "off", "false"):    # insieme al server parte anche l'ascolto dei segnali (AVVIO_ASCOLTO=0 in config.env lo disattiva)
+    if not signals_enabled():                                           # segnali di Cedric abbandonati per ora: niente ascolto, e se ne girava uno lo si ferma (altrimenti continuerebbe ad aprire sul demo)
+        try:
+            if listener_running():
+                kill_listeners()
+                print("Segnali disattivati: ho fermato l'ascolto che era in esecuzione.", flush=True)
+            else:
+                print("Segnali di Cedric disattivati (SEGNALI=1 in config.env per riattivarli).", flush=True)
+        except Exception as e:
+            print("Non sono riuscito a fermare l'ascolto:", str(e)[:150], flush=True)
+    elif os.environ.get("AVVIO_ASCOLTO", "1").strip().lower() not in ("0", "no", "off", "false"):    # insieme al server parte anche l'ascolto dei segnali (AVVIO_ASCOLTO=0 in config.env lo disattiva)
         try:
             if listener_running():                                          # un ascolto avviato con una versione precedente del codice (o a mano) va sostituito, altrimenti continua a usare il codice vecchio
                 try:

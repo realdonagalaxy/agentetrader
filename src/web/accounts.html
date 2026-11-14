@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="it">
+<html lang="it" class="nosig">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -23,6 +23,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);pa
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
 header.top{position:sticky;top:0;z-index:20;background:var(--hdr);color:var(--hdr-ink);box-shadow:0 0 0 100vmax var(--hdr);clip-path:inset(0 -100vmax);padding:14px 0;display:flex;gap:10px 20px;align-items:center;flex-wrap:wrap}
 h1{font-size:18px;font-weight:600;margin:0}
+.nosig .sigonly{display:none!important}
 .brand{display:flex;align-items:center;gap:14px;min-width:0}
 .logo{background:#fff;border-radius:8px;padding:5px 12px;display:flex;flex:none}
 .logo img{height:42px;width:auto;display:block}
@@ -147,7 +148,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
 <div class="wrap">
 <header class="top">
   <div class="brand"><span class="logo"><img src="/logo.png" alt="donatrader"></span><div><h1>Gestione Conti</h1><div class="hsub" id="upd">Monitoraggio e gestione dei conti MetaTrader 5</div></div></div>
-  <nav role="tablist"><button role="tab" aria-selected="true" data-tab="conti">Conti</button><button role="tab" aria-selected="false" data-tab="ris">Risultati</button><button role="tab" aria-selected="false" data-tab="seg" hidden>Automatico</button></nav>
+  <nav role="tablist"><button role="tab" aria-selected="true" data-tab="conti">Conti</button><button role="tab" aria-selected="false" data-tab="ris">Risultati</button><button role="tab" aria-selected="false" data-tab="seg" class="sigonly">Automatico</button></nav>
   <button class="btn sec" id="refresh" style="color:#fff;border-color:rgba(255,255,255,.3)">Aggiorna</button>
   <button class="btn sec" id="imp" style="color:#fff;border-color:rgba(255,255,255,.3)" title="Aggiunge il conto a cui il terminale MT5 aperto è collegato adesso">Importa da MT5</button>
   <button class="btn" id="add" style="background:#fff;color:#14233a">+ Nuovo conto</button>
@@ -157,7 +158,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
   <div class="banner" id="sim" hidden>Modalità SIMULATORE: conti, prezzi e operazioni sono finti. Serve solo a provare l'interfaccia.</div>
   <div class="banner" id="warn" hidden></div>
   <div class="kpis" id="kpis"></div>
-  <div class="panel"><h2>Ascolto segnali</h2>
+  <div class="panel sigonly"><h2>Ascolto segnali</h2>
     <div class="body stack" style="grid-template-columns:minmax(0,1fr) auto;align-items:center">
       <div id="tgst" class="sub" style="font-size:13px;color:var(--ink)">Controllo…</div>
       <div class="actions" style="align-items:center"><button class="btn sec" id="lastbtn" title="Se un segnale non è stato aperto da solo: lo cerca nel canale e lo applica ai conti demo">Apri l'ultimo segnale</button><button class="btn" id="lsbtn">Avvia ascolto segnali</button></div>
@@ -166,7 +167,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
   <div class="panel">
     <h2>Conti</h2>
     <div class="tw"><table class="acctable">
-      <thead><tr><th>Conto</th><th>Tipo</th><th>Stato</th><th class="r">Saldo</th><th class="r">Equity</th><th class="r">P&amp;L aperto</th><th class="r">Pos.</th><th>Segnali</th><th>Attivo</th><th></th></tr></thead>
+      <thead><tr><th>Conto</th><th>Tipo</th><th>Stato</th><th class="r">Saldo</th><th class="r">Equity</th><th class="r">P&amp;L aperto</th><th class="r">Pos.</th><th class="sigonly">Segnali</th><th>Attivo</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table></div>
   </div>
@@ -220,14 +221,14 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
       <label>Lotti per operazione<input type="number" id="lots" min="0.01" max="1" step="0.01" value="0.05"></label>
       <label>Nota<input type="text" id="note" maxlength="300"></label>
     </div>
-    <label>Obiettivo del segnale <span class="hint">(quale TP del canale usa questo conto)</span><select id="tp_target"><option value="1">TP1</option><option value="2">TP2</option><option value="3">TP3</option></select></label>
-    <label class="chk"><input type="checkbox" id="partial_on"><span>A TP1 parzializza e porta il resto a pareggio (BE)</span></label>
-    <div id="partbox" class="row2" hidden>
+    <label class="sigonly">Obiettivo del segnale <span class="hint">(quale TP del canale usa questo conto)</span><select id="tp_target"><option value="1">TP1</option><option value="2">TP2</option><option value="3">TP3</option></select></label>
+    <label class="chk sigonly"><input type="checkbox" id="partial_on"><span>A TP1 parzializza e porta il resto a pareggio (BE)</span></label>
+    <div id="partbox" class="row2 sigonly" hidden>
       <label>Quota chiusa a TP1 (%) <span class="hint">(da 10 a 90)</span><input type="number" id="partial_pct" min="10" max="90" step="5" value="60"></label>
       <div class="sub" id="partnote" style="align-self:end;padding-bottom:8px"></div>
     </div>
     <label class="chk"><input type="checkbox" id="enabled" checked><span>Conto attivo (viene monitorato)</span></label>
-    <label class="chk"><input type="checkbox" id="use_signals" checked><span>Usa per i segnali del canale (apre le operazioni; solo se il conto è demo)</span></label>
+    <label class="chk sigonly"><input type="checkbox" id="use_signals" checked><span>Usa per i segnali del canale (apre le operazioni; solo se il conto è demo)</span></label>
   </div>
   <div class="foot"><span class="msg" id="tmsg"></span>
     <button type="button" class="btn sec" id="test">Prova connessione</button>
@@ -275,7 +276,7 @@ function render() {
     const pl = ok ? `<span class="${cls(s.profit)}">${money(s.profit, s.currency)}</span>` : "—";
     let h = `<tr class="acc${on ? "" : " off"}" data-id="${a.id}"><td data-l="Conto"><div class="name num" title="${esc(((s && s.company) || a.broker || a.name) + (a.terminal_path ? " · Terminale: " + a.terminal_path : ""))}">${esc(a.login)}</div></td><td data-l="Tipo">${typ}</td><td data-l="Stato">${state}</td>
       <td data-l="Saldo" class="r num">${ok ? money(s.balance, s.currency) : "—"}</td><td data-l="Equity" class="r num">${ok ? money(s.equity, s.currency) : "—"}</td><td data-l="P&amp;L aperto" class="r num">${pl}</td><td data-l="Posizioni" class="r num">${n}</td>
-      <td data-l="Segnali">${a.use_signals && on && !(s && s.connected && !s.demo) ? `<span class="badge b-sig">${a.lots} lotti · TP${a.tp_target || 1}${a.partial_pct ? ` · parz. ${a.partial_pct}%` : ""}</span>` : a.use_signals && !(s && s.connected && !s.demo) ? `<span class="badge b-off">Sospeso</span>` : `<span class="badge b-off">No</span>`}</td>
+      <td data-l="Segnali" class="sigonly">${a.use_signals && on && !(s && s.connected && !s.demo) ? `<span class="badge b-sig">${a.lots} lotti · TP${a.tp_target || 1}${a.partial_pct ? ` · parz. ${a.partial_pct}%` : ""}</span>` : a.use_signals && !(s && s.connected && !s.demo) ? `<span class="badge b-off">Sospeso</span>` : `<span class="badge b-off">No</span>`}</td>
       <td data-l="Attivo"><label class="sw" title="${on ? "Conto attivo: disattivalo per fermare monitoraggio e segnali" : "Conto disattivato: attivalo per monitorarlo e usarlo per i segnali"}"><input type="checkbox" role="switch" data-act="toggle" ${on ? "checked" : ""} aria-label="Attiva o disattiva il conto ${esc(a.login)}"><span></span></label></td>
       <td data-l=""><div class="actions"><button class="btn sm sec" data-act="edit">Modifica</button><button class="btn sm del" data-act="del">Elimina</button></div></td></tr>`;
     if (open.has(a.id) && ok) h += detail(a, s);
@@ -315,7 +316,7 @@ function warn() {
 async function refresh() {
   if (busy) return; busy = true;
   try {
-    const j = await api("/api/accounts"); accounts = j.accounts; $("sim").hidden = !j.simulator; render();
+    const j = await api("/api/accounts"); accounts = j.accounts; document.documentElement.classList.toggle("nosig", !j.signals); $("sim").hidden = !j.simulator; render();
     for (const a of accounts.filter(x => x.enabled)) { status[a.id] = await api(`/api/accounts/${a.id}/status`); render(); }
     $("upd").textContent = "Aggiornato " + new Date().toLocaleTimeString("it-IT");
   } catch (e) { toast("Errore: " + e.message); }
@@ -374,6 +375,7 @@ $("add").onclick = () => edit(null);
 $("cancel").onclick = () => $("dlg").close();
 $("refresh").onclick = refresh;
 async function tgCheck() {
+  if (document.documentElement.classList.contains("nosig")) return;                  // segnali disattivati: niente controlli
   const el = $("tgst");
   try {
     const t = await api("/api/telegram");
