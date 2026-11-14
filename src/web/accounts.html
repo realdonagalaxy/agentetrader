@@ -117,6 +117,11 @@ tr.acc.off .name{opacity:.6}
 .cal .day.has{cursor:pointer}
 .cal .day.has:hover{box-shadow:0 0 0 2px var(--accent) inset}
 .cal .day.has:focus-visible{outline:2px solid var(--accent)}
+#cdlg{width:min(1100px,calc(100vw - 24px));max-height:92vh;padding:0;display:none;flex-direction:column}
+#cdlg[open]{display:flex}
+#cdlg .cdh{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)}
+#cdlg .cdh h3{border:0;padding:0;margin:0;margin-right:auto}
+#cdlg .cbody{padding:16px 18px;overflow-y:auto;display:grid;gap:16px}
 #daydlg{width:min(860px,calc(100vw - 24px));max-height:92vh;display:none;flex-direction:column}
 #daydlg[open]{display:flex}
 #daybody{padding:14px 18px;overflow-y:auto}
@@ -148,28 +153,36 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
 <div class="wrap">
 <header class="top">
   <div class="brand"><span class="logo"><img src="/logo.png" alt="donatrader"></span><div><h1>Gestione Conti</h1><div class="hsub" id="upd">Monitoraggio e gestione dei conti MetaTrader 5</div></div></div>
-  <nav role="tablist"><button role="tab" aria-selected="true" data-tab="conti">Conti</button><button role="tab" aria-selected="false" data-tab="ris">Risultati</button><button role="tab" aria-selected="false" data-tab="seg" class="sigonly">Automatico</button></nav>
-  <button class="btn sec" id="refresh" style="color:#fff;border-color:rgba(255,255,255,.3)">Aggiorna</button>
-  <button class="btn sec" id="imp" style="color:#fff;border-color:rgba(255,255,255,.3)" title="Aggiunge il conto a cui il terminale MT5 aperto è collegato adesso">Importa da MT5</button>
-  <button class="btn" id="add" style="background:#fff;color:#14233a">+ Nuovo conto</button>
+  <nav role="tablist"><button role="tab" aria-selected="true" data-tab="home">Trade</button><button role="tab" aria-selected="false" data-tab="cal">Calendario</button><button role="tab" aria-selected="false" data-tab="seg" class="sigonly">Automatico</button></nav>
+  <button class="btn" id="conti" style="background:#fff;color:#14233a">Conti</button>
 </header>
 <main>
-<div id="tab-conti" style="display:grid;gap:16px">
+<div id="tab-home" style="display:grid;gap:16px">
   <div class="banner" id="sim" hidden>Modalità SIMULATORE: conti, prezzi e operazioni sono finti. Serve solo a provare l'interfaccia.</div>
-  <div class="banner" id="warn" hidden></div>
-  <div class="kpis" id="kpis"></div>
-  <div class="panel sigonly"><h2>Ascolto segnali</h2>
-    <div class="body stack" style="grid-template-columns:minmax(0,1fr) auto;align-items:center">
-      <div id="tgst" class="sub" style="font-size:13px;color:var(--ink)">Controllo…</div>
-      <div class="actions" style="align-items:center"><button class="btn sec" id="lastbtn" title="Se un segnale non è stato aperto da solo: lo cerca nel canale e lo applica ai conti demo">Apri l'ultimo segnale</button><button class="btn" id="lsbtn">Avvia ascolto segnali</button></div>
+  <div class="panel"><h2>Trade letti da MT5 <span style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="sub" style="text-transform:none;letter-spacing:0" id="trsub"></span>
+      <button class="btn sm sec" id="tprev" aria-label="Mese precedente">‹</button><b id="tmonth" style="min-width:130px;text-align:center;text-transform:capitalize;letter-spacing:0;font-size:14px;color:var(--ink)"></b>
+      <button class="btn sm sec" id="tnext" aria-label="Mese successivo">›</button><button class="btn sm sec" id="ttoday">Oggi</button></span></h2>
+    <div class="body stack" style="grid-template-columns:minmax(0,260px) auto;align-items:end">
+      <label>Conto<select id="tsrc"></select></label>
+      <div class="sub" style="font-size:13px;padding-bottom:6px">Il conto, il saldo e le posizioni sono nel pulsante «Conti» in alto.</div>
     </div>
+    <div class="kpis" id="trkpis" style="padding:0 16px 8px"></div>
+    <div class="tw" style="padding:0 16px 8px"><table class="acctable" id="trtable"><thead id="trhead"></thead><tbody id="trrows"></tbody></table></div>
+    <div class="sub" style="padding:0 16px 16px">Sola lettura: qui compaiono i trade che apri tu direttamente da MT5 (posizioni aperte, ordini in attesa e operazioni chiuse nel mese scelto), per il conto scelto. SL e TP sono quelli impostati all'apertura; R = risultato diviso per la distanza dello SL iniziale (se lo SL è stato messo dopo l'apertura, R non è calcolabile). Orari del server del broker.</div>
   </div>
-  <div class="panel">
-    <h2>Conti</h2>
-    <div class="tw"><table class="acctable">
-      <thead><tr><th>Conto</th><th>Tipo</th><th>Stato</th><th class="r">Saldo</th><th class="r">Equity</th><th class="r">P&amp;L aperto</th><th class="r">Pos.</th><th class="sigonly">Segnali</th><th>Attivo</th><th></th></tr></thead>
-      <tbody id="rows"></tbody>
-    </table></div>
+</div>
+<div id="tab-cal" hidden style="display:grid;gap:16px">
+  <div class="panel"><h2>Calendario <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
+      <button class="btn sm sec" id="cprev" aria-label="Mese precedente">‹</button><b id="cmonth" style="min-width:150px;text-align:center;text-transform:capitalize;letter-spacing:0;font-size:14px;color:var(--ink)"></b>
+      <button class="btn sm sec" id="cnext" aria-label="Mese successivo">›</button><button class="btn sm sec" id="ctoday">Oggi</button></span></h2>
+    <div class="body stack" style="grid-template-columns:minmax(0,260px) auto;align-items:end">
+      <label>Conto<select id="rsrc"></select></label>
+      <div class="sub" id="ctot" style="font-size:13px;color:var(--ink);padding-bottom:6px"></div>
+    </div>
+    <div style="padding:0 16px 16px">
+      <div id="cal" class="cal"></div>
+      <div class="sub" style="margin-top:10px">Per ogni giorno di chiusura: numero di TP e di SL (dal motivo di chiusura registrato da MT5) e la percentuale guadagnata o persa rispetto al saldo a inizio giornata (solo il realizzato, al netto di commissioni e swap; depositi e prelievi non contano). Le chiusure fatte a mano non sono né TP né SL: compaiono come «altre». Orario del server del broker.</div>
+    </div>
   </div>
 </div>
 <div id="tab-seg" hidden style="display:grid;gap:16px">
@@ -184,29 +197,26 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
     <div class="sub" style="padding:0 16px 16px">Un segnale è «aperto su tutti» quando ogni conto abilitato ai segnali ha aperto la sua posizione. Il rapporto 1:1 è: segnali aperti su tutti i conti / segnali del canale. Se un segnale del canale manca dall'elenco, premi «Scarica dal canale»: registra i messaggi del giorno senza aprire nulla. Orari del tuo PC.</div>
   </div>
 </div>
-<div id="tab-ris" hidden style="display:grid;gap:16px">
-  <div class="panel"><h2>Calendario <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
-      <button class="btn sm sec" id="cprev" aria-label="Mese precedente">‹</button><b id="cmonth" style="min-width:150px;text-align:center;text-transform:capitalize;letter-spacing:0;font-size:14px;color:var(--ink)"></b>
-      <button class="btn sm sec" id="cnext" aria-label="Mese successivo">›</button><button class="btn sm sec" id="ctoday">Oggi</button></span></h2>
-    <div class="body stack" style="grid-template-columns:minmax(0,260px) auto;align-items:end">
-      <label>Conto<select id="rsrc"></select></label>
-      <div class="sub" id="ctot" style="font-size:13px;color:var(--ink);padding-bottom:6px"></div>
-    </div>
-    <div style="padding:0 16px 16px">
-      <div id="cal" class="cal"></div>
-      <div class="sub" style="margin-top:10px">Per ogni giorno di chiusura: numero di TP e di SL (dal motivo di chiusura registrato da MT5) e la percentuale guadagnata o persa rispetto al saldo a inizio giornata (solo il realizzato, al netto di commissioni e swap; depositi e prelievi non contano). Le chiusure fatte a mano non sono né TP né SL: compaiono come «altre». Orario del server del broker.</div>
-    </div>
-  </div>
-  <div class="panel"><h2>Trade letti da MT5 <span class="sub" style="margin-left:auto;text-transform:none;letter-spacing:0" id="trsub"></span></h2>
-    <div class="kpis" id="trkpis" style="padding:0 16px 8px"></div>
-    <div class="tw" style="padding:0 16px 8px"><table class="acctable" id="trtable"><thead id="trhead"></thead><tbody id="trrows"></tbody></table></div>
-    <div class="sub" style="padding:0 16px 16px">Sola lettura: qui compaiono i trade che apri tu direttamente da MT5 (posizioni aperte, ordini in attesa e operazioni chiuse nel mese del calendario), per il conto scelto. SL e TP sono quelli impostati all'apertura; R = risultato diviso per la distanza dello SL iniziale (se lo SL è stato messo dopo l'apertura, R non è calcolabile). Orari del server del broker.</div>
-  </div>
-</div>
-</div>
 </main>
 </div>
 
+<dialog id="cdlg"><div class="cdh"><h3>Conti</h3><button type="button" class="btn sm" id="add">+ Nuovo conto</button><button type="button" class="btn sm sec" id="cclose">Chiudi</button></div>
+  <div class="cbody">
+    <div class="banner" id="warn" hidden></div>
+    <div class="kpis" id="kpis"></div>
+  <div class="panel sigonly"><h2>Ascolto segnali</h2>
+    <div class="body stack" style="grid-template-columns:minmax(0,1fr) auto;align-items:center">
+      <div id="tgst" class="sub" style="font-size:13px;color:var(--ink)">Controllo…</div>
+      <div class="actions" style="align-items:center"><button class="btn sec" id="lastbtn" title="Se un segnale non è stato aperto da solo: lo cerca nel canale e lo applica ai conti demo">Apri l'ultimo segnale</button><button class="btn" id="lsbtn">Avvia ascolto segnali</button></div>
+    </div>
+  </div>
+    <div class="panel">
+    <div class="tw"><table class="acctable">
+      <thead><tr><th>Conto</th><th>Tipo</th><th>Stato</th><th class="r">Saldo</th><th class="r">Equity</th><th class="r">P&amp;L aperto</th><th class="r">Pos.</th><th class="sigonly">Segnali</th><th>Attivo</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+    </div>
+  </div></dialog>
 <dialog id="dlg"><form method="dialog" id="f" autocomplete="off">
   <h3 id="dtitle">Nuovo conto</h3>
   <div class="body">
@@ -248,7 +258,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
 <script>
 const $ = id => document.getElementById(id);
 const H = {"Content-Type": "application/json", "X-Requested-With": "accounts"};
-let accounts = [], status = {}, open = new Set(), editing = null, busy = false;
+let accounts = [], status = {}, open = new Set(), editing = null, busy = false, started = false;
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const money = (v, cur) => { try { return new Intl.NumberFormat("it-IT", {style: "currency", currency: cur || "EUR"}).format(v); } catch (e) { return Number(v).toFixed(2) + " " + (cur || ""); } };
 const cls = v => v > 0 ? "gain" : v < 0 ? "loss" : "flat";
@@ -319,6 +329,7 @@ async function refresh() {
     const j = await api("/api/accounts"); accounts = j.accounts; document.documentElement.classList.toggle("nosig", !j.signals); $("sim").hidden = !j.simulator; render();
     for (const a of accounts.filter(x => x.enabled)) { status[a.id] = await api(`/api/accounts/${a.id}/status`); render(); }
     $("upd").textContent = "Aggiornato " + new Date().toLocaleTimeString("it-IT");
+    if (fillSources() && started) loadActive();                       // un conto aggiunto o tolto cambia il menu e, se serve, l'elenco
   } catch (e) { toast("Errore: " + e.message); }
   busy = false;
 }
@@ -373,7 +384,6 @@ const form = () => ({name: editing ? (accounts.find(x => x.id === editing) || {}
   lots: $("lots").value, note: $("note").value, create_terminal: !editing, enabled: $("enabled").checked, use_signals: $("use_signals").checked, tp_target: $("tp_target").value, partial_pct: $("partial_on").checked && +$("tp_target").value > 1 ? $("partial_pct").value : 0});
 $("add").onclick = () => edit(null);
 $("cancel").onclick = () => $("dlg").close();
-$("refresh").onclick = refresh;
 async function tgCheck() {
   if (document.documentElement.classList.contains("nosig")) return;                  // segnali disattivati: niente controlli
   const el = $("tgst");
@@ -417,12 +427,6 @@ $("lsbtn").onclick = async () => {
   setTimeout(() => { $("lsbtn").disabled = false; tgCheck(); }, stop ? 500 : 6000);
 };
 tgCheck(); setInterval(() => { if (!document.hidden) tgCheck(); }, 20000);
-$("imp").onclick = async () => {
-  $("imp").disabled = true;
-  try { const r = await api("/api/import-current", "POST", {}); toast(`Aggiunto: ${r.name}${r.demo ? "" : " (conto REALE: solo lettura, non usato per i segnali)"}`, 6000); await refresh(); }
-  catch (e) { toast(e.message, 7000); }
-  $("imp").disabled = false;
-};
 $("test").onclick = async () => {
   const m = $("tmsg"); m.className = "msg"; m.textContent = "Collegamento in corso…"; $("test").disabled = true;
   try { const r = await api("/api/test", "POST", form()); m.className = "msg " + (r.connected ? "gain" : "loss");
@@ -443,16 +447,22 @@ let calMonth = new Date(); calMonth.setDate(1);
 const ym = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
 const sgn = v => (v > 0 ? "+" : "") + new Intl.NumberFormat("it-IT", {maximumFractionDigits: 1}).format(v);
 function fillSources() {
-  const prev = $("rsrc").value;
-  $("rsrc").innerHTML = accounts.map(a => `<option value="${a.id}">${esc(a.login)}</option>`).join("") || `<option value="">Nessun conto: aggiungine uno</option>`;
-  if (prev && [...$("rsrc").options].some(o => o.value === prev)) $("rsrc").value = prev;
-  loadCalendar();
+  const prev = $("tsrc").value || $("rsrc").value;
+  const opts = accounts.map(a => `<option value="${a.id}">${esc(a.login)}</option>`).join("") || `<option value="">Nessun conto: aggiungine uno</option>`;
+  $("tsrc").innerHTML = opts; $("rsrc").innerHTML = opts;
+  if (prev && [...$("tsrc").options].some(o => o.value === prev)) { $("tsrc").value = prev; $("rsrc").value = prev; }
+  return $("tsrc").value !== prev;
 }
+const activeTab = () => (document.querySelector("nav button[aria-selected=true]") || {}).dataset.tab;
+function loadActive() { const t = activeTab(); if (t === "home") loadTrades(); else if (t === "cal") loadCalendar(); }
+$("tsrc").onchange = () => { $("rsrc").value = $("tsrc").value; loadTrades(); };
+$("rsrc").onchange = () => { $("tsrc").value = $("rsrc").value; loadCalendar(); };
 async function loadTrades() {
-  if (!$("rsrc").value) { $("trrows").innerHTML = ""; $("trhead").innerHTML = ""; $("trkpis").innerHTML = ""; return; }
+  $("tmonth").textContent = calMonth.toLocaleDateString("it-IT", {month: "long", year: "numeric"});
+  if (!$("tsrc").value) { $("trrows").innerHTML = ""; $("trhead").innerHTML = ""; $("trkpis").innerHTML = ""; return; }
   $("trsub").textContent = "Lettura da MT5…";
   let j;
-  try { j = await api(`/api/trades?account=${$("rsrc").value}&month=${ym(calMonth)}`); } catch (e) { $("trsub").innerHTML = `<span class="loss">${esc(e.message)}</span>`; $("trrows").innerHTML = ""; return; }
+  try { j = await api(`/api/trades?account=${$("tsrc").value}&month=${ym(calMonth)}`); } catch (e) { $("trsub").innerHTML = `<span class="loss">${esc(e.message)}</span>`; $("trrows").innerHTML = ""; return; }
   $("trsub").textContent = "";
   const tm = t => { const d = new Date(t * 1000).toISOString(); return d.slice(8, 10) + "/" + d.slice(5, 7) + " " + d.slice(11, 16); };
   const px = v => v == null || v === 0 ? "—" : String(Math.round(+v * 100000) / 100000), r2 = v => v == null ? "—" : (v > 0 ? "+" : "") + Number(v).toFixed(2);
@@ -480,7 +490,6 @@ async function loadCalendar() {
   try { drawCalendar(await api(`/api/calendar?account=${$("rsrc").value}&month=${ym(calMonth)}`)); }
   catch (e) { $("cal").innerHTML = ""; $("ctot").innerHTML = `<span class="loss">${esc(e.message)}</span>`; }
   $("cal").style.opacity = 1;
-  loadTrades();
 }
 function drawCalendar(R) {
   const y = calMonth.getFullYear(), m = calMonth.getMonth(), first = (new Date(y, m, 1).getDay() + 6) % 7, n = new Date(y, m + 1, 0).getDate(), today = new Date();
@@ -531,7 +540,9 @@ $("cal").addEventListener("click", e => { const d = e.target.closest(".day.has")
 $("cal").addEventListener("keydown", e => { if ((e.key === "Enter" || e.key === " ") && e.target.classList.contains("has")) { e.preventDefault(); openDay(e.target.dataset.day); } });
 $("dayclose").onclick = () => { dayToken++; $("daydlg").close(); };
 $("daydlg").addEventListener("close", () => { dayToken++; });
-$("rsrc").onchange = loadCalendar;
+$("tprev").onclick = () => { calMonth.setMonth(calMonth.getMonth() - 1); loadTrades(); };
+$("tnext").onclick = () => { calMonth.setMonth(calMonth.getMonth() + 1); loadTrades(); };
+$("ttoday").onclick = () => { calMonth = new Date(); calMonth.setDate(1); loadTrades(); };
 $("cprev").onclick = () => { calMonth.setMonth(calMonth.getMonth() - 1); loadCalendar(); };
 $("cnext").onclick = () => { calMonth.setMonth(calMonth.getMonth() + 1); loadCalendar(); };
 $("ctoday").onclick = () => { calMonth = new Date(); calMonth.setDate(1); loadCalendar(); };
@@ -615,11 +626,16 @@ $("ssync").onclick = async () => {
 
 document.querySelectorAll("nav button").forEach(b => b.onclick = async () => {
   document.querySelectorAll("nav button").forEach(x => x.setAttribute("aria-selected", x === b));
-  $("tab-conti").hidden = b.dataset.tab !== "conti"; $("tab-ris").hidden = b.dataset.tab !== "ris"; $("tab-seg").hidden = b.dataset.tab !== "seg";
-  if (b.dataset.tab === "ris") fillSources();
-  if (b.dataset.tab === "seg") loadSignals();
+  $("tab-home").hidden = b.dataset.tab !== "home"; $("tab-cal").hidden = b.dataset.tab !== "cal"; $("tab-seg").hidden = b.dataset.tab !== "seg";
+  if (b.dataset.tab === "seg") loadSignals(); else loadActive();
 });
-refresh(); setInterval(() => { if (!document.querySelector("dialog[open]") && !document.hidden) refresh(); }, 20000);
+$("conti").onclick = () => { render(); $("cdlg").showModal(); refresh(); };
+$("cclose").onclick = () => $("cdlg").close();
+(async () => {
+  await refresh(); fillSources(); started = true; loadActive();
+  if (!accounts.length) $("cdlg").showModal();                       // nessun conto: si apre subito la finestra per aggiungerne uno
+})();
+setInterval(() => { if (!document.querySelector("dialog[open]:not(#cdlg)") && !document.hidden) { refresh(); if (activeTab() === "home" && !$("cdlg").open) loadTrades(); } }, 20000);
 </script>
 </body>
 </html>
