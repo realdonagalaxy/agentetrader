@@ -25,9 +25,20 @@ header.top{position:sticky;top:0;z-index:20;background:var(--hdr);color:var(--hd
 h1{font-size:18px;font-weight:600;margin:0}
 .nosig .sigonly{display:none!important}
 tr.opn,tr.opn:hover{background:rgba(56,189,248,.16)}                  /* posizioni aperte: celestino */
-.panel.pendpanel{border:2px solid #1c3566}                           /* tabella degli ordini in attesa: bordo blu scuro */
-.panel.pendpanel table{border-bottom:2px solid #1c3566}
-@media (prefers-color-scheme:dark){.panel.pendpanel,.panel.pendpanel table{border-color:#5b86c9}}
+/* tabella ordini/posizioni: blu notte con scritte verde limone, stile futuristico (uguale in chiaro e scuro) */
+.panel.pendpanel{--lm:#a8ff3e;--lm2:#78b82e;background:#071433;border:1px solid #2a4f9e;box-shadow:0 0 0 1px #0d2352,0 0 22px rgba(60,110,255,.28);color:var(--lm);font-family:var(--mono)}
+.panel.pendpanel h2{background:linear-gradient(90deg,#0b1d4a,#071433);color:var(--lm);border-bottom:1px solid #2a4f9e;letter-spacing:.2em;text-shadow:0 0 8px rgba(168,255,62,.45)}
+.panel.pendpanel .sub{color:var(--lm2)}
+.panel.pendpanel th{background:#0a1a40;color:var(--lm2);border-bottom:1px solid #2a4f9e;letter-spacing:.06em;padding:9px 7px}
+.panel.pendpanel td{border-bottom:1px solid #14306b;color:var(--lm);padding:10px 7px;font-size:13px}
+.panel.pendpanel td b{color:var(--lm);text-shadow:0 0 6px rgba(168,255,62,.35)}
+.panel.pendpanel tr.opn,.panel.pendpanel tr.opn:hover{background:rgba(70,130,255,.2);box-shadow:inset 3px 0 0 var(--lm)}
+.panel.pendpanel .gain{color:#38f5d6}.panel.pendpanel .loss{color:#ff7b72}.panel.pendpanel .flat{color:var(--lm2)}
+.panel.pendpanel .badge{background:transparent;border:1px solid var(--lm2);color:var(--lm)}
+.panel.pendpanel .b-ok{border-color:#38f5d6;color:#38f5d6}.panel.pendpanel .b-err{border-color:#ff7b72;color:#ff7b72}
+.panel.pendpanel .btn.sec{background:transparent;color:var(--lm);border:1px solid var(--lm2)}
+.panel.pendpanel .btn.sec:hover{background:rgba(168,255,62,.12);box-shadow:0 0 10px rgba(168,255,62,.35)}
+.panel.pendpanel [data-l]::before{color:var(--lm2)}
 .brand{display:flex;align-items:center;gap:14px;min-width:0}
 .logo{background:#fff;border-radius:8px;padding:5px 12px;display:flex;flex:none}
 .logo img{height:42px;width:auto;display:block}
