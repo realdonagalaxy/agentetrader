@@ -39,6 +39,17 @@ tr.opn,tr.opn:hover{background:rgba(56,189,248,.16)}                  /* posizio
 .panel.pendpanel .btn.sec{background:transparent;color:var(--lm);border:1px solid var(--lm2)}
 .panel.pendpanel .btn.sec:hover{background:rgba(0,255,82,.12);box-shadow:0 0 10px rgba(0,255,82,.35)}
 .panel.pendpanel [data-l]::before{color:var(--lm2)}
+.panel.pendpanel .cal .dow,.panel.pendpanel .cal .dn{color:var(--lm2)}
+.panel.pendpanel .cal .day{background:rgba(255,255,255,.05);border-color:#2f4768}
+.panel.pendpanel .cal .day.out{background:transparent;border-color:transparent}
+.panel.pendpanel .cal .day.win{background:rgba(0,255,82,.14);border-color:rgba(0,255,82,.45)}
+.panel.pendpanel .cal .day.loss{background:rgba(255,123,114,.15);border-color:rgba(255,123,114,.45)}
+.panel.pendpanel .cal .day.today{outline-color:var(--lm)}
+.panel.pendpanel .cal .day.has:hover{box-shadow:0 0 0 2px var(--lm) inset}
+.panel.pendpanel select,.panel.pendpanel label{background:transparent;color:var(--lm)}
+.panel.pendpanel select{background:rgba(255,255,255,.06);border-color:#2f4768}
+.panel.pendpanel h2 b,.panel.pendpanel #ctot{color:var(--lm)!important}
+.panel.pendpanel .cal .gain{color:#38f5d6}
 .brand{display:flex;align-items:center;gap:14px;min-width:0}
 .logo{background:#fff;border-radius:8px;padding:5px 12px;display:flex;flex:none}
 .logo img{height:42px;width:auto;display:block}
@@ -192,7 +203,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
   </div>
 </div>
 <div id="tab-cal" hidden style="display:grid;gap:16px">
-  <div class="panel"><h2>Calendario <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
+  <div class="panel pendpanel"><h2>Calendario <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
       <button class="btn sm sec" id="cprev" aria-label="Mese precedente">‹</button><b id="cmonth" style="min-width:150px;text-align:center;text-transform:capitalize;letter-spacing:0;font-size:14px;color:var(--ink)"></b>
       <button class="btn sm sec" id="cnext" aria-label="Mese successivo">›</button><button class="btn sm sec" id="ctoday">Oggi</button></span></h2>
     <div class="body stack" style="grid-template-columns:minmax(0,260px) auto;align-items:end">
