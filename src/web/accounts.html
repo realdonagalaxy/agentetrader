@@ -24,11 +24,9 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);pa
 header.top{position:sticky;top:0;z-index:20;background:var(--hdr);color:var(--hdr-ink);box-shadow:0 0 0 100vmax var(--hdr);clip-path:inset(0 -100vmax);padding:14px 0;display:flex;gap:10px 20px;align-items:center;flex-wrap:wrap}
 h1{font-size:18px;font-weight:600;margin:0}
 .nosig .sigonly{display:none!important}
-tr.pend,tr.pend:hover{background:rgba(245,197,24,.14)}
 .panel.pendpanel{border:2px solid #1c3566}                            /* tabella degli ordini in attesa: bordo blu scuro */
 .panel.pendpanel table{border-bottom:2px solid #1c3566}
 @media (prefers-color-scheme:dark){.panel.pendpanel,.panel.pendpanel table{border-color:#5b86c9}}
-tr.opn,tr.opn:hover{background:rgba(56,189,248,.16)}
 .brand{display:flex;align-items:center;gap:14px;min-width:0}
 .logo{background:#fff;border-radius:8px;padding:5px 12px;display:flex;flex:none}
 .logo img{height:42px;width:auto;display:block}
@@ -168,7 +166,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
     <div class="tw" style="padding:0 16px 8px"><table class="acctable" id="pendtable"><thead id="pendhead"></thead><tbody id="pendrows"></tbody></table></div>
     <div class="sub" style="padding:0 16px 16px">Ordini LIMIT e STOP piazzati su MT5 e non ancora eseguiti, di tutti i conti collegati. Si aggiornano da soli ogni 20 secondi. Distanza = quanto manca al prezzo dell'ordine, in % del prezzo; rischio = perdita allo SL in % del saldo del conto (se lo SL è impostato).</div>
   </div>
-  <div class="panel"><h2>Trade letti da MT5 <span style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="sub" style="text-transform:none;letter-spacing:0" id="trsub"></span>
+  <div class="panel"><h2>Trade chiusi <span style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="sub" style="text-transform:none;letter-spacing:0" id="trsub"></span>
       <button class="btn sm sec" id="tprev" aria-label="Mese precedente">‹</button><b id="tmonth" style="min-width:130px;text-align:center;text-transform:capitalize;letter-spacing:0;font-size:14px;color:var(--ink)"></b>
       <button class="btn sm sec" id="tnext" aria-label="Mese successivo">›</button><button class="btn sm sec" id="ttoday">Oggi</button></span></h2>
     <div class="body stack" style="grid-template-columns:minmax(0,260px) auto;align-items:end">
@@ -177,7 +175,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
     </div>
     <div class="kpis" id="trkpis" style="padding:0 16px 8px"></div>
     <div class="tw" style="padding:0 16px 8px"><table class="acctable" id="trtable"><thead id="trhead"></thead><tbody id="trrows"></tbody></table></div>
-    <div class="sub" style="padding:0 16px 16px">Sola lettura: qui compaiono i trade che apri tu direttamente da MT5 (posizioni aperte, ordini in attesa e operazioni chiuse nel mese scelto), per il conto scelto. SL e TP sono quelli impostati all'apertura; R = risultato diviso per la distanza dello SL iniziale (se lo SL è stato messo dopo l'apertura, R non è calcolabile). Orari del server del broker.</div>
+    <div class="sub" style="padding:0 16px 16px">Sola lettura: qui compaiono le operazioni eseguite e già chiuse che hai fatto direttamente da MT5, nel mese scelto e per il conto scelto (gli ordini non ancora eseguiti sono nel riquadro sopra). SL e TP sono quelli impostati all'apertura; R = risultato diviso per la distanza dello SL iniziale (se lo SL è stato messo dopo l'apertura, R non è calcolabile). Orari del server del broker.</div>
   </div>
 </div>
 <div id="tab-cal" hidden style="display:grid;gap:16px">
@@ -344,7 +342,7 @@ function renderPending() {
   const px = v => v == null ? "—" : String(Math.round(+v * 100000) / 100000), pc = v => v == null ? "—" : Number(v).toFixed(2).replace(".", ",") + "%";
   $("pendsub").innerHTML = (rows.length ? `${rows.length} ${rows.length === 1 ? "ordine" : "ordini"}` : "") + (bad.length ? ` <span class="loss">· non letti: ${esc(bad.join(" · "))}</span>` : "");
   $("pendhead").innerHTML = `<tr><th>Conto</th><th>Ordine</th><th>Asset</th><th class="r">Lotti</th><th class="r">Prezzo ordine</th><th class="r">SL</th><th class="r">TP</th><th class="r">Prezzo attuale</th><th class="r">Distanza</th><th class="r">R:R</th><th class="r">Rischio</th><th>Impostato</th></tr>`;
-  $("pendrows").innerHTML = rows.length ? rows.map(o => `<tr class="pend"><td data-l="Conto"><b>${esc(o.login)}</b></td><td data-l="Ordine"><span class="badge ${o.side === "buy" ? "b-ok" : "b-err"}">${esc(o.tipo)}</span></td><td data-l="Asset"><b>${esc(o.symbol)}</b></td>
+  $("pendrows").innerHTML = rows.length ? rows.map(o => `<tr><td data-l="Conto"><b>${esc(o.login)}</b></td><td data-l="Ordine"><span class="badge ${o.side === "buy" ? "b-ok" : "b-err"}">${esc(o.tipo)}</span></td><td data-l="Asset"><b>${esc(o.symbol)}</b></td>
     <td class="r" data-l="Lotti">${o.volume ?? "—"}</td><td class="r" data-l="Prezzo ordine"><b>${px(o.price)}</b></td><td class="r" data-l="SL">${px(o.sl)}</td><td class="r" data-l="TP">${px(o.tp)}</td>
     <td class="r" data-l="Prezzo attuale">${px(o.current)}</td><td class="r" data-l="Distanza">${pc(o.dist_pct)}</td><td class="r" data-l="R:R">${o.rr != null ? "1:" + o.rr : "—"}</td><td class="r" data-l="Rischio">${pc(o.risk_pct)}</td><td data-l="Impostato">${tm(o.time)}</td></tr>`).join("")
     : `<tr><td colspan="12" class="sub" style="padding:14px">Nessun ordine in attesa${accounts.length ? "" : ": aggiungi un conto"}.</td></tr>`;
@@ -494,8 +492,7 @@ async function loadTrades() {
   const tm = t => { const d = new Date(t * 1000).toISOString(); return d.slice(8, 10) + "/" + d.slice(5, 7) + " " + d.slice(11, 16); };
   const px = v => v == null || v === 0 ? "—" : String(Math.round(+v * 100000) / 100000), r2 = v => v == null ? "—" : (v > 0 ? "+" : "") + Number(v).toFixed(2);
   const C = j.closed, tp = C.filter(t => t.reason === "tp").length, sl = C.filter(t => t.reason === "sl").length, net = C.reduce((a, t) => a + t.net, 0), rs = C.filter(t => t.r != null).reduce((a, t) => a + t.r, 0);
-  $("trkpis").innerHTML = `<div class="kpi"><div class="l">Aperti ora</div><div class="v">${j.open.length}</div><div class="s">${j.pending.length} ordini in attesa</div></div>
-    <div class="kpi"><div class="l">Chiusi nel mese</div><div class="v">${C.length}</div><div class="s">${tp} TP · ${sl} SL · ${C.length - tp - sl} altre</div></div>
+  $("trkpis").innerHTML = `<div class="kpi"><div class="l">Chiusi nel mese</div><div class="v">${C.length}</div><div class="s">${tp} TP · ${sl} SL · ${C.length - tp - sl} altre</div></div>
     <div class="kpi"><div class="l">Netto del mese</div><div class="v ${cls(net)}">${money(net, j.currency)}</div></div>
     <div class="kpi"><div class="l">R totale</div><div class="v ${cls(rs)}">${r2(rs)}R</div><div class="s">sui trade con SL iniziale</div></div>`;
   $("trhead").innerHTML = `<tr><th>Stato</th><th>Asset</th><th>Lotti</th><th>Apertura</th><th class="r">Entry</th><th class="r">SL</th><th class="r">TP</th><th class="r">Chiusura / ora</th><th class="r">R</th><th class="r">Risultato</th></tr>`;
@@ -503,9 +500,6 @@ async function loadTrades() {
   const row = (stato, sym, lots, when, entry, sl_, tp_, last, r, res) => `<tr><td data-l="Stato">${stato}</td><td data-l="Asset"><b>${esc(sym)}</b></td><td class="r" data-l="Lotti">${lots ?? "—"}</td><td data-l="Apertura">${when}</td>
     <td class="r" data-l="Entry">${entry}</td><td class="r" data-l="SL">${sl_}</td><td class="r" data-l="TP">${tp_}</td><td class="r" data-l="Chiusura / ora">${last}</td><td class="r" data-l="R">${r}</td><td class="r" data-l="Risultato">${res}</td></tr>`;
   const rows = [];
-  j.open.forEach(p => rows.push(row(`${side(p.side)} <span class="badge b-sig">aperto</span>`, p.symbol, p.volume, tm(p.time), px(p.open), px(p.sl), px(p.tp), px(p.price),
-    `<span class="${cls(p.r)}">${r2(p.r)}</span>`, `<b class="${cls(p.profit)}">${money(p.profit, j.currency)}</b>`).replace("<tr>", `<tr class="opn">`)));
-  j.pending.forEach(o => rows.push(row(`<span class="badge b-off">${esc(o.tipo)}</span>`, o.symbol, o.volume, tm(o.time), px(o.price), px(o.sl), px(o.tp), "—", "—", `<span class="sub">in attesa</span>`).replace("<tr>", `<tr class="pend">`)));
   C.forEach(t => rows.push(row(`${side(t.side)} ${t.reason === "tp" ? `<span class="badge b-ok">TP</span>` : t.reason === "sl" ? `<span class="badge b-err">SL</span>` : `<span class="badge b-off">chiusa</span>`}`, t.symbol, t.volume, tm(t.open_time), px(t.open_price),
     px(t.sl), px(t.tp), `${px(t.close_price)}<div class="sub">${tm(t.close_time)}</div>`, `<span class="${cls(t.r)}">${r2(t.r)}</span>`, `<b class="${cls(t.net)}">${money(t.net, j.currency)}</b>`)));
   $("trrows").innerHTML = rows.join("") || `<tr><td colspan="10" class="sub" style="padding:14px">Nessun trade per questo conto e questo mese.</td></tr>`;
