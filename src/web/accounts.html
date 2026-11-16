@@ -187,6 +187,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
     </div>
     <div class="kpis" id="trkpis" style="padding:0 16px 8px"></div>
     <div class="tw" style="padding:0 16px 8px"><table class="acctable" id="trtable"><thead id="trhead"></thead><tbody id="trrows"></tbody></table></div>
+    <div id="trpager" style="display:flex;align-items:center;justify-content:center;gap:12px;padding:0 16px 10px" hidden><button class="btn sm sec" id="trprevp">‹ Precedenti</button><span class="sub" id="trpageinfo"></span><button class="btn sm sec" id="trnextp">Successivi ›</button></div>
     <div class="sub" style="padding:0 16px 16px">Sola lettura: qui compaiono le operazioni eseguite e già chiuse che hai fatto direttamente da MT5, nel mese scelto e per il conto scelto (gli ordini non ancora eseguiti sono nel riquadro sopra). SL e TP sono quelli impostati all'apertura; R = risultato diviso per la distanza dello SL iniziale (se lo SL è stato messo dopo l'apertura, R non è calcolabile). Orari del server del broker.</div>
   </div>
 </div>
@@ -580,8 +581,22 @@ async function loadTrades() {
   const rows = [];
   C.forEach(t => rows.push(row(`${side(t.side)} ${t.reason === "tp" ? `<span class="badge b-ok">TP</span>` : t.reason === "sl" ? `<span class="badge b-err">SL</span>` : `<span class="badge b-off">chiusa</span>`}`, t.symbol, t.volume, tm(t.open_time), px(t.open_price),
     px(t.sl), px(t.tp), `${px(t.close_price)}<div class="sub">${tm(t.close_time)}</div>`, `<span class="${cls(t.r)}">${r2(t.r)}</span>`, `<b class="${cls(t.net)}">${money(t.net, j.currency)}</b>`)));
-  $("trrows").innerHTML = rows.join("") || `<tr><td colspan="10" class="sub" style="padding:14px">Nessun trade per questo conto e questo mese.</td></tr>`;
+  const key = $("tsrc").value + "|" + ym(calMonth);
+  if (key !== trKey) { trKey = key; trPage = 0; }                     // cambio di conto o mese: si riparte dalla prima pagina; l'aggiornamento automatico invece la mantiene
+  trRows = rows; drawTradePage();
 }
+const TR_PER_PAGE = 10;
+let trRows = [], trPage = 0, trKey = "";
+function drawTradePage() {
+  const pages = Math.max(1, Math.ceil(trRows.length / TR_PER_PAGE));
+  trPage = Math.min(Math.max(trPage, 0), pages - 1);
+  $("trrows").innerHTML = trRows.slice(trPage * TR_PER_PAGE, (trPage + 1) * TR_PER_PAGE).join("") || `<tr><td colspan="10" class="sub" style="padding:14px">Nessun trade per questo conto e questo mese.</td></tr>`;
+  $("trpager").hidden = pages <= 1;
+  $("trpageinfo").textContent = `Pagina ${trPage + 1} di ${pages} · trade ${trPage * TR_PER_PAGE + 1}–${Math.min(trRows.length, (trPage + 1) * TR_PER_PAGE)} di ${trRows.length}`;
+  $("trprevp").disabled = trPage === 0; $("trnextp").disabled = trPage >= pages - 1;
+}
+$("trprevp").onclick = () => { trPage--; drawTradePage(); };
+$("trnextp").onclick = () => { trPage++; drawTradePage(); };
 async function loadCalendar() {
   $("cmonth").textContent = calMonth.toLocaleDateString("it-IT", {month: "long", year: "numeric"});
   if (!$("rsrc").value) { $("cal").innerHTML = ""; $("ctot").textContent = ""; return; }
