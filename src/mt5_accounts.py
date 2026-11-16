@@ -413,6 +413,22 @@ def _order(mt5, o, balance: float) -> dict:
             "current": cur, "dist_pct": round(100 * abs(price - cur) / cur, 2) if cur else None, "rr": rr, "risk_pct": risk, "time": int(getattr(o, "time_setup", 0) or 0), "comment": getattr(o, "comment", "")}
 
 
+def _positions_safe(mt5, balance: float) -> list:
+    """Posizioni aperte del conto, con R:R e rischio allo SL in % del saldo (se SL e TP sono impostati). Un errore di calcolo non nasconde la posizione."""
+    out = []
+    for p in (mt5.positions_get() or []):
+        d = _pos(p)
+        try:
+            sl, tp, op = float(p.sl) or None, float(p.tp) or None, float(p.price_open)
+            d["rr"] = round(abs(tp - op) / abs(op - sl), 2) if sl and tp and op != sl else None
+            per_lot = _loss_per_lot(mt5, mt5.symbol_info(p.symbol), p.type == 0, op, sl, p.symbol) if sl else None
+            d["risk_pct"] = round(100 * per_lot * float(p.volume) / balance, 2) if per_lot and balance > 0 else None
+        except Exception:
+            d["rr"], d["risk_pct"] = None, None
+        out.append(d)
+    return out
+
+
 def _orders_safe(mt5, balance: float) -> list:
     """Ordini pendenti del conto: un errore nel leggerne uno non deve mai impedire di mostrare il conto (l'ordine compare comunque, con i soli dati di base)."""
     out = []
@@ -440,7 +456,7 @@ def snapshot(acc: dict) -> dict:
             _remember_kind(acc["id"], is_demo(mt5), getattr(i, "company", "")) if acc.get("id") else None
             return {"connected": True, "demo": is_demo(mt5), "currency": i.currency, "balance": i.balance, "equity": i.equity, "margin": i.margin,
                     "free_margin": i.margin_free, "profit": i.profit, "leverage": i.leverage, "broker_name": i.name, "company": (getattr(i, "company", "") or "").strip(),
-                    "positions": [_pos(p) for p in (mt5.positions_get() or [])], "orders": _orders_safe(mt5, float(i.balance)), "at": int(time.time())}
+                    "positions": _positions_safe(mt5, float(i.balance)), "orders": _orders_safe(mt5, float(i.balance)), "at": int(time.time())}
     except Exception as e:
         return {"connected": False, "error": str(e)[:300]}
 

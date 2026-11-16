@@ -24,7 +24,8 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);pa
 header.top{position:sticky;top:0;z-index:20;background:var(--hdr);color:var(--hdr-ink);box-shadow:0 0 0 100vmax var(--hdr);clip-path:inset(0 -100vmax);padding:14px 0;display:flex;gap:10px 20px;align-items:center;flex-wrap:wrap}
 h1{font-size:18px;font-weight:600;margin:0}
 .nosig .sigonly{display:none!important}
-.panel.pendpanel{border:2px solid #1c3566}                            /* tabella degli ordini in attesa: bordo blu scuro */
+tr.opn,tr.opn:hover{background:rgba(56,189,248,.16)}                  /* posizioni aperte: celestino */
+.panel.pendpanel{border:2px solid #1c3566}                           /* tabella degli ordini in attesa: bordo blu scuro */
 .panel.pendpanel table{border-bottom:2px solid #1c3566}
 @media (prefers-color-scheme:dark){.panel.pendpanel,.panel.pendpanel table{border-color:#5b86c9}}
 .brand{display:flex;align-items:center;gap:14px;min-width:0}
@@ -162,9 +163,9 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
 <main>
 <div id="tab-home" style="display:grid;gap:16px">
   <div class="banner" id="sim" hidden>Modalità SIMULATORE: conti, prezzi e operazioni sono finti. Serve solo a provare l'interfaccia.</div>
-  <div class="panel pendpanel"><h2>Ordini in attesa <span class="sub" style="margin-left:auto;text-transform:none;letter-spacing:0" id="pendsub"></span></h2>
+  <div class="panel pendpanel"><h2>Posizioni aperte e ordini in attesa <span class="sub" style="margin-left:auto;text-transform:none;letter-spacing:0" id="pendsub"></span></h2>
     <div class="tw" style="padding:0 16px 8px"><table class="acctable" id="pendtable"><thead id="pendhead"></thead><tbody id="pendrows"></tbody></table></div>
-    <div class="sub" style="padding:0 16px 16px">Ordini LIMIT e STOP piazzati su MT5 e non ancora eseguiti, di tutti i conti collegati. Si aggiornano da soli ogni 20 secondi. Distanza = quanto manca al prezzo dell'ordine, in % del prezzo; rischio = perdita allo SL in % del saldo del conto (se lo SL è impostato).</div>
+    <div class="sub" style="padding:0 16px 16px">Posizioni ancora in corso (righe celesti, con il risultato di adesso) e ordini LIMIT/STOP non ancora eseguiti, di tutti i conti collegati. Si aggiornano da soli ogni 20 secondi. Distanza = quanto manca al prezzo dell'ordine, in % del prezzo; rischio = perdita allo SL in % del saldo del conto (se lo SL è impostato).</div>
   </div>
   <div class="panel"><h2>Trade chiusi <span style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="sub" style="text-transform:none;letter-spacing:0" id="trsub"></span>
       <button class="btn sm sec" id="tprev" aria-label="Mese precedente">‹</button><b id="tmonth" style="min-width:130px;text-align:center;text-transform:capitalize;letter-spacing:0;font-size:14px;color:var(--ink)"></b>
@@ -336,16 +337,23 @@ function renderPending() {
     const s = status[a.id];
     if (!s) return;
     if (!s.connected) { bad.push(`${a.login}: ${s.error || "non letto"}`); return; }
-    (s.orders || []).forEach(o => rows.push({login: a.login, cur: s.currency, ...o}));
+    (s.positions || []).forEach(p => rows.push({kind: "pos", login: a.login, cur: s.currency, ...p}));       // posizioni aperte (in corso)
+    (s.orders || []).forEach(o => rows.push({kind: "ord", login: a.login, cur: s.currency, ...o}));          // ordini non ancora eseguiti
   });
   const tm = t => { if (!t) return "—"; const d = new Date(t * 1000).toISOString(); return d.slice(8, 10) + "/" + d.slice(5, 7) + " " + d.slice(11, 16); };
   const px = v => v == null ? "—" : String(Math.round(+v * 100000) / 100000), pc = v => v == null ? "—" : Number(v).toFixed(2).replace(".", ",") + "%";
-  $("pendsub").innerHTML = (rows.length ? `${rows.length} ${rows.length === 1 ? "ordine" : "ordini"}` : "") + (bad.length ? ` <span class="loss">· non letti: ${esc(bad.join(" · "))}</span>` : "");
-  $("pendhead").innerHTML = `<tr><th>Conto</th><th>Ordine</th><th>Asset</th><th class="r">Lotti</th><th class="r">Prezzo ordine</th><th class="r">SL</th><th class="r">TP</th><th class="r">Prezzo attuale</th><th class="r">Distanza</th><th class="r">R:R</th><th class="r">Rischio</th><th>Impostato</th></tr>`;
-  $("pendrows").innerHTML = rows.length ? rows.map(o => `<tr><td data-l="Conto"><b>${esc(o.login)}</b></td><td data-l="Ordine"><span class="badge ${o.side === "buy" ? "b-ok" : "b-err"}">${esc(o.tipo)}</span></td><td data-l="Asset"><b>${esc(o.symbol)}</b></td>
-    <td class="r" data-l="Lotti">${o.volume ?? "—"}</td><td class="r" data-l="Prezzo ordine"><b>${px(o.price)}</b></td><td class="r" data-l="SL">${px(o.sl)}</td><td class="r" data-l="TP">${px(o.tp)}</td>
-    <td class="r" data-l="Prezzo attuale">${px(o.current)}</td><td class="r" data-l="Distanza">${pc(o.dist_pct)}</td><td class="r" data-l="R:R">${o.rr != null ? "1:" + o.rr : "—"}</td><td class="r" data-l="Rischio">${pc(o.risk_pct)}</td><td data-l="Impostato">${tm(o.time)}</td></tr>`).join("")
-    : `<tr><td colspan="12" class="sub" style="padding:14px">Nessun ordine in attesa${accounts.length ? "" : ": aggiungi un conto"}.</td></tr>`;
+  const np = rows.filter(r => r.kind === "pos").length, no = rows.length - np;
+  $("pendsub").innerHTML = [np ? `${np} ${np === 1 ? "posizione aperta" : "posizioni aperte"}` : "", no ? `${no} ${no === 1 ? "ordine in attesa" : "ordini in attesa"}` : ""].filter(Boolean).join(" · ") + (bad.length ? ` <span class="loss">· non letti: ${esc(bad.join(" · "))}</span>` : "");
+  $("pendhead").innerHTML = `<tr><th>Conto</th><th>Stato</th><th>Asset</th><th class="r">Lotti</th><th class="r">Entry</th><th class="r">SL</th><th class="r">TP</th><th class="r">Prezzo attuale</th><th class="r">Distanza</th><th class="r">R:R</th><th class="r">Rischio</th><th class="r">Risultato</th><th>Ora</th></tr>`;
+  $("pendrows").innerHTML = rows.length ? rows.map(o => {
+    const pos = o.kind === "pos", price = pos ? o.open : o.price, cur = pos ? o.price : o.current;
+    const stato = pos ? `<span class="badge ${o.side === "buy" ? "b-ok" : "b-err"}">${o.side.toUpperCase()}</span> <span class="badge b-sig">aperto</span>` : `<span class="badge ${o.side === "buy" ? "b-ok" : "b-err"}">${esc(o.tipo)}</span>`;
+    const res = pos ? `<b class="${cls(o.profit)}">${money(o.profit, o.cur)}</b>` : `<span class="sub">in attesa</span>`;
+    return `<tr${pos ? ` class="opn"` : ""}><td data-l="Conto"><b>${esc(o.login)}</b></td><td data-l="Stato">${stato}</td><td data-l="Asset"><b>${esc(o.symbol)}</b></td>
+    <td class="r" data-l="Lotti">${o.volume ?? "—"}</td><td class="r" data-l="Entry"><b>${px(price)}</b></td><td class="r" data-l="SL">${px(o.sl)}</td><td class="r" data-l="TP">${px(o.tp)}</td>
+    <td class="r" data-l="Prezzo attuale">${px(cur)}</td><td class="r" data-l="Distanza">${pos ? "—" : pc(o.dist_pct)}</td><td class="r" data-l="R:R">${o.rr != null ? "1:" + o.rr : "—"}</td><td class="r" data-l="Rischio">${pc(o.risk_pct)}</td>
+    <td class="r" data-l="Risultato">${res}</td><td data-l="Ora">${tm(o.time)}</td></tr>`;
+  }).join("") : `<tr><td colspan="13" class="sub" style="padding:14px">Nessuna posizione aperta né ordine in attesa${accounts.length ? "" : ": aggiungi un conto"}.</td></tr>`;
 }
 async function refresh() {
   if (busy) return; busy = true;
