@@ -25,6 +25,9 @@ header.top{position:sticky;top:0;z-index:20;background:var(--hdr);color:var(--hd
 h1{font-size:18px;font-weight:600;margin:0}
 .nosig .sigonly{display:none!important}
 tr.pend,tr.pend:hover{background:rgba(245,197,24,.14)}
+.panel.pendpanel{border:2px solid #1c3566}                            /* tabella degli ordini in attesa: bordo blu scuro */
+.panel.pendpanel table{border-bottom:2px solid #1c3566}
+@media (prefers-color-scheme:dark){.panel.pendpanel,.panel.pendpanel table{border-color:#5b86c9}}
 tr.opn,tr.opn:hover{background:rgba(56,189,248,.16)}
 .brand{display:flex;align-items:center;gap:14px;min-width:0}
 .logo{background:#fff;border-radius:8px;padding:5px 12px;display:flex;flex:none}
@@ -161,7 +164,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
 <main>
 <div id="tab-home" style="display:grid;gap:16px">
   <div class="banner" id="sim" hidden>Modalità SIMULATORE: conti, prezzi e operazioni sono finti. Serve solo a provare l'interfaccia.</div>
-  <div class="panel"><h2>Ordini in attesa <span class="sub" style="margin-left:auto;text-transform:none;letter-spacing:0" id="pendsub"></span></h2>
+  <div class="panel pendpanel"><h2>Ordini in attesa <span class="sub" style="margin-left:auto;text-transform:none;letter-spacing:0" id="pendsub"></span></h2>
     <div class="tw" style="padding:0 16px 8px"><table class="acctable" id="pendtable"><thead id="pendhead"></thead><tbody id="pendrows"></tbody></table></div>
     <div class="sub" style="padding:0 16px 16px">Ordini LIMIT e STOP piazzati su MT5 e non ancora eseguiti, di tutti i conti collegati. Si aggiornano da soli ogni 20 secondi. Distanza = quanto manca al prezzo dell'ordine, in % del prezzo; rischio = perdita allo SL in % del saldo del conto (se lo SL è impostato).</div>
   </div>
