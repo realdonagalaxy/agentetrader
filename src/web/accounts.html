@@ -24,6 +24,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);pa
 header.top{position:sticky;top:0;z-index:20;background:var(--hdr);color:var(--hdr-ink);box-shadow:0 0 0 100vmax var(--hdr);clip-path:inset(0 -100vmax);padding:14px 0;display:flex;gap:10px 20px;align-items:center;flex-wrap:wrap}
 h1{font-size:18px;font-weight:600;margin:0}
 .nosig .sigonly{display:none!important}
+tr.pend,tr.pend:hover{background:rgba(245,197,24,.14)}
 .brand{display:flex;align-items:center;gap:14px;min-width:0}
 .logo{background:#fff;border-radius:8px;padding:5px 12px;display:flex;flex:none}
 .logo img{height:42px;width:auto;display:block}
@@ -102,13 +103,13 @@ tr.acc.off .name{opacity:.6}
   #rows > tr.acc > td[data-l="Stato"],#rows > tr.acc > td[data-l=""]{grid-column:1/-1}
   #rows > tr.acc > td[data-l=""]::before{display:none}
   #rows > tr.acc > td[data-l=""] .actions{justify-content:flex-start}
-  #trrows > tr,#srows > tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 12px;padding:12px 14px;border-bottom:1px solid var(--line)}
-  #trrows > tr > td,#srows > tr > td{display:block;border:0;padding:0;text-align:left!important;min-width:0;overflow-wrap:anywhere}
-  #trrows > tr > td::before,#srows > tr > td::before{content:attr(data-l);display:block;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink3);margin-bottom:1px}
+  #pendrows > tr,#trrows > tr,#srows > tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 12px;padding:12px 14px;border-bottom:1px solid var(--line)}
+  #pendrows > tr > td,#trrows > tr > td,#srows > tr > td{display:block;border:0;padding:0;text-align:left!important;min-width:0;overflow-wrap:anywhere}
+  #pendrows > tr > td::before,#trrows > tr > td::before,#srows > tr > td::before{content:attr(data-l);display:block;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink3);margin-bottom:1px}
   #srows > tr > td.wide{grid-column:1/-1}
   #srows > tr > td[data-l="Segnale"]{grid-column:span 2;font-size:15px}
   #srows > tr > td[data-l="Ora"]{grid-column:span 1}
-  #stable,#trtable{display:block}
+  #stable,#trtable,#pendtable{display:block}
   #tab-seg .panel > h2{flex-wrap:wrap;row-gap:8px}
   #tab-seg .panel > h2 > span{margin-left:0!important;flex-wrap:wrap}
   #rows > tr.det,#rows > tr.det > td{display:block}
@@ -159,6 +160,10 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
 <main>
 <div id="tab-home" style="display:grid;gap:16px">
   <div class="banner" id="sim" hidden>Modalità SIMULATORE: conti, prezzi e operazioni sono finti. Serve solo a provare l'interfaccia.</div>
+  <div class="panel"><h2>Ordini in attesa <span class="sub" style="margin-left:auto;text-transform:none;letter-spacing:0" id="pendsub"></span></h2>
+    <div class="tw" style="padding:0 16px 8px"><table class="acctable" id="pendtable"><thead id="pendhead"></thead><tbody id="pendrows"></tbody></table></div>
+    <div class="sub" style="padding:0 16px 16px">Ordini LIMIT e STOP piazzati su MT5 e non ancora eseguiti, di tutti i conti collegati. Si aggiornano da soli ogni 20 secondi. Distanza = quanto manca al prezzo dell'ordine, in % del prezzo; rischio = perdita allo SL in % del saldo del conto (se lo SL è impostato).</div>
+  </div>
   <div class="panel"><h2>Trade letti da MT5 <span style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="sub" style="text-transform:none;letter-spacing:0" id="trsub"></span>
       <button class="btn sm sec" id="tprev" aria-label="Mese precedente">‹</button><b id="tmonth" style="min-width:130px;text-align:center;text-transform:capitalize;letter-spacing:0;font-size:14px;color:var(--ink)"></b>
       <button class="btn sm sec" id="tnext" aria-label="Mese successivo">›</button><button class="btn sm sec" id="ttoday">Oggi</button></span></h2>
@@ -323,11 +328,29 @@ function warn() {
   if (nopw.length) msg.push("Password non salvata per: " + nopw.map(a => a.login).join(", ") + ". Senza password il programma non può accedere al conto nel suo terminale («Modifica» → Password).");
   w.hidden = !msg.length; w.innerHTML = msg.map(esc).join("<br>");
 }
+function renderPending() {
+  const rows = [], bad = [];
+  accounts.filter(a => a.enabled).forEach(a => {
+    const s = status[a.id];
+    if (!s) return;
+    if (!s.connected) { bad.push(`${a.login}: ${s.error || "non letto"}`); return; }
+    (s.orders || []).forEach(o => rows.push({login: a.login, cur: s.currency, ...o}));
+  });
+  const tm = t => { if (!t) return "—"; const d = new Date(t * 1000).toISOString(); return d.slice(8, 10) + "/" + d.slice(5, 7) + " " + d.slice(11, 16); };
+  const px = v => v == null ? "—" : String(Math.round(+v * 100000) / 100000), pc = v => v == null ? "—" : Number(v).toFixed(2).replace(".", ",") + "%";
+  $("pendsub").innerHTML = (rows.length ? `${rows.length} ${rows.length === 1 ? "ordine" : "ordini"}` : "") + (bad.length ? ` <span class="loss">· non letti: ${esc(bad.join(" · "))}</span>` : "");
+  $("pendhead").innerHTML = `<tr><th>Conto</th><th>Ordine</th><th>Asset</th><th class="r">Lotti</th><th class="r">Prezzo ordine</th><th class="r">SL</th><th class="r">TP</th><th class="r">Prezzo attuale</th><th class="r">Distanza</th><th class="r">R:R</th><th class="r">Rischio</th><th>Impostato</th></tr>`;
+  $("pendrows").innerHTML = rows.length ? rows.map(o => `<tr class="pend"><td data-l="Conto"><b>${esc(o.login)}</b></td><td data-l="Ordine"><span class="badge ${o.side === "buy" ? "b-ok" : "b-err"}">${esc(o.tipo)}</span></td><td data-l="Asset"><b>${esc(o.symbol)}</b></td>
+    <td class="r" data-l="Lotti">${o.volume ?? "—"}</td><td class="r" data-l="Prezzo ordine"><b>${px(o.price)}</b></td><td class="r" data-l="SL">${px(o.sl)}</td><td class="r" data-l="TP">${px(o.tp)}</td>
+    <td class="r" data-l="Prezzo attuale">${px(o.current)}</td><td class="r" data-l="Distanza">${pc(o.dist_pct)}</td><td class="r" data-l="R:R">${o.rr != null ? "1:" + o.rr : "—"}</td><td class="r" data-l="Rischio">${pc(o.risk_pct)}</td><td data-l="Impostato">${tm(o.time)}</td></tr>`).join("")
+    : `<tr><td colspan="12" class="sub" style="padding:14px">Nessun ordine in attesa${accounts.length ? "" : ": aggiungi un conto"}.</td></tr>`;
+}
 async function refresh() {
   if (busy) return; busy = true;
   try {
     const j = await api("/api/accounts"); accounts = j.accounts; document.documentElement.classList.toggle("nosig", !j.signals); $("sim").hidden = !j.simulator; render();
-    for (const a of accounts.filter(x => x.enabled)) { status[a.id] = await api(`/api/accounts/${a.id}/status`); render(); }
+    for (const a of accounts.filter(x => x.enabled)) { status[a.id] = await api(`/api/accounts/${a.id}/status`); render(); renderPending(); }
+    renderPending();
     $("upd").textContent = "Aggiornato " + new Date().toLocaleTimeString("it-IT");
     if (fillSources() && started) loadActive();                       // un conto aggiunto o tolto cambia il menu e, se serve, l'elenco
   } catch (e) { toast("Errore: " + e.message); }
@@ -478,7 +501,7 @@ async function loadTrades() {
   const rows = [];
   j.open.forEach(p => rows.push(row(`${side(p.side)} <span class="badge b-sig">aperto</span>`, p.symbol, p.volume, tm(p.time), px(p.open), px(p.sl), px(p.tp), px(p.price),
     `<span class="${cls(p.r)}">${r2(p.r)}</span>`, `<b class="${cls(p.profit)}">${money(p.profit, j.currency)}</b>`)));
-  j.pending.forEach(o => rows.push(row(`<span class="badge b-off">${esc(o.tipo)}</span>`, o.symbol, o.volume, tm(o.time), px(o.price), px(o.sl), px(o.tp), "—", "—", `<span class="sub">in attesa</span>`)));
+  j.pending.forEach(o => rows.push(row(`<span class="badge b-off">${esc(o.tipo)}</span>`, o.symbol, o.volume, tm(o.time), px(o.price), px(o.sl), px(o.tp), "—", "—", `<span class="sub">in attesa</span>`).replace("<tr>", `<tr class="pend">`)));
   C.forEach(t => rows.push(row(`${side(t.side)} ${t.reason === "tp" ? `<span class="badge b-ok">TP</span>` : t.reason === "sl" ? `<span class="badge b-err">SL</span>` : `<span class="badge b-off">chiusa</span>`}`, t.symbol, t.volume, tm(t.open_time), px(t.open_price),
     px(t.sl), px(t.tp), `${px(t.close_price)}<div class="sub">${tm(t.close_time)}</div>`, `<span class="${cls(t.r)}">${r2(t.r)}</span>`, `<b class="${cls(t.net)}">${money(t.net, j.currency)}</b>`)));
   $("trrows").innerHTML = rows.join("") || `<tr><td colspan="10" class="sub" style="padding:14px">Nessun trade per questo conto e questo mese.</td></tr>`;

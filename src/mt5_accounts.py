@@ -380,15 +380,67 @@ def _pos(p) -> dict:
             "sl": p.sl, "tp": p.tp, "profit": round(p.profit + getattr(p, "swap", 0.0), 2), "time": int(p.time), "magic": p.magic, "comment": p.comment}
 
 
+ORDER_NAMES = {2: "BUY LIMIT", 3: "SELL LIMIT", 4: "BUY STOP", 5: "SELL STOP", 6: "BUY STOP LIMIT", 7: "SELL STOP LIMIT"}
+
+
+def _loss_per_lot(mt5, info, buy: bool, price: float, sl: float, sym: str):
+    """Perdita in valuta del conto per 1 lotto se il prezzo va da price a sl (None se non calcolabile)."""
+    try:
+        pr = mt5.order_calc_profit(mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL, sym, 1.0, price, sl)
+        if pr:
+            return abs(float(pr))
+    except Exception:
+        pass
+    tv, ts = getattr(info, "trade_tick_value", None), getattr(info, "trade_tick_size", None)
+    return abs(price - sl) / ts * tv if tv and ts else None
+
+
+def _order(mt5, o, balance: float) -> dict:
+    """Ordine PENDENTE (non ancora eseguito) letto da MT5, con prezzo attuale, distanza in % del prezzo, R:R e rischio in % del saldo se lo SL è impostato."""
+    t = int(o.type)
+    buy = t in (2, 4, 6)
+    price = float(o.price_open)
+    tick = mt5.symbol_info_tick(o.symbol)
+    cur = (tick.ask if buy else tick.bid) if tick else None
+    sl, tp = (float(o.sl) or None), (float(o.tp) or None)
+    vol = getattr(o, "volume_current", None) or getattr(o, "volume_initial", None) or getattr(o, "volume", None)
+    rr = round(abs(tp - price) / abs(price - sl), 2) if sl and tp and price != sl else None
+    risk = None
+    if sl and vol and balance > 0:
+        per_lot = _loss_per_lot(mt5, mt5.symbol_info(o.symbol), buy, price, sl, o.symbol)
+        risk = round(100 * per_lot * float(vol) / balance, 2) if per_lot else None
+    return {"ticket": int(o.ticket), "symbol": o.symbol, "tipo": ORDER_NAMES.get(t, f"tipo {t}"), "side": "buy" if buy else "sell", "volume": vol, "price": price, "sl": sl, "tp": tp,
+            "current": cur, "dist_pct": round(100 * abs(price - cur) / cur, 2) if cur else None, "rr": rr, "risk_pct": risk, "time": int(getattr(o, "time_setup", 0) or 0), "comment": getattr(o, "comment", "")}
+
+
+def _orders_safe(mt5, balance: float) -> list:
+    """Ordini pendenti del conto: un errore nel leggerne uno non deve mai impedire di mostrare il conto (l'ordine compare comunque, con i soli dati di base)."""
+    out = []
+    try:
+        orders = mt5.orders_get() or []
+    except Exception:
+        return out
+    for o in orders:
+        try:
+            out.append(_order(mt5, o, balance))
+        except Exception:
+            try:
+                out.append({"ticket": int(o.ticket), "symbol": o.symbol, "tipo": ORDER_NAMES.get(int(o.type), f"tipo {o.type}"), "side": "buy" if int(o.type) in (2, 4, 6) else "sell",
+                            "volume": getattr(o, "volume_current", None), "price": float(o.price_open), "sl": float(o.sl) or None, "tp": float(o.tp) or None})
+            except Exception:
+                pass
+    return out
+
+
 def snapshot(acc: dict) -> dict:
-    """Saldo, equity e posizioni aperte del conto. Mai eccezioni: in caso di errore {'connected': False, 'error': ...}."""
+    """Saldo, equity, posizioni aperte e ordini pendenti del conto. Mai eccezioni: in caso di errore {'connected': False, 'error': ...}."""
     try:
         with session(acc) as mt5:
             i = mt5.account_info()
             _remember_kind(acc["id"], is_demo(mt5), getattr(i, "company", "")) if acc.get("id") else None
             return {"connected": True, "demo": is_demo(mt5), "currency": i.currency, "balance": i.balance, "equity": i.equity, "margin": i.margin,
                     "free_margin": i.margin_free, "profit": i.profit, "leverage": i.leverage, "broker_name": i.name, "company": (getattr(i, "company", "") or "").strip(),
-                    "positions": [_pos(p) for p in (mt5.positions_get() or [])], "at": int(time.time())}
+                    "positions": [_pos(p) for p in (mt5.positions_get() or [])], "orders": _orders_safe(mt5, float(i.balance)), "at": int(time.time())}
     except Exception as e:
         return {"connected": False, "error": str(e)[:300]}
 
