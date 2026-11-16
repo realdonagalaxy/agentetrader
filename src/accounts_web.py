@@ -544,6 +544,15 @@ class Handler(BaseHTTPRequestHandler):
             if m and method == "POST":
                 ma.set_enabled(int(m[1]), bool(self._data().get("enabled")))
                 return self._json({"id": int(m[1])})
+            m = re.fullmatch(r"/api/accounts/(\d+)/split", path)               # «Dividi» un ordine LIMIT in due (TP1 / TP2); senza "confirm" è solo l'anteprima
+            if m and method == "POST":
+                from src import split_orders as so
+                d = self._data()
+                acc = ma.get_account(int(m[1]))
+                args = (acc, int(d["ticket"]), float(d["tp1"]), float(d["tp2"]), float(d["pct"]))
+                if not d.get("execute"):
+                    return self._json(so.preview(*args))
+                return self._json(so.execute(*args, expect=d.get("expect") or {}, confirm=str(d.get("confirm") or "")))
             m = re.fullmatch(r"/api/accounts/(\d+)/close", path)
             if m and method == "POST":
                 d = self._data()
@@ -624,6 +633,8 @@ def main():
             print(str(e), flush=True)
         except Exception as e:
             print("Ascolto segnali non avviato:", str(e)[:200], flush=True)
+    from src import split_orders as _so                                  # pareggio dopo TP1 per gli ordini divisi con «Dividi» (non dipende dai segnali)
+    threading.Thread(target=_so.watch_loop, daemon=True).start()
     if not a.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:

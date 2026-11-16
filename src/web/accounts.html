@@ -257,6 +257,18 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
 <dialog id="daydlg"><div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)"><h3 id="daytitle" style="border:0;padding:0;margin:0;text-transform:capitalize"></h3><span id="daysum" class="sub" style="margin-left:auto"></span>
   <button class="btn sm sec" id="dayclose" aria-label="Chiudi">Chiudi</button></div><div id="daybody"></div></dialog>
 
+<dialog id="splitdlg"><form method="dialog" id="splitf" autocomplete="off">
+  <h3>Dividi ordine in due (TP1 / TP2)</h3>
+  <div class="body">
+    <div id="splitinfo" class="sub" style="font-size:13px;color:var(--ink)"></div>
+    <div class="row2"><label>TP1 (prezzo)<input type="number" id="sptp1" step="any" required></label><label>TP2 (prezzo)<input type="number" id="sptp2" step="any" required></label></div>
+    <label>Lotti chiusi a TP1 (%)<input type="number" id="sppct" min="1" max="99" step="1" value="50" required></label>
+    <div class="sub">Dopo TP1 lo SL della parte che resta va a pareggio (serve Gestione Conti acceso).</div>
+    <div id="spprev" style="font-size:13px"></div>
+    <label id="sprealw" hidden>Conto REALE: per confermare scrivi <b>REALE</b><input type="text" id="spreal" autocomplete="off"></label>
+  </div>
+  <div class="foot"><button type="button" class="btn sec" id="spcancel">Annulla</button><button type="button" class="btn" id="sppreview">Anteprima</button><button type="button" class="btn del" id="spgo" hidden>Cancella e piazza le due parti</button></div>
+</form></dialog>
 <dialog id="ask"><form method="dialog">
   <h3 id="atitle">Conferma</h3><div class="body" id="atext"></div>
   <div class="foot"><button value="no" class="btn sec">Annulla</button><button value="yes" class="btn del" id="ayes">Conferma</button></div>
@@ -289,7 +301,7 @@ function render() {
   else rows.innerHTML = accounts.map(a => {
     const s = status[a.id], on = a.enabled, ok = s && s.connected;
     const state = !on ? `<span class="badge b-off">Disattivato</span>` : !s ? `<span class="badge b-off">…</span>` : ok ? `<span class="badge b-ok">Collegato</span>` : `<span class="badge b-err">Errore</span><div class="err">${esc(s.error)}</div>`;
-    const typ = ok ? (s.demo ? `<span class="badge b-demo">DEMO</span>` : `<span class="badge b-real">REALE · sola lettura</span>`) : `<span class="sub">—</span>`;
+    const typ = ok ? (s.demo ? `<span class="badge b-demo">DEMO</span>` : `<span class="badge b-real">REALE</span>`) : `<span class="sub">—</span>`;
     const n = ok ? s.positions.length : "—";
     const pl = ok ? `<span class="${cls(s.profit)}">${money(s.profit, s.currency)}</span>` : "—";
     let h = `<tr class="acc${on ? "" : " off"}" data-id="${a.id}"><td data-l="Conto"><div class="name num" title="${esc(((s && s.company) || a.broker || a.name) + (a.terminal_path ? " · Terminale: " + a.terminal_path : ""))}">${esc(a.login)}</div></td><td data-l="Tipo">${typ}</td><td data-l="Stato">${state}</td>
@@ -331,6 +343,7 @@ function warn() {
   if (nopw.length) msg.push("Password non salvata per: " + nopw.map(a => a.login).join(", ") + ". Senza password il programma non può accedere al conto nel suo terminale («Modifica» → Password).");
   w.hidden = !msg.length; w.innerHTML = msg.map(esc).join("<br>");
 }
+let pendRows = [];
 function renderPending() {
   const rows = [], bad = [];
   accounts.filter(a => a.enabled).forEach(a => {
@@ -344,17 +357,52 @@ function renderPending() {
   const px = v => v == null ? "—" : String(Math.round(+v * 100000) / 100000), pc = v => v == null ? "—" : Number(v).toFixed(2).replace(".", ",") + "%";
   const np = rows.filter(r => r.kind === "pos").length, no = rows.length - np;
   $("pendsub").innerHTML = [np ? `${np} ${np === 1 ? "posizione aperta" : "posizioni aperte"}` : "", no ? `${no} ${no === 1 ? "ordine in attesa" : "ordini in attesa"}` : ""].filter(Boolean).join(" · ") + (bad.length ? ` <span class="loss">· non letti: ${esc(bad.join(" · "))}</span>` : "");
-  $("pendhead").innerHTML = `<tr><th>Conto</th><th>Stato</th><th>Asset</th><th class="r">Lotti</th><th class="r">Entry</th><th class="r">SL</th><th class="r">TP</th><th class="r">Prezzo attuale</th><th class="r">Distanza</th><th class="r">R:R</th><th class="r">Rischio</th><th class="r">Risultato</th><th>Ora</th></tr>`;
-  $("pendrows").innerHTML = rows.length ? rows.map(o => {
+  $("pendhead").innerHTML = `<tr><th>Conto</th><th>Stato</th><th>Asset</th><th class="r">Lotti</th><th class="r">Entry</th><th class="r">SL</th><th class="r">TP</th><th class="r">Prezzo attuale</th><th class="r">Distanza</th><th class="r">R:R</th><th class="r">Rischio</th><th class="r">Risultato</th><th>Ora</th><th></th></tr>`;
+  pendRows = rows;
+  $("pendrows").innerHTML = rows.length ? rows.map((o, i) => {
     const pos = o.kind === "pos", price = pos ? o.open : o.price, cur = pos ? o.price : o.current;
     const stato = pos ? `<span class="badge ${o.side === "buy" ? "b-ok" : "b-err"}">${o.side.toUpperCase()}</span> <span class="badge b-sig">aperto</span>` : `<span class="badge ${o.side === "buy" ? "b-ok" : "b-err"}">${esc(o.tipo)}</span>`;
     const res = pos ? `<b class="${cls(o.profit)}">${money(o.profit, o.cur)}</b>` : `<span class="sub">in attesa</span>`;
     return `<tr${pos ? ` class="opn"` : ""}><td data-l="Conto"><b>${esc(o.login)}</b></td><td data-l="Stato">${stato}</td><td data-l="Asset"><b>${esc(o.symbol)}</b></td>
     <td class="r" data-l="Lotti">${o.volume ?? "—"}</td><td class="r" data-l="Entry"><b>${px(price)}</b></td><td class="r" data-l="SL">${px(o.sl)}</td><td class="r" data-l="TP">${px(o.tp)}</td>
     <td class="r" data-l="Prezzo attuale">${px(cur)}</td><td class="r" data-l="Distanza">${pos ? "—" : pc(o.dist_pct)}</td><td class="r" data-l="R:R">${o.rr != null ? "1:" + o.rr : "—"}</td><td class="r" data-l="Rischio">${pc(o.risk_pct)}</td>
-    <td class="r" data-l="Risultato">${res}</td><td data-l="Ora">${tm(o.time)}</td></tr>`;
-  }).join("") : `<tr><td colspan="13" class="sub" style="padding:14px">Nessuna posizione aperta né ordine in attesa${accounts.length ? "" : ": aggiungi un conto"}.</td></tr>`;
+    <td class="r" data-l="Risultato">${res}</td><td data-l="Ora">${tm(o.time)}</td><td data-l="">${!pos && /^(BUY|SELL) LIMIT$/.test(o.tipo) ? `<button class="btn sm sec" data-split="${i}" title="Divide l'ordine in due: una parte con TP1, l'altra con TP2">Dividi</button>` : ""}</td></tr>`;
+  }).join("") : `<tr><td colspan="14" class="sub" style="padding:14px">Nessuna posizione aperta né ordine in attesa${accounts.length ? "" : ": aggiungi un conto"}.</td></tr>`;
 }
+
+let spCur = null, spPrev = null;
+$("pendrows").addEventListener("click", e => {
+  const b = e.target.closest("button[data-split]"); if (!b) return;
+  const o = pendRows[+b.dataset.split]; if (!o) return;
+  const a = accounts.find(x => String(x.login) === String(o.login));
+  spCur = {acc: a, o}; spPrev = null;
+  $("splitinfo").innerHTML = `Conto <b>${esc(o.login)}</b> · <b>${esc(o.tipo)} ${esc(o.symbol)}</b> · ${o.volume} lotti · entry <b>${o.price}</b> · SL <b>${o.sl ?? "—"}</b>`;
+  $("sptp1").value = ""; $("sptp2").value = o.tp ?? ""; $("sppct").value = 50; $("spprev").innerHTML = ""; $("spgo").hidden = true; $("sprealw").hidden = true; $("spreal").value = "";
+  $("splitdlg").showModal(); $("sptp1").focus();
+});
+$("spcancel").onclick = () => $("splitdlg").close();
+const spBody = () => ({ticket: spCur.o.ticket, tp1: +$("sptp1").value, tp2: +$("sptp2").value, pct: +$("sppct").value});
+$("sppreview").onclick = async () => {
+  if (!$("splitf").reportValidity()) return;
+  try {
+    const p = await api(`/api/accounts/${spCur.acc.id}/split`, "POST", spBody()); spPrev = p;
+    $("spprev").innerHTML = `<div class="banner" style="margin:6px 0">Verrà <b>cancellato</b> l'ordine ${p.ticket} e piazzati due ordini ${esc(p.tipo)} su ${esc(p.symbol)} a <b>${p.price}</b>, SL <b>${p.sl}</b>:<br>
+      · <b>${p.vol1}</b> lotti con TP1 <b>${p.tp1}</b> (R:R 1:${p.rr1})<br>· <b>${p.vol2}</b> lotti con TP2 <b>${p.tp2}</b> (R:R 1:${p.rr2})<br>Rischio totale invariato${p.risk_pct != null ? `: ${String(p.risk_pct).replace(".", ",")}% del saldo` : ""}.${p.demo ? "" : ` <b class="loss">CONTO REALE.</b>`}</div>`;
+    $("sprealw").hidden = p.demo; $("spgo").hidden = false;
+  } catch (er) { spPrev = null; $("spgo").hidden = true; $("spprev").innerHTML = `<div class="err">${esc(er.message)}</div>`; }
+};
+["sptp1", "sptp2", "sppct"].forEach(id => $(id).addEventListener("input", () => { spPrev = null; $("spgo").hidden = true; }));
+$("spgo").onclick = async () => {
+  if (!spPrev) return;
+  if (!spPrev.demo && $("spreal").value.trim() !== "REALE") { $("spprev").innerHTML += `<div class="err">Scrivi REALE per confermare.</div>`; return; }
+  $("spgo").disabled = true;
+  try {
+    const r = await api(`/api/accounts/${spCur.acc.id}/split`, "POST", {...spBody(), execute: true, confirm: $("spreal").value.trim(), expect: {price: spPrev.price, sl: spPrev.sl, volume: spPrev.volume}});
+    $("splitdlg").close(); toast(`Diviso: ${r.vol1} lotti a TP1 ${r.tp1} + ${r.vol2} lotti a TP2 ${r.tp2}`, 6000);
+    status[spCur.acc.id] = await api(`/api/accounts/${spCur.acc.id}/status`); renderPending();
+  } catch (er) { $("spprev").innerHTML = `<div class="err">${esc(er.message)}</div>`; $("spgo").hidden = true; spPrev = null; }
+  $("spgo").disabled = false;
+};
 async function refresh() {
   if (busy) return; busy = true;
   try {
