@@ -25,6 +25,7 @@ header.top{position:sticky;top:0;z-index:20;background:var(--hdr);color:var(--hd
 h1{font-size:18px;font-weight:600;margin:0}
 .nosig .sigonly{display:none!important}
 tr.pend,tr.pend:hover{background:rgba(245,197,24,.14)}
+tr.opn,tr.opn:hover{background:rgba(56,189,248,.16)}
 .brand{display:flex;align-items:center;gap:14px;min-width:0}
 .logo{background:#fff;border-radius:8px;padding:5px 12px;display:flex;flex:none}
 .logo img{height:42px;width:auto;display:block}
@@ -500,7 +501,7 @@ async function loadTrades() {
     <td class="r" data-l="Entry">${entry}</td><td class="r" data-l="SL">${sl_}</td><td class="r" data-l="TP">${tp_}</td><td class="r" data-l="Chiusura / ora">${last}</td><td class="r" data-l="R">${r}</td><td class="r" data-l="Risultato">${res}</td></tr>`;
   const rows = [];
   j.open.forEach(p => rows.push(row(`${side(p.side)} <span class="badge b-sig">aperto</span>`, p.symbol, p.volume, tm(p.time), px(p.open), px(p.sl), px(p.tp), px(p.price),
-    `<span class="${cls(p.r)}">${r2(p.r)}</span>`, `<b class="${cls(p.profit)}">${money(p.profit, j.currency)}</b>`)));
+    `<span class="${cls(p.r)}">${r2(p.r)}</span>`, `<b class="${cls(p.profit)}">${money(p.profit, j.currency)}</b>`).replace("<tr>", `<tr class="opn">`)));
   j.pending.forEach(o => rows.push(row(`<span class="badge b-off">${esc(o.tipo)}</span>`, o.symbol, o.volume, tm(o.time), px(o.price), px(o.sl), px(o.tp), "—", "—", `<span class="sub">in attesa</span>`).replace("<tr>", `<tr class="pend">`)));
   C.forEach(t => rows.push(row(`${side(t.side)} ${t.reason === "tp" ? `<span class="badge b-ok">TP</span>` : t.reason === "sl" ? `<span class="badge b-err">SL</span>` : `<span class="badge b-off">chiusa</span>`}`, t.symbol, t.volume, tm(t.open_time), px(t.open_price),
     px(t.sl), px(t.tp), `${px(t.close_price)}<div class="sub">${tm(t.close_time)}</div>`, `<span class="${cls(t.r)}">${r2(t.r)}</span>`, `<b class="${cls(t.net)}">${money(t.net, j.currency)}</b>`)));
