@@ -553,6 +553,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not d.get("execute"):
                     return self._json(so.preview(*args))
                 return self._json(so.execute(*args, expect=d.get("expect") or {}, confirm=str(d.get("confirm") or "")))
+            m = re.fullmatch(r"/api/accounts/(\d+)/be", path)                  # «BE»: SL al pareggio quando decide l'utente
+            if m and method == "POST":
+                d = self._data()
+                return self._json(ma.set_be(ma.get_account(int(m[1])), int(d["ticket"]), str(d.get("confirm") or "")))
             m = re.fullmatch(r"/api/accounts/(\d+)/close", path)
             if m and method == "POST":
                 d = self._data()

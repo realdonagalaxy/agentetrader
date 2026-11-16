@@ -529,6 +529,30 @@ def close_positions(acc: dict, tickets: list[int] | None = None) -> list[str]:
         return [_close(mt5, p) for p in pos]
 
 
+def set_be(acc: dict, ticket: int, confirm: str = "") -> dict:
+    """Porta lo SL di una posizione aperta al suo prezzo di apertura (pareggio), su richiesta dell'utente. TP invariato. Sui conti non demo serve confirm == 'REALE'."""
+    with session(acc) as mt5:
+        if not is_demo(mt5) and str(confirm).strip() != "REALE":
+            raise ValueError("Conto REALE: per confermare scrivi REALE.")
+        pos = [p for p in (mt5.positions_get() or []) if int(p.ticket) == int(ticket)]
+        if not pos:
+            raise ValueError("La posizione non è più aperta: aggiorna l'elenco.")
+        p = pos[0]
+        digits = int(getattr(mt5.symbol_info(p.symbol), "digits", 2))
+        be = round(float(p.price_open), digits)
+        if abs(float(p.sl) - be) < 10 ** -digits / 2:
+            raise ValueError("Lo SL è già a pareggio.")
+        buy = p.type == 0
+        tick = mt5.symbol_info_tick(p.symbol)
+        cur = tick.bid if buy else tick.ask
+        if (buy and cur <= be) or (not buy and cur >= be):
+            raise ValueError(f"Il prezzo ({cur:g}) non ha ancora superato il pareggio ({be:g}): lo SL lì verrebbe colpito subito, il broker lo rifiuta.")
+        r = mt5.order_send({"action": mt5.TRADE_ACTION_SLTP, "symbol": p.symbol, "position": p.ticket, "sl": be, "tp": p.tp, "magic": p.magic})
+        if r is None or r.retcode != mt5.TRADE_RETCODE_DONE:
+            raise ValueError(f"Il broker ha rifiutato la modifica ({getattr(r, 'retcode', '?')} {getattr(r, 'comment', '')}).")
+        return {"ticket": int(p.ticket), "sl": be, "symbol": p.symbol}
+
+
 def import_connected(terminal_path: str = "") -> dict:
     """Legge il conto a cui il terminale MT5 (già aperto e collegato) è connesso e lo aggiunge all'archivio, senza password.
     Conto demo: usato per i segnali con 0,05 lotti. Conto reale: aggiunto in sola lettura, NON usato per i segnali."""

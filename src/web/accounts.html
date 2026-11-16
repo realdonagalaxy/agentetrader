@@ -366,10 +366,21 @@ function renderPending() {
     return `<tr${pos ? ` class="opn"` : ""}><td data-l="Conto"><b>${esc(o.login)}</b></td><td data-l="Stato">${stato}</td><td data-l="Asset"><b>${esc(o.symbol)}</b></td>
     <td class="r" data-l="Lotti">${o.volume ?? "—"}</td><td class="r" data-l="Entry"><b>${px(price)}</b></td><td class="r" data-l="SL">${px(o.sl)}</td><td class="r" data-l="TP">${px(o.tp)}</td>
     <td class="r" data-l="Prezzo attuale">${px(cur)}</td><td class="r" data-l="Distanza">${pos ? "—" : pc(o.dist_pct)}</td><td class="r" data-l="R:R">${o.rr != null ? "1:" + o.rr : "—"}</td><td class="r" data-l="Rischio">${pc(o.risk_pct)}</td>
-    <td class="r" data-l="Risultato">${res}</td><td data-l="Ora">${tm(o.time)}</td><td data-l="">${!pos && /^(BUY|SELL) LIMIT$/.test(o.tipo) ? `<button class="btn sm sec" data-split="${i}" title="Divide l'ordine in due: una parte con TP1, l'altra con TP2">Dividi</button>` : ""}</td></tr>`;
+    <td class="r" data-l="Risultato">${res}</td><td data-l="Ora">${tm(o.time)}</td><td data-l="">${!pos && /^(BUY|SELL) LIMIT$/.test(o.tipo) ? `<button class="btn sm sec" data-split="${i}" title="Divide l'ordine in due: una parte con TP1, l'altra con TP2">Dividi</button>` : pos ? `<button class="btn sm sec" data-be="${i}" title="Porta lo SL al prezzo di apertura (pareggio)">BE</button>` : ""}</td></tr>`;
   }).join("") : `<tr><td colspan="14" class="sub" style="padding:14px">Nessuna posizione aperta né ordine in attesa${accounts.length ? "" : ": aggiungi un conto"}.</td></tr>`;
 }
 
+$("pendrows").addEventListener("click", async e => {
+  const b = e.target.closest("button[data-be]"); if (!b) return;
+  const o = pendRows[+b.dataset.be]; if (!o) return;
+  const a = accounts.find(x => String(x.login) === String(o.login)), real = status[a.id] && !status[a.id].demo;
+  if (!await ask("SL a pareggio (BE)", `Portare lo SL della posizione ${o.symbol} (conto ${o.login}) al prezzo di apertura ${o.open}? Il TP resta invariato.`, "Metti a BE")) return;
+  let confirm = "";
+  if (real) { confirm = (prompt("Conto REALE: scrivi REALE per confermare") || "").trim(); if (confirm !== "REALE") return toast("Annullato: non hai scritto REALE"); }
+  b.disabled = true;
+  try { await api(`/api/accounts/${a.id}/be`, "POST", {ticket: o.ticket, confirm}); toast(`SL a pareggio su ${o.symbol}`); status[a.id] = await api(`/api/accounts/${a.id}/status`); renderPending(); }
+  catch (er) { toast(er.message, 7000); b.disabled = false; }
+});
 let spCur = null, spPrev = null;
 $("pendrows").addEventListener("click", e => {
   const b = e.target.closest("button[data-split]"); if (!b) return;
