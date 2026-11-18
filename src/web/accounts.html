@@ -157,6 +157,10 @@ tr.acc.off .name{opacity:.6}
 #daydlg{width:min(860px,calc(100vw - 24px));max-height:92vh;display:none;flex-direction:column}
 #daydlg[open]{display:flex}
 #daybody{padding:14px 18px;overflow-y:auto}
+#cdlg,#daydlg{background:var(--hdr);color:#00ff52;border-color:#2f4768;--lm:#00ff52;--lm2:#00b83a;--gain:#38f5d6;--loss:#ff7b72;--ink:#00ff52;--ink2:#00b83a;--ink3:#00b83a;--line:#2f4768;--surface:#14233a;--surface2:rgba(255,255,255,.05);--gain-bg:rgba(56,245,214,.14);--loss-bg:rgba(255,123,114,.15);--flat-bg:rgba(255,255,255,.07);--warn:#e9ff3c;--warn-bg:rgba(233,255,60,.08);font-family:var(--mono)}
+#cdlg h3,#daydlg h3{color:#00ff52;letter-spacing:.12em;text-transform:uppercase}
+#cdlg .btn.sec,#daydlg .btn.sec{color:#00ff52;border-color:#00b83a}
+#cdlg .btn:not(.sec):not(.del){background:#00ff52;color:var(--hdr)}
 .tcard{border:1px solid var(--line);border-radius:6px;padding:12px;margin-bottom:14px;background:var(--surface)}
 .thead{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;margin-bottom:10px}
 .thead .num{font-size:13px}
@@ -195,7 +199,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
     <div class="tw" style="padding:0 16px 8px"><table class="acctable" id="pendtable"><thead id="pendhead"></thead><tbody id="pendrows"></tbody></table></div>
     <div class="sub" style="padding:0 16px 16px">Posizioni ancora in corso (righe celesti, con il risultato di adesso) e ordini LIMIT/STOP non ancora eseguiti, di tutti i conti collegati. Si aggiornano da soli ogni 20 secondi. Distanza = quanto manca al prezzo dell'ordine, in % del prezzo; rischio = perdita allo SL in % del saldo del conto (se lo SL è impostato).</div>
   </div>
-  <div class="panel"><h2>Trade chiusi <span style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="sub" style="text-transform:none;letter-spacing:0" id="trsub"></span>
+  <div class="panel pendpanel"><h2>Trade chiusi <span style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="sub" style="text-transform:none;letter-spacing:0" id="trsub"></span>
       <button class="btn sm sec" id="tprev" aria-label="Mese precedente">‹</button><b id="tmonth" style="min-width:130px;text-align:center;text-transform:capitalize;letter-spacing:0;font-size:14px;color:var(--ink)"></b>
       <button class="btn sm sec" id="tnext" aria-label="Mese successivo">›</button><button class="btn sm sec" id="ttoday">Oggi</button></span></h2>
     <div class="body stack" style="grid-template-columns:minmax(0,260px) auto;align-items:end">
@@ -247,7 +251,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
       <div class="actions" style="align-items:center"><button class="btn sec" id="lastbtn" title="Se un segnale non è stato aperto da solo: lo cerca nel canale e lo applica ai conti demo">Apri l'ultimo segnale</button><button class="btn" id="lsbtn">Avvia ascolto segnali</button></div>
     </div>
   </div>
-    <div class="panel">
+    <div class="panel pendpanel">
     <div class="tw"><table class="acctable">
       <thead><tr><th>Conto</th><th>Tipo</th><th>Stato</th><th class="r">Saldo</th><th class="r">Equity</th><th class="r">P&amp;L aperto</th><th class="r">Pos.</th><th class="sigonly">Segnali</th><th>Attivo</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
