@@ -275,7 +275,8 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
       <div class="sub" id="partnote" style="align-self:end;padding-bottom:8px"></div>
     </div>
     <label class="chk"><input type="checkbox" id="enabled" checked><span>Conto attivo (viene monitorato)</span></label>
-    <label class="chk sigonly"><input type="checkbox" id="use_signals" checked><span>Usa per i segnali del canale (apre le operazioni; solo se il conto è demo)</span></label>
+    <label class="chk sigonly"><input type="checkbox" id="use_signals" checked><span>Usa per i segnali del canale (apre le operazioni)</span></label>
+    <label class="chk sigonly"><input type="checkbox" id="real_ok"><span><b class="loss">Consenti segnali su conto REALE</b> (se il conto è reale apre con soldi veri; spenta = solo demo)</span></label>
   </div>
   <div class="foot"><span class="msg" id="tmsg"></span>
     <button type="button" class="btn sec" id="test">Prova connessione</button>
@@ -335,7 +336,7 @@ function render() {
     const pl = ok ? `<span class="${cls(s.profit)}">${money(s.profit, s.currency)}</span>` : "—";
     let h = `<tr class="acc${on ? "" : " off"}" data-id="${a.id}"><td data-l="Conto"><div class="name num" title="${esc(((s && s.company) || a.broker || a.name) + (a.terminal_path ? " · Terminale: " + a.terminal_path : ""))}">${esc(a.login)}</div></td><td data-l="Tipo">${typ}</td><td data-l="Stato">${state}</td>
       <td data-l="Saldo" class="r num">${ok ? money(s.balance, s.currency) : "—"}</td><td data-l="Equity" class="r num">${ok ? money(s.equity, s.currency) : "—"}</td><td data-l="P&amp;L aperto" class="r num">${pl}</td><td data-l="Posizioni" class="r num">${n}</td>
-      <td data-l="Segnali" class="sigonly">${a.use_signals && on && !(s && s.connected && !s.demo) ? `<span class="badge b-sig">${a.lots} lotti · TP${a.tp_target || 1}${a.partial_pct ? ` · parz. ${a.partial_pct}%` : ""}</span>` : a.use_signals && !(s && s.connected && !s.demo) ? `<span class="badge b-off">Sospeso</span>` : `<span class="badge b-off">No</span>`}</td>
+      <td data-l="Segnali" class="sigonly">${a.use_signals && on && (a.real_ok || !(s && s.connected && !s.demo)) ? `<span class="badge ${s && s.connected && !s.demo ? "b-real" : "b-sig"}">${a.lots} lotti · TP${a.tp_target || 1}${a.partial_pct ? ` · parz. ${a.partial_pct}%` : ""}${s && s.connected && !s.demo ? " · REALE" : ""}</span>` : a.use_signals && (a.real_ok || !(s && s.connected && !s.demo)) ? `<span class="badge b-off">Sospeso</span>` : `<span class="badge b-off">No</span>`}</td>
       <td data-l="Attivo"><label class="sw" title="${on ? "Conto attivo: disattivalo per fermare monitoraggio e segnali" : "Conto disattivato: attivalo per monitorarlo e usarlo per i segnali"}"><input type="checkbox" role="switch" data-act="toggle" ${on ? "checked" : ""} aria-label="Attiva o disattiva il conto ${esc(a.login)}"><span></span></label></td>
       <td data-l=""><div class="actions"><button class="btn sm sec" data-act="edit">Modifica</button><button class="btn sm del" data-act="del">Elimina</button></div></td></tr>`;
     if (open.has(a.id) && ok) h += detail(a, s);
@@ -489,7 +490,7 @@ function edit(a) {
   $("password").value = ""; $("password").placeholder = a && a.has_password ? "•••••• (lascia vuoto per non cambiarla)" : "";
   $("tp_target").value = a ? (a.tp_target || 1) : 1;
   $("partial_on").checked = !!(a && a.partial_pct); $("partial_pct").value = a && a.partial_pct ? a.partial_pct : 60; partUi();
-  $("enabled").checked = a ? a.enabled : true; $("use_signals").checked = a ? a.use_signals : true;
+  $("enabled").checked = a ? a.enabled : true; $("use_signals").checked = a ? a.use_signals : true; $("real_ok").checked = !!(a && a.real_ok); $("real_ok").dataset.was = a && a.real_ok ? "1" : "";
   $("tpl").hidden = !a; $("terminal_path").value = a ? (a.terminal_path || "Terminale predefinito di MT5") : "";
   $("dlg").showModal(); $("login").focus();
 }
@@ -558,8 +559,13 @@ $("test").onclick = async () => {
 $("f").addEventListener("submit", async e => {
   e.preventDefault(); $("save").disabled = true;
   const mk = !editing;
+  let confirm_real = "";
+  if ($("real_ok").checked && !$("real_ok").dataset.was) {               // appena spuntata: serve scrivere REALE
+    confirm_real = (prompt("Con questa spunta i segnali del canale apriranno operazioni con SOLDI VERI su questo conto.\nPer confermare scrivi REALE") || "").trim();
+    if (confirm_real !== "REALE") { $("tmsg").className = "msg loss"; $("tmsg").textContent = "Non hai scritto REALE: la spunta non è stata salvata."; $("save").disabled = false; return; }
+  }
   if (mk) { $("tmsg").className = "msg"; $("tmsg").textContent = "Accedo al conto nel terminale MT5: può richiedere un minuto…"; }
-  try { const r = await api(editing ? "/api/accounts/" + editing : "/api/accounts", editing ? "PUT" : "POST", form()); $("dlg").close();
+  try { const r = await api(editing ? "/api/accounts/" + editing : "/api/accounts", editing ? "PUT" : "POST", {...form(), real_ok: $("real_ok").checked, confirm_real}); $("dlg").close();
     toast(mk && r.terminal_path ? "Conto salvato. Terminale MT5: " + r.terminal_path : "Conto salvato", mk ? 12000 : 3500); refresh(); }
   catch (er) { $("tmsg").className = "msg loss"; $("tmsg").textContent = er.message; }
   $("save").disabled = false;

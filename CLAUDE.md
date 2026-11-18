@@ -20,7 +20,7 @@ Sei l'agente quantitativo di sviluppo e monitoraggio trading. Il tuo compito è:
 
 ## Sicurezza operativa
 - Non eseguire ordini su conto `live` senza conferma esplicita. Default: `CTRADER_ENV=demo`.
-- Parte AUTOMATICA (segnali del canale): solo conti demo, sempre. Il trading DISCREZIONALE si apre a mano da MT5: Gestione Conti lo legge soltanto (scheda Risultati), non invia ordini per conto dell'utente (decisione 14/11/2026).
+- Parte AUTOMATICA (segnali del canale): di default solo conti demo. Decisione 18/11/2026: per ogni conto c'è la spunta «Consenti segnali su conto REALE» (spenta di default, per attivarla si scrive REALE); solo se spuntata i segnali possono aprire su quel conto reale. Mai attivarla al posto dell'utente. Il trading DISCREZIONALE si apre a mano da MT5: Gestione Conti lo legge soltanto (scheda Risultati), non invia ordini per conto dell'utente (decisione 14/11/2026).
 - Unica eccezione (decisione 16/11/2026): il pulsante «Dividi» su un ordine LIMIT in attesa (`src/split_orders.py`) cancella l'ordine e ne piazza due (TP1/TP2, stesso prezzo e SL), solo dopo anteprima e conferma esplicita; su conti NON demo serve scrivere REALE. A TP1 chiuso in profitto lo SL della parte 2 va a BE (controllo ogni 30 s mentre Gestione Conti è acceso). Stessa logica per il pulsante «BE» su una posizione aperta (SL al prezzo di apertura, solo su richiesta, conferma e REALE sui conti reali).
 - Mai committare `config.env` o credenziali (usa `config.env.example`).
 - Ogni segnale riporta: simbolo, direzione, entry, SL, TP, R:R e motivazione.

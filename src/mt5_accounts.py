@@ -73,6 +73,10 @@ def db() -> sqlite3.Connection:
         con.execute("ALTER TABLE accounts ADD COLUMN manual_ok INTEGER")          # usa il conto per i trade manuali: NULL = predefinito (sì se demo, no se reale)
     except sqlite3.OperationalError:
         pass
+    try:
+        con.execute("ALTER TABLE accounts ADD COLUMN real_ok INTEGER DEFAULT 0")  # 1 = i segnali del canale possono aprire anche se il conto è REALE (scelta esplicita dell'utente, spenta di default)
+    except sqlite3.OperationalError:
+        pass
     return con
 
 
@@ -161,7 +165,8 @@ def clean(d: dict) -> dict:
     return {"name": name[:60], "login": login, "server": server[:80], "terminal_path": norm_terminal(str(d.get("terminal_path") or "")),
             "lots": round(lots, 2), "enabled": 1 if d.get("enabled", True) else 0, "use_signals": 1 if d.get("use_signals", True) else 0, "note": str(d.get("note") or "")[:300],
             "tp_target": int(d.get("tp_target") or 1) if str(d.get("tp_target") or 1) in ("1", "2", "3") else 1,
-            "partial_pct": _pct(d.get("partial_pct")), "manual_ok": None if d.get("manual_ok") is None else (1 if d.get("manual_ok") else 0)}
+            "partial_pct": _pct(d.get("partial_pct")), "manual_ok": None if d.get("manual_ok") is None else (1 if d.get("manual_ok") else 0),
+            "real_ok": None if d.get("real_ok") is None else (1 if d.get("real_ok") else 0)}
 
 
 def _pct(v) -> int:
@@ -177,7 +182,7 @@ def _pct(v) -> int:
 
 def out(r: sqlite3.Row) -> dict:
     d = dict(r)
-    d["enabled"], d["use_signals"] = bool(d["enabled"]), bool(d["use_signals"])
+    d["enabled"], d["use_signals"], d["real_ok"] = bool(d["enabled"]), bool(d["use_signals"]), bool(d.get("real_ok"))
     d["manual_ok"] = bool(d["manual_ok"]) if d.get("manual_ok") is not None else (d.get("kind") == "demo")       # predefinito: sì per i demo, no per i reali
     d["has_password"] = bool(get_password(d))
     return d
@@ -206,10 +211,13 @@ def save_account(d: dict, aid: int | None = None) -> int:
     con = db()
     old = None
     if aid is not None:
-        old = con.execute("SELECT login, server, terminal_path FROM accounts WHERE id=?", (aid,)).fetchone()
+        old = con.execute("SELECT login, server, terminal_path, real_ok FROM accounts WHERE id=?", (aid,)).fetchone()
         if old is None:
             con.close()
             raise ValueError("conto non trovato")
+    if c["real_ok"] and not (old and old["real_ok"]) and str(d.get("confirm_real") or "").strip() != "REALE":
+        con.close()
+        raise ValueError("Per far aprire i segnali su un conto REALE scrivi REALE come conferma.")
     dup = con.execute("SELECT id FROM accounts WHERE login=? AND server=? AND id IS NOT ?", (c["login"], c["server"], aid)).fetchone()
     con.close()
     if dup:
@@ -230,14 +238,14 @@ def save_account(d: dict, aid: int | None = None) -> int:
         set_password(c["login"], c["server"], pw)
     con = db()
     if old is None:
-        cur = con.execute("INSERT INTO accounts (name,login,server,terminal_path,lots,enabled,use_signals,note,tp_target,partial_pct,manual_ok,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))",
-                          (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["note"], c["tp_target"], c["partial_pct"], c["manual_ok"]))
+        cur = con.execute("INSERT INTO accounts (name,login,server,terminal_path,lots,enabled,use_signals,note,tp_target,partial_pct,manual_ok,real_ok,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))",
+                          (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["note"], c["tp_target"], c["partial_pct"], c["manual_ok"], c["real_ok"] or 0))
         aid = cur.lastrowid
     else:
         if (old["login"], old["server"]) != (c["login"], c["server"]):
             del_password(old["login"], old["server"])                  # la vecchia password non vale più
-        con.execute("UPDATE accounts SET name=?,login=?,server=?,terminal_path=?,lots=?,enabled=?,use_signals=?,note=?,tp_target=?,partial_pct=?,manual_ok=? WHERE id=?",
-                    (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["note"], c["tp_target"], c["partial_pct"], c["manual_ok"], aid))
+        con.execute("UPDATE accounts SET name=?,login=?,server=?,terminal_path=?,lots=?,enabled=?,use_signals=?,note=?,tp_target=?,partial_pct=?,manual_ok=?,real_ok=COALESCE(?,real_ok) WHERE id=?",
+                    (c["name"], c["login"], c["server"], c["terminal_path"], c["lots"], c["enabled"], c["use_signals"], c["note"], c["tp_target"], c["partial_pct"], c["manual_ok"], c["real_ok"], aid))
     if first:                                                          # tipo e società li conosciamo già dal primo collegamento
         con.execute("UPDATE accounts SET kind=?, broker=COALESCE(NULLIF(?, ''), broker) WHERE id=?",
                     ("demo" if first.get("demo") else "real", first.get("company", ""), aid))

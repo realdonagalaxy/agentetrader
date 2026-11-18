@@ -150,7 +150,7 @@ def filling(mt5, info) -> int:
     return mt5.ORDER_FILLING_IOC if m & 2 else mt5.ORDER_FILLING_FOK if m & 1 else mt5.ORDER_FILLING_RETURN
 
 
-def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "", target: int = 1, partial: float = 0.0) -> tuple[str, list]:
+def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "", target: int = 1, partial: float = 0.0, allow_real: bool = False) -> tuple[str, list]:
     """Apre il segnale con il TP scelto per il conto (target 1, 2 o 3): se il segnale non contiene quel TP non apre.
     partial (0-1, solo con target > 1): quota dei lotti che si chiude a TP1; il resto passa a pareggio (BE) quando TP1 viene toccato e corre fino al TP scelto.
     Servono un conto in modalità hedging e lotti divisibili, altrimenti si apre un'unica posizione con il TP scelto e il messaggio lo dice.
@@ -158,7 +158,7 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
     if target not in (1, 2, 3):
         target = 1
     if target == 1:
-        return _execute(mt5, {**sig, "_target": 1}, dry, lots, tag)
+        return _execute(mt5, {**sig, "_target": 1}, dry, lots, tag, allow_real=allow_real)
     chosen = sig.get(f"tp{target}")
     if chosen is None:
         raise ValueError(f"il segnale non contiene TP{target}: su questo conto non apro (obiettivo scelto TP{target})")
@@ -169,7 +169,7 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
     if partial and 0 < partial < 1:
         s2["tp_parz"] = sig["tp1"]
     try:
-        text, trks = _execute(mt5, s2, dry, lots, tag, partial if "tp_parz" in s2 else 0.0)
+        text, trks = _execute(mt5, s2, dry, lots, tag, partial if "tp_parz" in s2 else 0.0, allow_real=allow_real)
     except ValueError as e:
         raise ValueError(str(e).replace("TP1", f"TP{target}")) from None
     for t in trks:
@@ -177,7 +177,7 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
     return text, trks
 
 
-def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "", partial: float = 0.0) -> tuple[str, list]:
+def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "", partial: float = 0.0, allow_real: bool = False) -> tuple[str, list]:
     """Valida e (se non dry) invia l'ordine. Restituisce (testo di risposta, elenco delle posizioni da seguire: una, oppure due se il segnale ha il TP2); solleva ValueError se rifiutato."""
     ti = mt5.terminal_info()
     if ti is not None and getattr(ti, "trade_allowed", True) is False:
@@ -185,8 +185,8 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
     acc = mt5.account_info()
     if acc is None:
         raise ValueError("MT5 non risponde: controlla che il terminale sia aperto e collegato")
-    if acc.trade_mode != mt5.ACCOUNT_TRADE_MODE_DEMO:
-        raise ValueError("il conto collegato NON è demo: non apro nulla")
+    if acc.trade_mode != mt5.ACCOUNT_TRADE_MODE_DEMO and not allow_real:
+        raise ValueError("il conto collegato NON è demo e non hai spuntato «Consenti segnali su conto REALE» per questo conto: non apro nulla")
     sym = broker_symbol(sig["symbol"])
     info = mt5.symbol_info(sym)
     if info is None or not mt5.symbol_select(sym, True):
@@ -666,8 +666,8 @@ def suggest() -> None:
 def active_accounts() -> list[dict]:
     """Conti dell'archivio (src.mt5_accounts) abilitati e usati per i segnali; riletti a ogni giro, quindi le modifiche dall'app si applicano subito."""
     from src import mt5_accounts as ma
-    # I conti già riconosciuti come REALI non vengono nemmeno contattati: collegarsi a loro cambierebbe il login del terminale e potrebbe lasciare fuori il demo.
-    return [a for a in ma.list_accounts() if a["enabled"] and a["use_signals"] and a.get("kind") != "real"]
+    # I conti REALI ricevono i segnali solo se hai spuntato «Consenti segnali su conto REALE» (decisione 18/11/2026); altrimenti non vengono nemmeno contattati.
+    return [a for a in ma.list_accounts() if a["enabled"] and a["use_signals"] and (a.get("kind") != "real" or a.get("real_ok"))]
 
 
 def check() -> None:
@@ -684,8 +684,8 @@ def check() -> None:
             why.append("DISATTIVATO (interruttore Attivo)")
         if not a["use_signals"]:
             why.append("«Usa per i segnali» è spento")
-        if a.get("kind") == "real":
-            why.append("è un conto REALE: non viene usato")
+        if a.get("kind") == "real" and not a.get("real_ok"):
+            why.append("è un conto REALE e «Consenti segnali su conto REALE» non è spuntato")
         print(f"\n[{a['name']}] login {a['login']} · {a['server']} · lotti {a['lots']} · password salvata: {'sì' if a['has_password'] else 'NO'} · terminale: {a['terminal_path'] or '(predefinito)'}")
         print("  Segnali:", "NON riceve (" + "; ".join(why) + ")" if why else "riceve i segnali")
         try:
@@ -862,7 +862,7 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
                     try:
                         if acc:
                             with ma.session(acc) as mt:
-                                res, trks = execute(mt, sig, dry, acc["lots"], acc["login"] and str(acc["login"]), acc.get("tp_target") or 1, (acc.get("partial_pct") or 0) / 100)
+                                res, trks = execute(mt, sig, dry, acc["lots"], acc["login"] and str(acc["login"]), acc.get("tp_target") or 1, (acc.get("partial_pct") or 0) / 100, allow_real=bool(acc.get("real_ok")))
                         else:
                             if legacy is None:
                                 from src.mt5_feed import connect
