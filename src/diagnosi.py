@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 J = Path(os.environ.get("JOURNAL_DIR", ROOT / "journal"))
-CHIAVI = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_API_ID", "TELEGRAM_API_HASH", "TELEGRAM_CANALE", "SENZA_BOT", "MT5_SYMBOL", "AVVIO_ASCOLTO", "SCARTO_ACTIVTRADES")
+CHIAVI = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_API_ID", "TELEGRAM_API_HASH", "TELEGRAM_CANALE", "SEGNALI", "SENZA_BOT", "MT5_SYMBOL", "AVVIO_ASCOLTO", "SCARTO_ACTIVTRADES")
 
 
 def mask(t: str) -> str:
@@ -60,7 +60,7 @@ def main() -> None:
         print("config.env NON ESISTE")
     for k in CHIAVI:
         v = env.get(k, "")
-        print(f"  {k}: " + ("assente/vuoto" if not v else (v if k in ("TELEGRAM_CANALE", "SENZA_BOT", "MT5_SYMBOL") else "presente")))
+        print(f"  {k}: " + ("assente/vuoto" if not v else (v if k in ("TELEGRAM_CANALE", "SEGNALI", "SENZA_BOT", "MT5_SYMBOL") else "presente")))
     print("  sessione Telegram:", "presente" if (J / "telegram.session").exists() else "ASSENTE (rifai: python -m src.telegram_reader --elenca)")
     sez("CANALE")
     try:

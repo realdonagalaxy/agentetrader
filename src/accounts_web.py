@@ -286,8 +286,8 @@ def listener_running() -> bool:
 
 
 def signals_enabled() -> bool:
-    """Segnali di Cedric (ascolto del canale, apertura sui conti demo, scheda Automatico): SPENTI di default, si riaccendono con SEGNALI=1 in config.env."""
-    return os.environ.get("SEGNALI", "").strip().lower() in ("1", "si", "sì", "true", "on")
+    """Segnali di Cedric (ascolto del canale, apertura sui conti demo, scheda Automatico): ACCESI di default (dal 18/11/2026); SEGNALI=0 in config.env li spegne."""
+    return os.environ.get("SEGNALI", "").strip().lower() not in ("0", "no", "off", "false")
 
 
 def code_version() -> str:
@@ -318,7 +318,7 @@ def listener_start() -> int:
     import subprocess
     import sys
     if not signals_enabled():
-        raise ValueError("I segnali sono disattivati (SEGNALI=1 in config.env per riattivarli).")
+        raise ValueError("I segnali sono disattivati (SEGNALI=0 in config.env: toglilo per riattivarli).")
     if listener_running():
         raise ValueError("L'ascolto dei segnali è già attivo.")
     log = open(ma.DATA_DIR / "mt5_orders.log", "a", encoding="utf-8")
@@ -618,7 +618,7 @@ def main():
                 kill_listeners()
                 print("Segnali disattivati: ho fermato l'ascolto che era in esecuzione.", flush=True)
             else:
-                print("Segnali di Cedric disattivati (SEGNALI=1 in config.env per riattivarli).", flush=True)
+                print("Segnali di Cedric disattivati (SEGNALI=0 in config.env: toglilo per riattivarli).", flush=True)
         except Exception as e:
             print("Non sono riuscito a fermare l'ascolto:", str(e)[:150], flush=True)
     elif os.environ.get("AVVIO_ASCOLTO", "1").strip().lower() not in ("0", "no", "off", "false"):    # insieme al server parte anche l'ascolto dei segnali (AVVIO_ASCOLTO=0 in config.env lo disattiva)
