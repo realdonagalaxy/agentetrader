@@ -378,6 +378,7 @@ function warn() {
   w.hidden = !msg.length; w.innerHTML = msg.map(esc).join("<br>");
 }
 let pendRows = [];
+const atBE = p => p.sl && (p.side === "buy" ? p.sl >= p.open - Math.abs(p.open) * 1e-7 : p.sl <= p.open + Math.abs(p.open) * 1e-7);   // SL già a pareggio (o oltre, in profitto): il tasto BE non serve più
 function renderPending() {
   const rows = [], bad = [];
   accounts.filter(a => a.enabled).forEach(a => {
@@ -400,7 +401,7 @@ function renderPending() {
     return `<tr${pos ? ` class="opn"` : ""}><td data-l="Conto"><b>${esc(o.login)}</b></td><td data-l="Stato">${stato}</td><td data-l="Asset"><b>${esc(o.symbol)}</b></td>
     <td class="r" data-l="Lotti">${o.volume ?? "—"}</td><td class="r" data-l="Entry"><b>${px(price)}</b></td><td class="r" data-l="SL">${px(o.sl)}</td><td class="r" data-l="TP">${px(o.tp)}</td>
     <td class="r" data-l="Prezzo attuale">${px(cur)}</td><td class="r" data-l="Distanza">${pos ? "—" : pc(o.dist_pct)}</td><td class="r" data-l="R:R">${o.rr != null ? "1:" + o.rr : "—"}</td><td class="r" data-l="Rischio">${pc(o.risk_pct)}</td>
-    <td class="r" data-l="Risultato">${res}</td><td data-l="Ora">${tm(o.time)}</td><td data-l="">${!pos && /^(BUY|SELL) LIMIT$/.test(o.tipo) ? `<button class="btn sm sec" data-split="${i}" title="Divide l'ordine in due: una parte con TP1, l'altra con TP2">Dividi</button>` : pos ? `<button class="btn sm sec" data-be="${i}" title="Porta lo SL al prezzo di apertura (pareggio)">BE</button>` : ""}</td></tr>`;
+    <td class="r" data-l="Risultato">${res}</td><td data-l="Ora">${tm(o.time)}</td><td data-l="">${!pos && /^(BUY|SELL) LIMIT$/.test(o.tipo) ? `<button class="btn sm sec" data-split="${i}" title="Divide l'ordine in due: una parte con TP1, l'altra con TP2">Dividi</button>` : pos && !atBE(o) ? `<button class="btn sm sec" data-be="${i}" title="Porta lo SL al prezzo di apertura (pareggio)">BE</button>` : ""}</td></tr>`;
   }).join("") : `<tr><td colspan="14" class="sub" style="padding:14px">Nessuna posizione aperta né ordine in attesa${accounts.length ? "" : ": aggiungi un conto"}.</td></tr>`;
 }
 
