@@ -26,7 +26,7 @@ h1{font-size:18px;font-weight:600;margin:0}
 .nosig .sigonly{display:none!important}
 tr.opn,tr.opn:hover{background:rgba(56,189,248,.16)}                  /* posizioni aperte: celestino */
 /* tabella ordini/posizioni: blu notte con scritte verde limone, stile futuristico (uguale in chiaro e scuro) */
-.panel.pendpanel{--lm:#00ff52;--lm2:#00b83a;background:var(--hdr);border:1px solid #2f4768;box-shadow:0 0 0 1px #0a1424,0 0 22px rgba(0,255,82,.12);color:var(--lm);font-family:var(--mono)}
+.panel.pendpanel{--gain:#38f5d6;--loss:#ff7b72;--lm:#00ff52;--lm2:#00b83a;background:var(--hdr);border:1px solid #2f4768;box-shadow:0 0 0 1px #0a1424,0 0 22px rgba(0,255,82,.12);color:var(--lm);font-family:var(--mono)}
 .panel.pendpanel h2{background:var(--hdr);color:var(--lm);border-bottom:1px solid #2f4768;letter-spacing:.2em;text-shadow:0 0 8px rgba(0,255,82,.45)}
 .panel.pendpanel .sub{color:var(--lm2)}
 .panel.pendpanel th{background:rgba(255,255,255,.05);color:var(--lm2);border-bottom:1px solid #2f4768;letter-spacing:.06em;padding:9px 7px}
@@ -50,6 +50,12 @@ tr.opn,tr.opn:hover{background:rgba(56,189,248,.16)}                  /* posizio
 .panel.pendpanel select{background:rgba(255,255,255,.06);border-color:#2f4768}
 .panel.pendpanel h2 b,.panel.pendpanel #ctot{color:var(--lm)!important}
 .panel.pendpanel .cal .gain{color:#38f5d6}
+.panel.pendpanel .kpi{background:rgba(255,255,255,.05);border:1px solid #2f4768;border-top:3px solid var(--lm)}
+.panel.pendpanel .kpi .l,.panel.pendpanel .kpi .s{color:var(--lm2)}.panel.pendpanel .kpi .v{color:var(--lm);text-shadow:0 0 8px rgba(0,255,82,.35)}
+.panel.pendpanel .kpi .v.gain{color:#38f5d6}.panel.pendpanel .kpi .v.loss{color:#ff7b72}.panel.pendpanel .kpi .v.flat{color:var(--lm2)}
+.panel.pendpanel .btn:not(.sec):not(.del){background:var(--lm);color:var(--hdr)}
+.panel.pendpanel input[type=date]{background:rgba(255,255,255,.06)!important;color:var(--lm)!important;border-color:#2f4768!important;color-scheme:dark}
+.panel.pendpanel #sorf,.panel.pendpanel #sinfo{color:var(--lm)!important}
 .brand{display:flex;align-items:center;gap:14px;min-width:0}
 .logo{background:#fff;border-radius:8px;padding:5px 12px;display:flex;flex:none}
 .logo img{height:42px;width:auto;display:block}
@@ -217,7 +223,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
   </div>
 </div>
 <div id="tab-seg" hidden style="display:grid;gap:16px">
-  <div class="panel"><h2>Segnali del canale <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
+  <div class="panel pendpanel"><h2>Segnali del canale <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
       <input type="date" id="sdate" aria-label="Giorno" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit">
       <button class="btn sm sec" id="sload">Aggiorna</button><button class="btn sm" id="ssync" title="Chiede al programma dei segnali di leggere dal canale tutti i messaggi di quel giorno e di registrarli (senza aprire nulla)">Scarica dal canale</button></span></h2>
     <div class="kpis" id="skpis" style="padding:0 16px 8px"></div>
