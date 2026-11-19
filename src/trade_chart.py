@@ -1,4 +1,4 @@
-"""Grafico di un'operazione chiusa: candele del periodo del trade con le linee di Entry, SL e TP (prezzi di ActivTrades) e il punto di chiusura. Restituisce un PNG (bytes).
+"""Grafico di un'operazione chiusa: candele del periodo del trade con le linee di Entry, SL e TP (prezzi del tuo broker) e il punto di chiusura. Restituisce un PNG (bytes).
 Usato da src.mt5_orders per inviare su Telegram lo screenshot quando una posizione arriva a TP o SL."""
 import io
 from datetime import datetime, timezone

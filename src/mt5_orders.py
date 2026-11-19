@@ -40,7 +40,7 @@ LOTS = 0.05
 MAX_SLIP_PRICE = 3.0
 MAX_POSITIONS = 6                 # posizioni aperte da questo programma per conto (ogni segnale con TP2 ne apre due)
 ENTRY_ORDER = os.environ.get("ENTRY_ORDER", "market").lower()            # "market" (default: a mercato, Entry di Vantage convertita con lo scarto) oppure "stop" (BUY/SELL STOP all'Entry del segnale)
-MIN_REMAINING_PIPS = float(os.environ.get("MIN_REMAINING_PIPS") or 45)  # a mercato si entra solo se, calcolata l'Entry su ActivTrades con lo scarto, al TP1 mancano PIÙ di questi pips
+MIN_REMAINING_PIPS = float(os.environ.get("MIN_REMAINING_PIPS") or 45)  # a mercato si entra solo se, calcolata l'Entry sul tuo broker con lo scarto, al TP1 mancano PIÙ di questi pips
 MARKET_MIN_PIPS = float(os.environ.get("MARKET_MIN_PIPS") or 40)       # Entry già superata: si entra a mercato solo se al TP1 mancano PIÙ di questi pips
 MAX_SPREAD = float(os.environ.get("MAX_SPREAD") or 1.00)            # $: oltre questo spread non si apre (rollover, notizie). Cambiabile in config.env
 MAX_SPREAD_PCT = float(os.environ.get("MAX_SPREAD_PCT") or 0.20)    # frazione della distanza del TP1: lo spread non deve mangiarne più di così
@@ -214,12 +214,12 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
         scarto = tick.bid - sig["entry"]                  # differenza di quotazione tra il tuo broker e il canale (entrambi sul bid)
         off, src = current_offset()
         pip = _pip(sym, info)
-        if off is not None:                               # Entry, SL e TP di Vantage convertiti in prezzi di ActivTrades; si entra solo se al TP1 mancano abbastanza pips
+        if off is not None:                               # Entry, SL e TP di Vantage convertiti nei prezzi del tuo broker; si entra solo se al TP1 mancano abbastanza pips
             e_at, tp_at, sl_at = sig["entry"] + off, sig["tp1"] + off, sig["sl"] + off
             remaining = ((tp_at - tick.bid) if buy else (tick.bid - tp_at)) / pip
             INFO.update(offset=round(off, 3), src=src, remaining=round(remaining, 1))
             if remaining <= MIN_REMAINING_PIPS:
-                raise ValueError(f"al TP1 mancano solo {remaining:.0f} pips (minimo {MIN_REMAINING_PIPS:.0f}): non apro. Entry della sala {sig['entry']} = {e_at:.2f} su ActivTrades "
+                raise ValueError(f"al TP1 mancano solo {remaining:.0f} pips (minimo {MIN_REMAINING_PIPS:.0f}): non apro. Entry della sala {sig['entry']} = {e_at:.2f} sul tuo broker "
                                  f"(scarto {off:+.2f}, {src}), TP1 {tp_at:.2f}, prezzo ora {tick.bid:.2f}.")
             if (buy and sl_at >= tick.bid) or (not buy and sl_at <= tick.bid):
                 raise ValueError(f"il prezzo ({tick.bid:.2f}) ha già superato lo SL convertito ({sl_at:.2f}): non apro.")
@@ -230,7 +230,7 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
                     raise ValueError(f"il prezzo ({pxz:.2f}) è fuori dalla zona d'ingresso {lo_at:.2f}-{hi_at:.2f} (zona della sala {sig['zone'][0]:g}-{sig['zone'][1]:g}, scarto {off:+.2f}, {src}): non apro")
                 zone_note = f" · dentro la zona {lo_at:.2f}-{hi_at:.2f}"
             sl, tp = (sl_at, tp_at) if buy else (sl_at + (tick.ask - tick.bid), tp_at + (tick.ask - tick.bid))
-            note_off = f" · Entry su ActivTrades {e_at:.2f} (scarto {off:+.2f}, {src}) · al TP{sig.get('_target', 1)} mancano {remaining:.0f} pips" + zone_note
+            note_off = f" · Entry sul tuo broker {e_at:.2f} (scarto {off:+.2f}, {src}) · al TP{sig.get('_target', 1)} mancano {remaining:.0f} pips" + zone_note
         else:                                              # nessuno scarto disponibile: distanze dall'Entry sul prezzo di adesso, filtro dei pips non applicabile
             sl, tp = (ref - sl_d, ref + tp_d) if buy else (ref + sl_d, ref - tp_d)
             note_off = f" · filtro dei {MIN_REMAINING_PIPS:.0f} pips NON applicato: scarto non disponibile ({src})" + (f" · zona {sig['zone'][0]:g}-{sig['zone'][1]:g} NON verificata (scarto da misurare)" if sig.get("zone") else "")
@@ -413,7 +413,7 @@ def say_photo(bot, png: bytes, caption: str, reply_to: int | None = None) -> boo
 
 
 def trade_screenshot(mt5, t: dict, deals, d, label: str) -> bytes | None:
-    """Grafico dell'operazione chiusa (candele di ActivTrades con Entry, SL, TP e chiusura). None se mancano i dati. Orari: server del broker."""
+    """Grafico dell'operazione chiusa (candele del tuo broker con Entry, SL, TP e chiusura). None se mancano i dati. Orari: server del broker."""
     from src import mt5_accounts as ma
     ins = [x for x in deals if x.entry == mt5.DEAL_ENTRY_IN]
     t_in = ins[0].time if ins else d.time - 300
@@ -578,12 +578,12 @@ def log_scarto(tag: str, sig: dict, tick, scarto: float) -> None:
 
 
 def current_offset() -> tuple[float | None, str]:
-    """Scarto tra il prezzo di ActivTrades e quello di Vantage (ActivTrades - Vantage), per convertire i livelli del segnale. Fonte: SCARTO_ACTIVTRADES in config.env, altrimenti la mediana
+    """Scarto tra il prezzo del tuo broker e quello della sala (broker - sala), per convertire i livelli del segnale. Fonte: SCARTO_BROKER in config.env, altrimenti la mediana
     degli scarti dei segnali già eseguiti (almeno 10). Nessuna fonte: (None, motivo)."""
-    env = os.environ.get("SCARTO_ACTIVTRADES") if scarti_path() == SCARTI else os.environ.get("SCARTO_SALA")     # lo scarto fisso vale per la sala in uso: SCARTO_ACTIVTRADES per Cedric, SCARTO_SALA per le altre
+    env = (os.environ.get("SCARTO_BROKER") or os.environ.get("SCARTO_ACTIVTRADES")) if scarti_path() == SCARTI else os.environ.get("SCARTO_SALA")     # (il vecchio nome SCARTO_ACTIVTRADES resta valido se già in config.env) lo scarto fisso vale per la sala in uso: SCARTO_BROKER per Cedric, SCARTO_SALA per le altre
     if env not in (None, ""):
         try:
-            return float(env.replace(",", ".")), "SCARTO_ACTIVTRADES" if scarti_path() == SCARTI else "SCARTO_SALA"
+            return float(env.replace(",", ".")), "SCARTO_BROKER" if scarti_path() == SCARTI else "SCARTO_SALA"
         except ValueError:
             pass
     import statistics as st

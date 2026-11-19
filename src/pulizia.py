@@ -2,7 +2,7 @@
 
 Cancella (se presenti): registri dei segnali, degli esiti e delle chiusure, journal/ordini_mt5.csv, l'elenco delle posizioni seguite (ordini_aperti.json), i grafici salvati e i file del lettore del canale.
 NON tocca mai: i conti e le loro password, le impostazioni, journal/trading_journal.xlsx, i dati di prezzo in data/ e le posizioni su MT5.
-Opzioni: --anche-scarti azzera anche journal/scarti.csv (le misure dello scarto di prezzo: servono alla conversione con ActivTrades, di norma conviene tenerle);
+Opzioni: --anche-scarti azzera anche journal/scarti.csv (le misure dello scarto di prezzo: servono alla conversione dei prezzi con il tuo broker, di norma conviene tenerle);
          --anche-conti elimina anche tutti i conti dell'app (database conti_mt5.db) e le loro password (poi si riaggiungono; su MT5 non cambia nulla);
          --anche-telegram cancella i messaggi recenti dal tuo canale/chat Telegram (quelli del bot e, nelle chat private, i tuoi): Telegram permette ai bot di cancellare solo messaggi di meno di 48 ore, i più vecchi vanno tolti a mano.
 Uso: python -m src.pulizia [--anche-scarti] [--anche-conti] [--anche-telegram] [--conferma]

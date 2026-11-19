@@ -239,7 +239,7 @@ def clean(d: dict) -> dict:
         raise ValueError("il numero di conto (login) non è valido")
     name = name or str(login)                                        # il nome non si chiede più: se manca vale il numero di conto
     if not server:
-        raise ValueError("il server del broker è obbligatorio (es. ActivTrades-Server)")
+        raise ValueError("il server del broker è obbligatorio (lo trovi in MT5: File → Apri un conto)")
     try:
         lots = float(str(d.get("lots") or 0.05).replace(",", "."))
     except ValueError:
