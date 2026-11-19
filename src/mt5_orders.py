@@ -142,7 +142,39 @@ def check_message(sig: dict) -> None:
 
 
 def broker_symbol(sym: str) -> str:
-    return os.environ.get("MT5_SYMBOL", sym) if sym == "XAUUSD" else sym
+    """Primo nome candidato (compatibilità): MT5_SYMBOL può contenere più nomi separati da virgola; per la scelta vera, sul terminale del conto, vedi resolve_symbol."""
+    return symbol_candidates(sym)[0]
+
+
+GOLD_ALIASES = ["XAUUSD", "GOLD", "XAUUSD.m", "XAUUSDm", "XAUUSD.", "GOLD.", "XAUUSD.a", "XAUUSD.pro", "XAUUSD#", "GOLD#", "GOLDm"]
+
+
+def symbol_candidates(sym: str) -> list[str]:
+    """Nomi con cui un simbolo può chiamarsi sul broker. MT5_SYMBOL in config.env accetta più nomi separati da virgola (es. GOLD, XAUUSD); per l'oro si aggiungono i nomi comuni."""
+    if sym != "XAUUSD":
+        return [sym]
+    out = [x.strip() for x in (os.environ.get("MT5_SYMBOL") or "").replace(";", ",").split(",") if x.strip()]
+    return list(dict.fromkeys(out + GOLD_ALIASES))
+
+
+def resolve_symbol(mt5, sym: str):
+    """Trova sul terminale del conto il nome giusto del simbolo (ogni broker ha il suo): prova i candidati in ordine, poi cerca tra i simboli del broker quelli che contengono XAU o GOLD.
+    Restituisce (nome, symbol_info) oppure (None, None)."""
+    for c in symbol_candidates(sym):
+        info = mt5.symbol_info(c)
+        if info is not None and mt5.symbol_select(c, True):
+            return c, info
+    if sym == "XAUUSD":
+        try:
+            found = [x for pat in ("*XAU*", "*GOLD*") for x in (mt5.symbols_get(pat) or [])]
+        except Exception:
+            found = []
+        found = sorted({x.name for x in found if "USD" in x.name.upper() or x.name.upper().startswith("GOLD")}, key=lambda n: (len(n), n))
+        for c in found:
+            info = mt5.symbol_info(c)
+            if info is not None and mt5.symbol_select(c, True):
+                return c, info
+    return None, None
 
 
 def filling(mt5, info) -> int:
@@ -187,10 +219,9 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
         raise ValueError("MT5 non risponde: controlla che il terminale sia aperto e collegato")
     if acc.trade_mode != mt5.ACCOUNT_TRADE_MODE_DEMO and not allow_real:
         raise ValueError("il conto collegato NON è demo e non hai spuntato «Consenti segnali su conto REALE» per questo conto: non apro nulla")
-    sym = broker_symbol(sig["symbol"])
-    info = mt5.symbol_info(sym)
-    if info is None or not mt5.symbol_select(sym, True):
-        raise ValueError(f"simbolo {sym!r} non trovato su MT5")
+    sym, info = resolve_symbol(mt5, sig["symbol"])
+    if sym is None:
+        raise ValueError(f"simbolo {sig['symbol']!r} non trovato su questo conto (provati: {', '.join(symbol_candidates(sig['symbol']))}): aprilo in MT5 → Market Watch → tasto destro → Simboli, oppure scrivi il suo nome in MT5_SYMBOL")
     mine = [p for p in (mt5.positions_get() or []) if p.magic == MAGIC] + [o for o in (mt5.orders_get() or []) if o.magic == MAGIC]
     if len(mine) >= MAX_POSITIONS:
         raise ValueError(f"già {len(mine)} posizioni o ordini aperti da questo programma (massimo {MAX_POSITIONS})")
@@ -690,8 +721,8 @@ def check() -> None:
         print("  Segnali:", "NON riceve (" + "; ".join(why) + ")" if why else "riceve i segnali")
         try:
             with ma.session(a) as m:
-                sym = broker_symbol("XAUUSD")
-                info = m.symbol_info(sym)
+                sym, info = resolve_symbol(m, "XAUUSD")
+                sym = sym or "XAUUSD"
                 print(f"  MT5: collegato · {'DEMO' if ma.is_demo(m) else 'REALE'} · simbolo {sym}: {'trovato' if info else 'NON TROVATO (controlla MT5_SYMBOL in config.env)'} · posizioni aperte {len(m.positions_get() or [])}")
         except Exception as e:
             print("  MT5: ERRORE:", str(e)[:250])
