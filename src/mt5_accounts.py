@@ -145,6 +145,90 @@ def default_terminal() -> str:
     return p
 
 
+def source_terminal() -> str:
+    """Installazione di MT5 da cui si copiano i terminali portable dei nuovi conti (MT5_SOURCE in config.env per cambiarla)."""
+    return os.environ.get("MT5_SOURCE") or r"C:\Program Files\MetaTrader 5"
+
+
+def copy_server_list(src: str, dst: str) -> str:
+    """Copia nella cartella portable la lista dei server che il terminale di origine conosce (servers.dat e file .srv). MT5 la tiene in %APPDATA%\\MetaQuotes\\Terminal\\<codice>\\config,
+    non nella cartella di installazione: senza di essa la copia non conosce i server dei broker. La cartella dati giusta si riconosce da origin.txt, che contiene il percorso dell'installazione.
+    Restituisce una nota su cosa è stato copiato (vuota se non trovato)."""
+    import glob
+    import shutil
+    appdata = os.environ.get("APPDATA")
+    if not appdata:
+        return ""
+    want = os.path.normcase(os.path.normpath(src)).lower()
+    for origin in glob.glob(os.path.join(appdata, "MetaQuotes", "Terminal", "*", "origin.txt")):
+        try:
+            raw = open(origin, "rb").read()
+            txt = raw.decode("utf-16") if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else raw.decode("utf-8", "ignore")
+        except OSError:
+            continue
+        if os.path.normcase(os.path.normpath(txt.strip())).lower() != want:
+            continue
+        cfg = os.path.join(os.path.dirname(origin), "config")
+        os.makedirs(os.path.join(dst, "config"), exist_ok=True)
+        n = 0
+        for pat in ("servers.dat", "*.srv"):
+            for f in glob.glob(os.path.join(cfg, pat)):
+                shutil.copy2(f, os.path.join(dst, "config", os.path.basename(f)))
+                n += 1
+        return f"{n} file dei server copiati"
+    return ""
+
+
+def provision_terminal(name: str, login: int) -> str:
+    r"""Copia l'installazione di origine in C:\MT5\<numero conto> (ripiego: cartella MT5 dell'utente), la marca come portable e crea il collegamento sul Desktop.
+    Se la cartella esiste già la riusa. Restituisce il percorso di terminal64.exe. L'origine non viene toccata."""
+    import shutil
+    exe, src = "terminal64.exe", source_terminal()
+    if not os.path.isfile(os.path.join(src, exe)):
+        raise ValueError(f"Non trovo l'installazione di MT5 da copiare: {os.path.join(src, exe)}. Togli la spunta «Crea un terminale dedicato» e indica a mano il percorso, "
+                         "oppure imposta MT5_SOURCE in config.env con la cartella del terminale da copiare.")
+    base = None
+    for cand in (os.environ.get("MT5_BASE") or r"C:\MT5", os.path.join(os.path.expanduser("~"), "MT5")):
+        try:
+            os.makedirs(cand, exist_ok=True)
+            base = cand
+            break
+        except OSError:
+            continue
+    if base is None:
+        raise ValueError("Non riesco a creare la cartella C:\\MT5 (permessi?): avvia Gestione Conti come amministratore oppure indica a mano il percorso del terminale.")
+    safe = str(login)                                             # la cartella porta il NUMERO del conto
+    dst = os.path.join(base, safe)
+    n = 1
+    while os.path.exists(dst) and not os.path.isfile(os.path.join(dst, "portable.flag")):   # cartella occupata da altro (non nostra): la evito
+        n += 1
+        dst = os.path.join(base, f"{safe}_{n}")
+    if not os.path.isfile(os.path.join(dst, exe)):
+        shutil.copytree(src, dst, dirs_exist_ok=True)
+    try:
+        copy_server_list(src, dst)
+    except Exception:
+        pass                                                      # la lista dei server è un aiuto: se manca, si aggiunge il server dal terminale
+    with open(os.path.join(dst, "portable.flag"), "w") as f:
+        f.write("portable")
+    if os.name == "nt":
+        try:
+            import subprocess
+            ps = ("$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop')+'\\MT5 " + safe + ".lnk');"
+                  f"$s.TargetPath='{os.path.join(dst, exe)}';$s.Arguments='/portable';$s.WorkingDirectory='{dst}';$s.Save()")
+            subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, timeout=30)
+        except Exception:
+            pass                                                  # il collegamento è solo una comodità
+    return os.path.join(dst, exe)
+
+
+def is_portable(terminal_path: str) -> bool:
+    """Il terminale è portable se nella sua cartella c'è il marcatore portable.flag (lo crea Gestione Conti quando prepara il terminale di un nuovo conto)."""
+    if not terminal_path:
+        return False
+    return os.path.isfile(os.path.join(_pm(terminal_path).dirname(terminal_path), "portable.flag"))
+
+
 def clean(d: dict) -> dict:
     name, server = str(d.get("name") or "").strip(), str(d.get("server") or "").strip()
     try:
@@ -185,6 +269,7 @@ def out(r: sqlite3.Row) -> dict:
     d["enabled"], d["use_signals"], d["real_ok"] = bool(d["enabled"]), bool(d["use_signals"]), bool(d.get("real_ok"))
     d["manual_ok"] = bool(d["manual_ok"]) if d.get("manual_ok") is not None else (d.get("kind") == "demo")       # predefinito: sì per i demo, no per i reali
     d["has_password"] = bool(get_password(d))
+    d["portable"] = is_portable(d.get("terminal_path") or "")
     return d
 
 
@@ -229,7 +314,7 @@ def save_account(d: dict, aid: int | None = None) -> int:
             raise ValueError("Scrivi la password: il conto viene registrato solo dopo che MT5 si è collegato con questi dati." if old is None
                              else "Hai cambiato login o server: riscrivi anche la password, per verificare il collegamento.")
         if old is None and not c["terminal_path"]:
-            c["terminal_path"] = default_terminal()                    # tutti i conti usano lo stesso MT5 originale
+            c["terminal_path"] = provision_terminal(c["name"], c["login"]) if d.get("dedicated") else default_terminal()   # «MT5 dedicato»: copia portable solo per questo conto
         first = _test_with_password(c, pw)
         if not first.get("connected"):
             raise ValueError(first.get("error") or "MT5 non si è collegato al conto: non è stato registrato nulla.")
@@ -357,6 +442,8 @@ def session(acc: dict):
         kw = {}
         if acc.get("terminal_path"):
             kw["path"] = acc["terminal_path"]
+            if is_portable(acc["terminal_path"]):
+                kw["portable"] = True                              # terminale dedicato al conto: stessa modalità con cui lo apri a mano (collegamento sul Desktop)
         pw = get_password(acc)
         if pw or os.environ.get("MT5_SIMULATOR") == "1":
             kw.update(login=int(acc["login"]), password=pw or "", server=acc["server"])
@@ -493,6 +580,8 @@ def _test_with_password(c: dict, pw: str) -> dict:
             kw = {"login": c["login"], "password": pw, "server": c["server"], "timeout": int(os.environ.get("MT5_TIMEOUT_MS") or 60000)}
             if c["terminal_path"]:
                 kw["path"] = c["terminal_path"]
+                if is_portable(c["terminal_path"]):
+                    kw["portable"] = True
             ok = mt5.initialize(**kw)
             if not ok and mt5.last_error()[0] == -10005:
                 mt5.shutdown()
@@ -815,3 +904,17 @@ def trade_chart_png(acc: dict, position: int, deal: int) -> bytes:
         raise ValueError("MT5 non ha le candele di quel periodo: apri un grafico del simbolo in MT5 e scorri indietro, poi riprova")
     f.write_bytes(png)
     return png
+
+
+def give_dedicated_terminal(aid: int) -> dict:
+    """Crea (copiando l'MT5 installato) un terminale portable dedicato a un conto già registrato e lo assegna al conto. Il vecchio terminale non viene toccato.
+    Il nuovo terminale parte senza il login: alla prima lettura Gestione Conti accede con la password salvata."""
+    acc = get_account(aid)
+    if is_portable(acc.get("terminal_path") or ""):
+        raise ValueError("Questo conto ha già un MT5 dedicato.")
+    path = provision_terminal(acc["name"], acc["login"])
+    con = db()
+    con.execute("UPDATE accounts SET terminal_path=? WHERE id=?", (path, aid))
+    con.commit()
+    con.close()
+    return {"terminal_path": path}

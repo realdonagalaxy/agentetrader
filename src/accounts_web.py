@@ -540,6 +540,9 @@ class Handler(BaseHTTPRequestHandler):
             if m and method == "DELETE":
                 ma.delete_account(int(m[1]))
                 return self._json({"deleted": int(m[1])})
+            m = re.fullmatch(r"/api/accounts/(\d+)/terminal", path)             # crea un MT5 portable dedicato a un conto già registrato
+            if m and method == "POST":
+                return self._json(ma.give_dedicated_terminal(int(m[1])))
             m = re.fullmatch(r"/api/accounts/(\d+)/enabled", path)
             if m and method == "POST":
                 ma.set_enabled(int(m[1]), bool(self._data().get("enabled")))
