@@ -14,8 +14,8 @@ SL e TP1 impostati sull'ordine; TP2/TP3 ignorati. Il simbolo XAUUSD viene tradot
 Filtro sullo spread: non apre se lo spread supera MAX_SPREAD (1,00 $) o MAX_SPREAD_PCT (20%) della distanza del TP1.
 Sicurezze: accetta messaggi solo dalla chat TELEGRAM_CHAT_ID; ignora i messaggi arrivati prima dell'avvio e quelli più vecchi di MAX_AGE_S;
 rifiuta se il conto NON è demo (non c'è modo di forzare: il live richiede una modifica esplicita del codice, da concordare), se manca SL/TP1, se SL/TP sono dal lato sbagliato,
-se ci sono già MAX_POSITIONS posizioni aperte con il magic number di questo programma, o se il prezzo è lontano dall'Entry. Quando una posizione aperta da qui si chiude a TP, risponde al messaggio del segnale, pulito: '✅ TP1 +N pips' o '❌ SL HIT -N pips' (oro: 1 pip = 0,10). Ogni esito viene risposto su Telegram e registrato in journal/ordini_mt5.csv.
-Parametri MIEI da confermare: MAX_SLIP_PRICE=3.0, MAX_POSITIONS=3, MAX_AGE_S=120, deviazione 20 punti.
+se c'è già un trade in corso (posizione o ordine in attesa con il magic number di questo programma: se ne apre uno alla volta per conto), o se il prezzo è lontano dall'Entry. Quando una posizione aperta da qui si chiude a TP, risponde al messaggio del segnale, pulito: '✅ TP1 +N pips' o '❌ SL HIT -N pips' (oro: 1 pip = 0,10). Ogni esito viene risposto su Telegram e registrato in journal/ordini_mt5.csv.
+Parametri MIEI da confermare: MAX_SLIP_PRICE=3.0, MAX_AGE_S=120, deviazione 20 punti.
 Uso: python -m src.mt5_orders            (ascolta Telegram e apre gli ordini)
      python -m src.mt5_orders --dry      (legge e valida ma non invia ordini)
 """
@@ -38,7 +38,7 @@ for _stream in (sys.stdout, sys.stderr):                           # su Windows 
 
 LOTS = 0.05
 MAX_SLIP_PRICE = 3.0
-MAX_POSITIONS = 6                 # posizioni aperte da questo programma per conto (ogni segnale con TP2 ne apre due)
+# Un trade alla volta per conto (decisione 20/11/2026): finché c'è una posizione o un ordine in attesa aperto da questo programma, gli altri segnali si ignorano. Con la parzializzazione le due parti contano come un solo trade.
 ENTRY_ORDER = os.environ.get("ENTRY_ORDER", "market").lower()            # "market" (default: a mercato, Entry di Vantage convertita con lo scarto) oppure "stop" (BUY/SELL STOP all'Entry del segnale)
 MIN_REMAINING_PIPS = float(os.environ.get("MIN_REMAINING_PIPS") or 45)  # a mercato si entra solo se, calcolata l'Entry sul tuo broker con lo scarto, al TP1 mancano PIÙ di questi pips
 MARKET_MIN_PIPS = float(os.environ.get("MARKET_MIN_PIPS") or 40)       # Entry già superata: si entra a mercato solo se al TP1 mancano PIÙ di questi pips
@@ -267,8 +267,8 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
     if sym is None:
         raise ValueError(f"simbolo {sig['symbol']!r} non trovato su questo conto (provati: {', '.join(symbol_candidates(sig['symbol']))}): aprilo in MT5 → Market Watch → tasto destro → Simboli, oppure scrivi il suo nome in MT5_SYMBOL")
     mine = [p for p in (mt5.positions_get() or []) if p.magic == MAGIC] + [o for o in (mt5.orders_get() or []) if o.magic == MAGIC]
-    if len(mine) >= MAX_POSITIONS:
-        raise ValueError(f"già {len(mine)} posizioni o ordini aperti da questo programma (massimo {MAX_POSITIONS})")
+    if mine:
+        raise ValueError(f"c'è già un trade in corso su questo conto ({len(mine)} tra posizioni e ordini in attesa): ignoro il segnale finché non si chiude")
     tick = mt5.symbol_info_tick(sym)
     INFO.clear()
     INFO.update(bid=tick.bid, ask=tick.ask, spread=round(tick.ask - tick.bid, 5))
