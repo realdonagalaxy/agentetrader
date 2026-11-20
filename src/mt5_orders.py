@@ -141,6 +141,50 @@ def check_message(sig: dict) -> None:
         raise ValueError(f"SELL: nel messaggio servono TP1 < Entry < SL (TP1 {sig['tp1']}, Entry {sig['entry']}, SL {sig['sl']})")
 
 
+_LOCK_FH = None
+
+
+def acquire_single_instance() -> bool:
+    """Blocco del sistema operativo, tenuto finché il programma vive: se due ascolti partono nello stesso istante (Gestione Conti + avvia_ascolto.bat o avvio automatico) solo uno lo ottiene.
+    Il controllo sul battito da solo non basta: il battito compare dopo qualche secondo dall'avvio e in quella finestra due programmi passano entrambi."""
+    global _LOCK_FH
+    JOURNAL_DIR.mkdir(parents=True, exist_ok=True)
+    f = open(JOURNAL_DIR / "mt5_orders.lock", "a+")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return False
+    _LOCK_FH = f
+    return True
+
+
+def claim_signal(sig_id, account) -> bool:
+    """Prenota «questo segnale su questo conto» con un file creato in modo esclusivo: se esiste già (un altro ascolto, o lo stesso segnale arrivato due volte) restituisce False e NON si apre di nuovo."""
+    d = JOURNAL_DIR / "applicati"
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / f"{sig_id}_{account}.flag"
+    try:
+        os.close(os.open(str(f), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        return True
+    except FileExistsError:
+        return False
+
+
+def release_signal(sig_id, account) -> None:
+    """Toglie la prenotazione se il segnale NON è stato aperto (rifiuto o errore): così «Apri l'ultimo segnale» può riprovarci."""
+    try:
+        (JOURNAL_DIR / "applicati" / f"{sig_id}_{account}.flag").unlink()
+    except OSError:
+        pass
+
+
 def broker_symbol(sym: str) -> str:
     """Primo nome candidato (compatibilità): MT5_SYMBOL può contenere più nomi separati da virgola; per la scelta vera, sul terminale del conto, vedi resolve_symbol."""
     return symbol_candidates(sym)[0]
@@ -698,7 +742,15 @@ def active_accounts() -> list[dict]:
     """Conti dell'archivio (src.mt5_accounts) abilitati e usati per i segnali; riletti a ogni giro, quindi le modifiche dall'app si applicano subito."""
     from src import mt5_accounts as ma
     # I conti REALI ricevono i segnali solo se hai spuntato «Consenti segnali su conto REALE» (decisione 18/11/2026); altrimenti non vengono nemmeno contattati.
-    return [a for a in ma.list_accounts() if a["enabled"] and a["use_signals"] and (a.get("kind") != "real" or a.get("real_ok"))]
+    out, seen = [], set()
+    for a in ma.list_accounts():
+        if a["enabled"] and a["use_signals"] and (a.get("kind") != "real" or a.get("real_ok")):
+            if int(a["login"]) in seen:                                   # lo stesso numero di conto registrato due volte (es. con server scritto diversamente): un solo ordine
+                print(f"Conto {a['login']} registrato due volte: uso solo il primo.", flush=True)
+                continue
+            seen.add(int(a["login"]))
+            out.append(a)
+    return out
 
 
 def check() -> None:
@@ -768,6 +820,8 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
     from dotenv import load_dotenv
     load_dotenv("config.env")
     from src import mt5_accounts as ma
+    if not acquire_single_instance():
+        sys.exit("Un altro ascolto dei segnali è già in esecuzione (blocco attivo): non ne avvio un secondo, gli ordini si aprirebbero due volte.")
     try:                                                          # un solo ascolto alla volta: due programmi aprirebbero ogni ordine due volte
         if time.time() - float(HEARTBEAT.read_text()) < 20:
             sys.exit("Un altro ascolto dei segnali è già in esecuzione: non ne avvio un secondo (gli ordini si aprirebbero due volte).")
@@ -886,10 +940,19 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
                 log_segnale(m.get("message_id") or m.get("chan_id"), m.get("date"), sig, text)
                 lines = [f"ℹ️ Manca la riga BUY/SELL: direzione dedotta dai livelli, {sig['side'].upper()} {sig['symbol']}."] if sig.get("inferred") else []
                 targets = active_accounts() or [None]
+                sig_id = m.get("message_id") or m.get("chan_id")
                 for acc in targets:
                     tag = f"[{acc['name']}] " if acc else ""
                     trks = []
                     INFO.clear()
+                    claimed = False
+                    if acc and not dry and sig_id:
+                        if not claim_signal(sig_id, acc["id"]):
+                            res = "↩️ Già aperto o in corso per questo conto: non lo apro due volte."
+                            lines.append(tag + res)
+                            log_esito(sig_id, acc["login"], res, acc["lots"], [])
+                            continue
+                        claimed = True
                     try:
                         if acc:
                             with ma.session(acc) as mt:
@@ -909,6 +972,8 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
                         res = f"⛔ Non apro: {e}"
                     except Exception as e:
                         res = f"⛔ Errore: {e}"
+                    if claimed and not trks:
+                        release_signal(sig_id, acc["id"])                     # niente aperto: si può riprovare
                     lines.append(tag + res)
                     log_esito(m.get("message_id") or m.get("chan_id"), acc["login"] if acc else "", res, acc["lots"] if acc else LOTS, trks)
                     log([datetime.now(timezone.utc).isoformat(timespec="seconds"), (tag + text).replace("\n", " | "), res])
