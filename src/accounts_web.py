@@ -576,11 +576,15 @@ class Handler(BaseHTTPRequestHandler):
     do_DELETE = lambda self: self._write("DELETE")
 
 
-def main():
+SRV = None
+
+
+def main(argv=None, on_ready=None):
+    """argv/on_ready servono all'app desktop (src.desktop_app): il server gira in un thread e on_ready(url) avvisa quando è pronto."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, help="porta da provare per prima (predefinita 8080; se occupata si usano le successive)")
     ap.add_argument("--no-browser", action="store_true")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     try:
         from dotenv import load_dotenv
         load_dotenv("config.env")
@@ -600,6 +604,8 @@ def main():
             print(f"Porta {port} occupata, provo la successiva…")
     if srv is None:
         sys.exit("Nessuna porta libera: usa --port con un altro numero.")
+    global SRV
+    SRV = srv
     port = srv.server_address[1]
     url = f"http://127.0.0.1:{port}"
     print(f"Gestione Conti su {url}  (Ctrl+C per chiudere)\nArchivio: {ma.DB_PATH}", flush=True)
@@ -642,6 +648,8 @@ def main():
             print("Ascolto segnali non avviato:", str(e)[:200], flush=True)
     from src import split_orders as _so                                  # pareggio dopo TP1 per gli ordini divisi con «Dividi» (non dipende dai segnali)
     threading.Thread(target=_so.watch_loop, daemon=True).start()
+    if on_ready:
+        on_ready(url)
     if not a.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:

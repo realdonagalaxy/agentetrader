@@ -1,18 +1,19 @@
 @echo off
 setlocal
-REM Crea sul Desktop il collegamento "Gestione Conti" che avvia il programma. Da lanciare una volta sola.
+REM Crea sul Desktop il collegamento "Gestione Conti" (app desktop, con il logo, senza finestra nera). Da lanciare una volta sola, dopo setup_windows.bat.
 set CARTELLA=%~dp0
-set DESTINAZIONE=%CARTELLA%avvia_gestione_conti.bat
-if not exist "%DESTINAZIONE%" (
-  echo ERRORE: non trovo %DESTINAZIONE%
+if not exist "%CARTELLA%.venv\Scripts\pythonw.exe" (
+  echo ERRORE: non trovo l'ambiente Python del progetto ^(.venv^). Lancia prima setup_windows.bat
   pause
   exit /b 1
 )
-powershell -NoProfile -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop')+'\Gestione Conti.lnk'); $s.TargetPath='%DESTINAZIONE%'; $s.WorkingDirectory='%CARTELLA%'; $s.Description='Avvia Gestione Conti'; $s.Save()"
+"%CARTELLA%.venv\Scripts\python.exe" -m pip install -q -r "%CARTELLA%requirements.txt"
+powershell -NoProfile -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop')+'\Gestione Conti.lnk'); $s.TargetPath='%CARTELLA%.venv\Scripts\pythonw.exe'; $s.Arguments='-m src.desktop_app'; $s.WorkingDirectory='%CARTELLA%'; $s.IconLocation='%CARTELLA%src\web\app.ico'; $s.Description='Gestione Conti'; $s.Save()"
 if errorlevel 1 (
   echo ERRORE nella creazione del collegamento.
   pause
   exit /b 1
 )
-echo Fatto: sul Desktop trovi il collegamento "Gestione Conti". Fai doppio clic per avviare il programma.
+echo Fatto: sul Desktop trovi il collegamento "Gestione Conti". Doppio clic per aprire l'app.
+echo Se non si apre, lancia avvia_desktop.bat: mostra l'errore.
 pause

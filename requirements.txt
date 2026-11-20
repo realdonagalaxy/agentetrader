@@ -8,3 +8,6 @@ matplotlib>=3.7
 MetaTrader5>=5.0.45; platform_system == "Windows"
 keyring>=24.0; platform_system == "Windows"
 telethon>=1.36
+pywebview>=5.0; platform_system == "Windows"
+pystray>=0.19; platform_system == "Windows"
+pillow>=10.0

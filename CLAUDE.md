@@ -28,6 +28,6 @@ Sei l'agente quantitativo di sviluppo e monitoraggio trading. Il tuo compito è:
 - Delega l'analisi quantitativa al sub-agente `quant-analyst`.
 
 ## Struttura
-`src/` (ctrader_client, telegram_bot, backtest_engine, journal_manager) · `data/` · `knowledge/` · `journal/`
+`src/` (ctrader_client, telegram_bot, backtest_engine, journal_manager, desktop_app = finestra desktop di Gestione Conti con pywebview; versione solo-web nel ramo `backup-webapp-2026-11-20`) · `data/` · `knowledge/` · `journal/`
 
 Il trading comporta rischio di perdita: il codice non è consulenza finanziaria.
