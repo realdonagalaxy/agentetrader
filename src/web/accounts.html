@@ -50,6 +50,10 @@ tr.opn,tr.opn:hover{background:rgba(56,189,248,.16)}                  /* posizio
 .panel.pendpanel select{background:rgba(255,255,255,.06);border-color:#2f4768}
 .panel.pendpanel h2 b,.panel.pendpanel #ctot{color:var(--lm)!important}
 .panel.pendpanel .cal .gain{color:#38f5d6}
+.eqd.on{background:var(--lm)!important;color:var(--hdr)!important}
+#eqchart svg{display:block;width:100%;height:auto;overflow:visible}
+#eqchart text{font:20px var(--mono);fill:var(--lm2)}
+#eqtip{position:absolute;pointer-events:none;background:#0a111b;border:1px solid #2f4768;border-radius:6px;padding:6px 10px;font:12px var(--mono);color:var(--lm);white-space:nowrap;z-index:5;box-shadow:0 6px 20px rgba(0,0,0,.5)}
 .panel.pendpanel .kpi{background:rgba(255,255,255,.05);border:1px solid #2f4768;border-top:3px solid var(--lm)}
 .panel.pendpanel .kpi .l,.panel.pendpanel .kpi .s{color:var(--lm2)}.panel.pendpanel .kpi .v{color:var(--lm);text-shadow:0 0 8px rgba(189,254,234,.35)}
 .panel.pendpanel .kpi .v.gain{color:#38f5d6}.panel.pendpanel .kpi .v.loss{color:#ff7b72}.panel.pendpanel .kpi .v.flat{color:var(--lm2)}
@@ -195,11 +199,18 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
 <main>
 <div id="tab-home" style="display:grid;gap:16px">
   <div class="banner" id="sim" hidden>Modalità SIMULATORE: conti, prezzi e operazioni sono finti. Serve solo a provare l'interfaccia.</div>
+  <div class="panel pendpanel" id="eqpanel"><h2>Equity curve <span style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="sub" style="text-transform:none;letter-spacing:0" id="eqsub"></span>
+      <select id="esrc" aria-label="Conto" style="width:auto;padding:4px 8px"></select>
+      <button class="btn sm sec eqd" data-d="30">30 giorni</button><button class="btn sm sec eqd" data-d="90">90 giorni</button><button class="btn sm sec eqd" data-d="365">1 anno</button></span></h2>
+    <div class="kpis" id="eqkpis" style="padding:12px 16px 4px"></div>
+    <div id="eqwrap" style="position:relative;padding:4px 16px 8px"><div id="eqchart"></div><div id="eqtip" hidden></div></div>
+    <div class="sub" style="padding:0 16px 14px">Risultato cumulato delle operazioni chiuse (commissioni e swap compresi, depositi e prelievi esclusi) in % del saldo a inizio periodo, più il profitto aperto adesso. Orari del server del broker.</div>
+  </div>
   <div class="panel pendpanel"><h2>Posizioni aperte e ordini in attesa <span class="sub" style="margin-left:auto;text-transform:none;letter-spacing:0" id="pendsub"></span></h2>
     <div class="tw" style="padding:0 16px 8px"><table class="acctable" id="pendtable"><thead id="pendhead"></thead><tbody id="pendrows"></tbody></table></div>
     <div class="sub" style="padding:0 16px 16px">Posizioni ancora in corso (righe celesti, con il risultato di adesso) e ordini LIMIT/STOP non ancora eseguiti, di tutti i conti collegati. Si aggiornano da soli ogni 20 secondi. Distanza = quanto manca al prezzo dell'ordine, in % del prezzo; rischio = perdita allo SL in % del saldo del conto (se lo SL è impostato).</div>
   </div>
-  <div class="panel pendpanel"><h2>Trade chiusi <span style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="sub" style="text-transform:none;letter-spacing:0" id="trsub"></span>
+  <div class="panel pendpanel" id="closedpanel" hidden><h2>Trade chiusi <span style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="sub" style="text-transform:none;letter-spacing:0" id="trsub"></span>
       <button class="btn sm sec" id="tprev" aria-label="Mese precedente">‹</button><b id="tmonth" style="min-width:130px;text-align:center;text-transform:capitalize;letter-spacing:0;font-size:14px;color:var(--ink)"></b>
       <button class="btn sm sec" id="tnext" aria-label="Mese successivo">›</button><button class="btn sm sec" id="ttoday">Oggi</button></span></h2>
     <div class="body stack" style="grid-template-columns:minmax(0,260px) auto;align-items:end">
@@ -590,17 +601,66 @@ let calMonth = new Date(); calMonth.setDate(1);
 const ym = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
 const sgn = v => (v > 0 ? "+" : "") + new Intl.NumberFormat("it-IT", {maximumFractionDigits: 1}).format(v);
 function fillSources() {
-  const prev = $("tsrc").value || $("rsrc").value;
+  const prev = $("tsrc").value || $("rsrc").value || $("esrc").value;
   const opts = accounts.map(a => `<option value="${a.id}">${esc(a.login)}</option>`).join("") || `<option value="">Nessun conto: aggiungine uno</option>`;
-  $("tsrc").innerHTML = opts; $("rsrc").innerHTML = opts;
-  if (prev && [...$("tsrc").options].some(o => o.value === prev)) { $("tsrc").value = prev; $("rsrc").value = prev; }
+  $("tsrc").innerHTML = opts; $("rsrc").innerHTML = opts; $("esrc").innerHTML = opts;
+  if (prev && [...$("tsrc").options].some(o => o.value === prev)) syncSrc(prev);
   return $("tsrc").value !== prev;
 }
 const activeTab = () => (document.querySelector("nav button[aria-selected=true]") || {}).dataset.tab;
-function loadActive() { const t = activeTab(); if (t === "home") loadTrades(); else if (t === "cal") loadCalendar(); }
-$("tsrc").onchange = () => { $("rsrc").value = $("tsrc").value; loadTrades(); };
-$("rsrc").onchange = () => { $("tsrc").value = $("rsrc").value; loadCalendar(); };
+function loadActive() { const t = activeTab(); if (t === "home") loadEquity(); else if (t === "cal") loadCalendar(); }
+const syncSrc = v => { $("tsrc").value = v; $("rsrc").value = v; $("esrc").value = v; };
+$("tsrc").onchange = () => { syncSrc($("tsrc").value); loadTrades(); };
+$("rsrc").onchange = () => { syncSrc($("rsrc").value); loadCalendar(); };
+$("esrc").onchange = () => { syncSrc($("esrc").value); loadEquity(); };
+let eqDays = 30, eqPts = [], eqCur = "EUR", eqUnit = "pct";
+document.querySelectorAll(".eqd").forEach(b => b.onclick = () => { eqDays = +b.dataset.d; loadEquity(); });
+async function loadEquity() {
+  document.querySelectorAll(".eqd").forEach(b => b.classList.toggle("on", +b.dataset.d === eqDays));
+  if (!$("esrc").value) { $("eqchart").innerHTML = ""; $("eqkpis").innerHTML = ""; return; }
+  let j;
+  try { j = await api(`/api/equity?account=${$("esrc").value}&days=${eqDays}`); } catch (e) { $("eqsub").innerHTML = `<span class="loss">${esc(e.message)}</span>`; return; }
+  $("eqsub").textContent = "";
+  const fp = v => (v > 0 ? "+" : "") + Number(v).toFixed(2).replace(".", ",") + "%";
+  $("eqkpis").innerHTML = `<div class="kpi"><div class="l">Risultato periodo</div><div class="v ${cls(j.total)}">${j.total_pct != null ? fp(j.total_pct) : "—"}</div><div class="s">${money(j.total, j.currency)}</div></div>
+    <div class="kpi"><div class="l">Max drawdown</div><div class="v ${j.max_dd_pct ? "loss" : "flat"}">${j.max_dd_pct ? "-" + String(j.max_dd_pct).replace(".", ",") + "%" : "0%"}</div><div class="s">calo dal massimo</div></div>
+    <div class="kpi"><div class="l">Equity adesso</div><div class="v">${money(j.equity, j.currency)}</div><div class="s">saldo ${money(j.balance, j.currency)} · aperto ${money(j.floating, j.currency)}</div></div>
+    <div class="kpi"><div class="l">Operazioni chiuse</div><div class="v">${j.operations}</div><div class="s">ultimi ${j.days} giorni</div></div>`;
+  eqUnit = j.points.every(p => p.pct != null) ? "pct" : "v"; eqCur = j.currency; eqPts = j.points;
+  drawEquity();
+}
+function drawEquity() {
+  const P = eqPts, W = 1000, H = 300, L = 78, R = 16, T = 14, B = 34;
+  if (P.length < 2) { $("eqchart").innerHTML = ""; return; }
+  const val = p => eqUnit === "pct" ? p.pct : p.v;
+  const ys = P.map(val), lo = Math.min(0, ...ys), hi = Math.max(0, ...ys), pad = (hi - lo || 1) * 0.12, y0 = lo - pad, y1 = hi + pad;
+  const t0 = P[0].t, t1 = P[P.length - 1].t, X = t => L + (t - t0) / ((t1 - t0) || 1) * (W - L - R), Y = v => T + (y1 - v) / (y1 - y0) * (H - T - B);
+  const fmt = v => eqUnit === "pct" ? (v > 0 ? "+" : "") + v.toFixed(1).replace(".", ",") + "%" : Math.round(v) + "";
+  const dt = t => new Date(t * 1000).toISOString().slice(8, 10) + "/" + new Date(t * 1000).toISOString().slice(5, 7);
+  let g = "";
+  for (let i = 0; i <= 4; i++) { const v = y0 + (y1 - y0) * i / 4; g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="#2f4768" stroke-width="1" opacity=".6"/><text x="${L - 8}" y="${Y(v) + 7}" text-anchor="end">${fmt(v)}</text>`; }
+  const path = P.map((p, i) => (i ? "L" : "M") + X(p.t).toFixed(1) + " " + Y(val(p)).toFixed(1)).join(" ");
+  const area = path + ` L${X(t1).toFixed(1)} ${Y(0)} L${X(t0).toFixed(1)} ${Y(0)} Z`;
+  const last = P[P.length - 1], up = val(last) >= 0;
+  $("eqchart").innerHTML = `<svg viewBox="0 0 ${W} ${H}" id="eqsvg" role="img" aria-label="Equity curve"><defs><linearGradient id="eqg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#bdfeea" stop-opacity=".35"/><stop offset="1" stop-color="#bdfeea" stop-opacity="0"/></linearGradient></defs>
+    ${g}<line x1="${L}" x2="${W - R}" y1="${Y(0)}" y2="${Y(0)}" stroke="#bdfeea" stroke-width="1.5" stroke-dasharray="6 6" opacity=".7"/>
+    <path d="${area}" fill="url(#eqg)"/><path d="${path}" fill="none" stroke="${up ? "#bdfeea" : "#ff7b72"}" stroke-width="3" stroke-linejoin="round"/>
+    <circle cx="${X(last.t)}" cy="${Y(val(last))}" r="6" fill="${up ? "#bdfeea" : "#ff7b72"}"/>
+    <text x="${L}" y="${H - 6}" text-anchor="start">${dt(t0)}</text><text x="${(L + W - R) / 2}" y="${H - 6}" text-anchor="middle">${dt((t0 + t1) / 2)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end">${dt(t1)} · adesso</text>
+    <line id="eqcur" y1="${T}" y2="${H - B}" stroke="#bdfeea" stroke-width="1" opacity="0"/></svg>`;
+  const svg = $("eqsvg"), tip = $("eqtip");
+  const move = ev => {
+    const r = svg.getBoundingClientRect(), cx = (ev.touches ? ev.touches[0].clientX : ev.clientX), px = (cx - r.left) / r.width * W;
+    let best = P[0]; for (const p of P) if (Math.abs(X(p.t) - px) < Math.abs(X(best.t) - px)) best = p;
+    const cur = $("eqcur"); cur.setAttribute("x1", X(best.t)); cur.setAttribute("x2", X(best.t)); cur.setAttribute("opacity", ".6");
+    tip.hidden = false; tip.innerHTML = `${new Date(best.t * 1000).toISOString().slice(0, 16).replace("T", " ")}${best.now ? " (adesso)" : ""}<br><b>${best.pct != null ? (best.pct > 0 ? "+" : "") + String(best.pct).replace(".", ",") + "%" : ""}</b> · ${money(best.v, eqCur)}`;
+    const wr = $("eqwrap").getBoundingClientRect(), tx = cx - wr.left + 12; tip.style.left = Math.min(tx, wr.width - tip.offsetWidth - 8) + "px"; tip.style.top = "8px";
+  };
+  svg.addEventListener("mousemove", move); svg.addEventListener("touchmove", move, {passive: true});
+  svg.addEventListener("mouseleave", () => { tip.hidden = true; $("eqcur").setAttribute("opacity", "0"); });
+}
 async function loadTrades() {
+  if ($("closedpanel").hidden) return;                                 // la tabella dei trade chiusi è nascosta: non si legge da MT5
   $("tmonth").textContent = calMonth.toLocaleDateString("it-IT", {month: "long", year: "numeric"});
   if (!$("tsrc").value) { $("trrows").innerHTML = ""; $("trhead").innerHTML = ""; $("trkpis").innerHTML = ""; return; }
   $("trsub").textContent = "Lettura da MT5…";
@@ -788,7 +848,7 @@ $("cclose").onclick = () => $("cdlg").close();
   await refresh(); fillSources(); started = true; loadActive();
   if (!accounts.length) $("cdlg").showModal();                       // nessun conto: si apre subito la finestra per aggiungerne uno
 })();
-setInterval(() => { if (!document.querySelector("dialog[open]:not(#cdlg)") && !document.hidden) { refresh(); if (activeTab() === "home" && !$("cdlg").open) loadTrades(); } }, 20000);
+setInterval(() => { if (!document.querySelector("dialog[open]:not(#cdlg)") && !document.hidden) { refresh(); if (activeTab() === "home" && !$("cdlg").open) loadEquity(); } }, 20000);
 </script>
 </body>
 </html>

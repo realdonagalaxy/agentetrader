@@ -475,6 +475,39 @@ def _pos(p) -> dict:
             "sl": p.sl, "tp": p.tp, "profit": round(p.profit + getattr(p, "swap", 0.0), 2), "time": int(p.time), "magic": p.magic, "comment": p.comment}
 
 
+def equity_curve(acc: dict, days: int = 30) -> dict:
+    """Curva del conto negli ultimi `days` giorni: risultato cumulato delle operazioni chiuse (commissioni e swap compresi; depositi e prelievi ESCLUSI) in valuta e in % del saldo a inizio periodo,
+    con un ultimo punto «adesso» che include il profitto delle posizioni aperte (equity). Orari del server del broker."""
+    from datetime import datetime, timedelta, timezone
+    days = max(1, min(int(days), 3650))
+    with session(acc) as mt5:
+        ai = mt5.account_info()
+        bal_now, eq_now, cur = float(ai.balance), float(ai.equity), ai.currency
+        t0 = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        flows = sorted(_balance_flows(mt5, t0), key=lambda f: f[0])
+    flows = [f for f in flows if f[0] >= t0]
+    start = bal_now - sum(v for _, v, _ in flows)                      # saldo a inizio periodo, ricostruito dal saldo di adesso
+    pts, cum = [{"t": int(t0.replace(tzinfo=timezone.utc).timestamp()), "v": 0.0}], 0.0
+    for when, v, trade in flows:
+        if trade:
+            cum += v
+            pts.append({"t": int(when.replace(tzinfo=timezone.utc).timestamp()), "v": round(cum, 2)})
+    floating = round(eq_now - bal_now, 2)
+    pts.append({"t": int(datetime.now(timezone.utc).timestamp()), "v": round(cum + floating, 2), "now": True})
+    base = start if start > 0 else None
+    for p_ in pts:
+        p_["pct"] = round(100 * p_["v"] / base, 2) if base else None
+    peak, dd = 0.0, 0.0                                               # massimo drawdown: calo dal massimo precedente, in % del massimo (saldo di partenza + risultato)
+    for p_ in pts:
+        lvl = (base or 0) + p_["v"]
+        peak = max(peak, lvl)
+        if peak > 0:
+            dd = max(dd, (peak - lvl) / peak * 100)
+    closed = sum(1 for _, _, tr in flows if tr)
+    return {"currency": cur, "days": days, "start_balance": round(start, 2), "balance": round(bal_now, 2), "equity": round(eq_now, 2), "floating": floating, "points": pts,
+            "total": round(cum + floating, 2), "total_pct": pts[-1]["pct"], "max_dd_pct": round(dd, 2), "operations": closed}
+
+
 ORDER_NAMES = {2: "BUY LIMIT", 3: "SELL LIMIT", 4: "BUY STOP", 5: "SELL STOP", 6: "BUY STOP LIMIT", 7: "SELL STOP LIMIT"}
 
 

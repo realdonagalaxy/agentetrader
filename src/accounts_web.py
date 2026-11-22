@@ -471,6 +471,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
                     raise ValueError("mese non valido (formato AAAA-MM)")
                 return self._json(ma.trade_list(ma.get_account(int((q.get("account") or ["0"])[0])), month))
+            if path == "/api/equity":                                              # curva del conto (risultato cumulato in %) per la pagina Trade
+                q = parse_qs(urlparse(self.path).query)
+                return self._json(ma.equity_curve(ma.get_account(int((q.get("account") or ["0"])[0])), int((q.get("days") or ["30"])[0])))
             if path == "/api/calendar":
                 q = parse_qs(urlparse(self.path).query)
                 month = (q.get("month") or [datetime.now().strftime("%Y-%m")])[0]
