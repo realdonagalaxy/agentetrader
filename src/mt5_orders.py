@@ -40,6 +40,7 @@ LOTS = 0.05
 MAX_SLIP_PRICE = 3.0
 # Un trade alla volta per conto (decisione 20/11/2026): finché c'è una posizione o un ordine in attesa aperto da questo programma, gli altri segnali si ignorano. Con la parzializzazione le due parti contano come un solo trade.
 ENTRY_ORDER = os.environ.get("ENTRY_ORDER", "market").lower()            # "market" (default: a mercato, Entry di Vantage convertita con lo scarto) oppure "stop" (BUY/SELL STOP all'Entry del segnale)
+ENTRY_DEV_MAX = float(os.environ.get("ENTRY_DEV_MAX") or 1.5)             # scostamento ($) tra il prezzo di adesso e l'Entry atteso sul tuo broker oltre il quale NON si apre a mercato ma si mette un ordine pendente (LIMIT o STOP) sull'Entry
 MIN_REMAINING_PIPS = float(os.environ.get("MIN_REMAINING_PIPS") or 45)  # a mercato si entra solo se, calcolata l'Entry sul tuo broker con lo scarto, al TP1 mancano PIÙ di questi pips
 MARKET_MIN_PIPS = float(os.environ.get("MARKET_MIN_PIPS") or 40)       # Entry già superata: si entra a mercato solo se al TP1 mancano PIÙ di questi pips
 MAX_SPREAD = float(os.environ.get("MAX_SPREAD") or 1.00)            # $: oltre questo spread non si apre (rollover, notizie). Cambiabile in config.env
@@ -241,7 +242,7 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
     buy = sig["side"] == "buy"
     if not ((chosen > sig["tp1"]) if buy else (chosen < sig["tp1"])):
         raise ValueError(f"TP{target} {chosen} non coerente con TP1 {sig['tp1']} per un {sig['side'].upper()}: non apro")
-    s2 = {**sig, "tp1": chosen, "tp2": None, "_target": target}
+    s2 = {**sig, "tp1": chosen, "tp2": None, "_target": target, "_tp1_real": sig["tp1"]}
     if partial and 0 < partial < 1:
         s2["tp_parz"] = sig["tp1"]
     try:
@@ -282,6 +283,7 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
     px = tick.ask if buy else tick.bid
     d = info.digits
     note_off, zone_note = "", ""
+    pend = None
     if relative_levels():
         check_message(sig)
         sl_d, tp_d = abs(sig["entry"] - sig["sl"]), abs(sig["tp1"] - sig["entry"])
@@ -293,12 +295,25 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
             e_at, tp_at, sl_at = sig["entry"] + off, sig["tp1"] + off, sig["sl"] + off
             remaining = ((tp_at - tick.bid) if buy else (tick.bid - tp_at)) / pip
             INFO.update(offset=round(off, 3), src=src, remaining=round(remaining, 1))
-            if remaining <= MIN_REMAINING_PIPS:
+            dev = tick.bid - e_at                              # >0: il prezzo è sopra l'Entry atteso, <0: sotto
+            if abs(dev) > ENTRY_DEV_MAX:                       # prezzo troppo lontano dall'Entry: niente mercato, ordine pendente sull'Entry (il prezzo può tornare nella zona)
+                tp1_real = (sig["tp_parz"] if sig.get("tp_parz") is not None else sig.get("_tp1_real", sig["tp1"])) + off          # TP1 vero del segnale, convertito
+                if (buy and tick.bid >= tp1_real) or (not buy and tick.bid <= tp1_real):
+                    raise ValueError(f"il prezzo ({tick.bid:.2f}) ha già toccato il primo target del segnale ({tp1_real:.2f}): il setup è già andato, non metto ordini pendenti.")
+                cur = tick.ask if buy else tick.bid
+                above = e_at > cur                             # l'Entry sta sopra il prezzo di adesso?
+                otype = (mt5.ORDER_TYPE_BUY_STOP if above else mt5.ORDER_TYPE_BUY_LIMIT) if buy else (mt5.ORDER_TYPE_SELL_LIMIT if above else mt5.ORDER_TYPE_SELL_STOP)
+                stops = (getattr(info, "trade_stops_level", 0) or 0) * (getattr(info, "point", 0.01) or 0.01)
+                if abs(e_at - cur) <= stops:
+                    raise ValueError(f"l'Entry {e_at:.2f} è troppo vicina al prezzo ({cur:.2f}) per un ordine pendente (distanza minima {stops:.2f}): non apro.")
+                pend = {"type": otype, "name": {mt5.ORDER_TYPE_BUY_STOP: "BUY STOP", mt5.ORDER_TYPE_BUY_LIMIT: "BUY LIMIT", mt5.ORDER_TYPE_SELL_LIMIT: "SELL LIMIT", mt5.ORDER_TYPE_SELL_STOP: "SELL STOP"}[otype],
+                        "price": e_at, "dev": dev, "off": off}
+            if pend is None and remaining <= MIN_REMAINING_PIPS:
                 raise ValueError(f"al TP1 mancano solo {remaining:.0f} pips (minimo {MIN_REMAINING_PIPS:.0f}): non apro. Entry della sala {sig['entry']} = {e_at:.2f} sul tuo broker "
                                  f"(scarto {off:+.2f}, {src}), TP1 {tp_at:.2f}, prezzo ora {tick.bid:.2f}.")
             if (buy and sl_at >= tick.bid) or (not buy and sl_at <= tick.bid):
                 raise ValueError(f"il prezzo ({tick.bid:.2f}) ha già superato lo SL convertito ({sl_at:.2f}): non apro.")
-            if sig.get("zone"):                              # sala con zona d'ingresso (es. «EP: 3928 - 3921»): a mercato solo se il prezzo è dentro la zona convertita
+            if sig.get("zone") and pend is None:              # sala con zona d'ingresso (es. «EP: 3928 - 3921»): a mercato solo se il prezzo è dentro la zona convertita
                 lo_at, hi_at = sig["zone"][0] + off, sig["zone"][1] + off
                 pxz = tick.ask if buy else tick.bid
                 if not lo_at <= pxz <= hi_at:
@@ -338,15 +353,27 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
         off2 = current_offset()[0]
         tpz_lv = (sig["tp_parz"] + off2 + (0 if buy else tick.ask - tick.bid)) if off2 is not None else (ref + tpz_d if buy else ref - tpz_d)
         parts = [(v1, tpz_lv, "tp1"), (v2, tp, "tp2")]
-    reqs = [{"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": v, "type": mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL,
-             "price": px, "sl": round(sl, d), "tp": round(t, d), "deviation": DEVIATION, "magic": MAGIC,
-             "comment": "tg-signal" + (f"-{name}" if name else ""), "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling(mt5, info)} for v, t, name in parts]
+    if pend is None:
+        reqs = [{"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": v, "type": mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL,
+                 "price": px, "sl": round(sl, d), "tp": round(t, d), "deviation": DEVIATION, "magic": MAGIC,
+                 "comment": "tg-signal" + (f"-{name}" if name else ""), "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling(mt5, info)} for v, t, name in parts]
+    else:                                                          # ordine pendente sull'Entry atteso, valido fino a fine giornata (o fino al TP1 toccato: lo annulla follow_orders)
+        exp_ok = getattr(info, "expiration_mode", 15) & 2
+        reqs = [{"action": mt5.TRADE_ACTION_PENDING, "symbol": sym, "volume": v, "type": pend["type"], "price": round(pend["price"], d), "sl": round(sl, d), "tp": round(t, d),
+                 "deviation": DEVIATION, "magic": MAGIC, "comment": "tg-signal-" + ("lim" if "LIMIT" in pend["name"] else "stp") + (f"-{name}" if name else ""),
+                 "type_time": mt5.ORDER_TIME_DAY if exp_ok else mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_RETURN} for v, t, name in parts]
     FT = f"TP{sig.get('_target', 1)}"
-    base = f"{sig['side'].upper()} {sym} " + (f"{v1}+{v2} lotti" if split else f"{lots} lotti") + f" a mercato ~{px} · SL {reqs[0]['sl']} ({abs(px - reqs[0]['sl']):.2f} $)"
-    if split:
-        base += f" · TP1 {reqs[0]['tp']} ({abs(reqs[0]['tp'] - px):.2f} $) con {v1} lotti, poi {FT} {reqs[1]['tp']} ({abs(reqs[1]['tp'] - px):.2f} $) con {v2}: a TP1 il resto va a pareggio"
+    pxr = round(pend["price"], d) if pend else px                    # prezzo di riferimento per le distanze: l'Entry dell'ordine pendente oppure il prezzo di mercato
+    if pend:
+        head = (f"⏳ Ordine {pend['name']} piazzato: {sig['side'].upper()} {sym} " + (f"{v1}+{v2} lotti" if split else f"{lots} lotti") +
+                f" @ {pxr} (il prezzo {tick.bid:.2f} è {abs(pend['dev']):.2f} $ {'sopra' if pend['dev'] > 0 else 'sotto'} l'Entry atteso: non inseguo, aspetto che torni; valido fino a fine giornata o fino al TP1)")
+        base = head + f" · SL {reqs[0]['sl']} ({abs(pxr - reqs[0]['sl']):.2f} $)"
     else:
-        base += f" · {FT} {reqs[0]['tp']} ({abs(reqs[0]['tp'] - px):.2f} $)"
+        base = f"{sig['side'].upper()} {sym} " + (f"{v1}+{v2} lotti" if split else f"{lots} lotti") + f" a mercato ~{px} · SL {reqs[0]['sl']} ({abs(px - reqs[0]['sl']):.2f} $)"
+    if split:
+        base += f" · TP1 {reqs[0]['tp']} ({abs(reqs[0]['tp'] - pxr):.2f} $) con {v1} lotti, poi {FT} {reqs[1]['tp']} ({abs(reqs[1]['tp'] - pxr):.2f} $) con {v2}: a TP1 il resto va a pareggio"
+    else:
+        base += f" · {FT} {reqs[0]['tp']} ({abs(reqs[0]['tp'] - pxr):.2f} $)"
     summary = base
     if partial and sig.get("tp_parz") is not None and not split:
         summary += f" · parzializzazione NON applicata: {why}"
@@ -361,15 +388,25 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
     if dry:
         return f"[PROVA, nessun ordine inviato] {summary}", []
     trks, group, note = [], f"{time.time():.0f}-{tag}", ""
+    okc = (mt5.TRADE_RETCODE_DONE, getattr(mt5, "TRADE_RETCODE_PLACED", 10008)) if pend else (mt5.TRADE_RETCODE_DONE,)
+    cancel_tp = parts[0][1]                                          # livello del TP1 vero: se il prezzo lo tocca prima dell'Entry l'ordine pendente si annulla
+    if pend and not split and sig.get("_tp1_real") is not None:      # obiettivo TP2/TP3 senza parzializzazione: l'annullamento resta al TP1 del segnale
+        cancel_tp = sig["_tp1_real"] + pend["off"] + (0 if buy else tick.ask - tick.bid)
     for req, (_, _, name) in zip(reqs, parts):
         res = mt5.order_send(req)
-        if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
+        if res is None or res.retcode not in okc:
             why = f"{getattr(res, 'retcode', None)} {getattr(res, 'comment', mt5.last_error())}"
             if not trks:
                 raise ValueError(f"ordine rifiutato dal broker: {why}")
             note = f" · ATTENZIONE: la seconda parte ({name}) non è stata aperta: {why}"
             break
-        trks.append({"position": int(res.order), "symbol": sym, "side": sig["side"], "open": actual_open(mt5, res.order, res.price, px), "tp": req["tp"], "sl": req["sl"], "part": name, "group": group})
+        if pend:
+            trks.append({"position": int(res.order), "symbol": sym, "side": sig["side"], "open": float(pend["price"]), "tp": req["tp"], "sl": req["sl"], "part": name, "group": group,
+                         "pending": True, "kind": "limit" if "LIMIT" in pend["name"] else "stop", "cancel_tp": float(cancel_tp)})
+        else:
+            trks.append({"position": int(res.order), "symbol": sym, "side": sig["side"], "open": actual_open(mt5, res.order, res.price, px), "tp": req["tp"], "sl": req["sl"], "part": name, "group": group})
+    if pend:
+        return (f"{summary} · ticket {', '.join(str(t['position']) for t in trks)}{note}", trks)
     return (f"✅ Aperto: {summary} · prezzo eseguito {trks[0]['open']} · ticket {', '.join(str(t['position']) for t in trks)}{note}", trks)
 
 
@@ -435,10 +472,11 @@ def follow_orders(mt5, pending: dict, bot, only=None) -> None:
             continue
         if list(mt5.orders_get(ticket=tk) or ()):
             tick = mt5.symbol_info_tick(t["symbol"])
-            if not t.get("keep") and ((tick.bid >= t["tp"]) if buy else (tick.ask <= t["tp"])):          # il movimento è partito senza lo stop: setup non più valido (gli ordini manuali restano: decide l'utente)
+            lvl = t.get("cancel_tp", t["tp"])
+            if not t.get("keep") and ((tick.bid >= lvl) if buy else (tick.ask <= lvl)):          # il movimento è partito senza lo stop: setup non più valido (gli ordini manuali restano: decide l'utente)
                 res = mt5.order_send({"action": mt5.TRADE_ACTION_REMOVE, "order": tk})
                 if res is not None and res.retcode == mt5.TRADE_RETCODE_DONE:
-                    say(bot, f"🚫 Ordine annullato: il prezzo ha toccato il TP1 ({fmt(t['tp'])}) senza attivare lo stop", t["msg_id"])
+                    say(bot, f"🚫 Ordine annullato: il prezzo ha toccato il TP1 ({fmt(lvl)}) senza passare dall'Entry", t["msg_id"])
                     del pending[key]
                     save_pending(pending)
             continue
