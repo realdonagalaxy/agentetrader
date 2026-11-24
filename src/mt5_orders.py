@@ -80,8 +80,14 @@ def looks_like_signal(text: str) -> bool:
 def parse_signal(text: str) -> dict:
     """Estrae side, symbol, entry, sl, tp1. Se manca la riga «BUY/SELL SIMBOLO» la direzione si deduce dai livelli (SL sopra l'Entry e TP1 sotto = SELL; il contrario = BUY) e lo
     strumento è XAUUSD; in quel caso sig['inferred'] è True. Solleva ValueError con il motivo se manca o è ambiguo qualcosa."""
-    head = re.search(r"\b(BUY|SELL)\s+([A-Za-z0-9._]+)", text, re.I)
+    head = re.search(r"\b(BUY|SELL)[ \t]+(?!(?:Entry|EP|SL|TP)\b)([A-Za-z0-9._]+)", text, re.I)      # stessa riga: «BUY XAUUSD»; non deve leggere «Entry» della riga dopo come simbolo
     out = {"side": head.group(1).lower(), "symbol": SYMBOL_ALIAS.get(head.group(2).upper(), head.group(2).upper()), "inferred": False} if head else {}
+    if not head:                                                              # simbolo prima della direzione: «XAU/USD BUY📈»
+        h2 = re.search(r"\b(XAU\s*/?\s*USD|GOLD|XAU|ORO)\s+(BUY|SELL)\b", text, re.I)
+        if h2:
+            sym = re.sub(r"[\s/]", "", h2.group(1)).upper()
+            out = {"side": h2.group(2).lower(), "symbol": SYMBOL_ALIAS.get(sym, sym), "inferred": False}
+            head = h2
     ent = re.findall(r"\b(?:Entry|EP)\s*[:=]?\s*" + NUM + r"(?:\s*[-–—]\s*" + NUM + r")?", text, re.I)          # «Entry: 3906.39» oppure zona «EP: 3928 - 3921»
     if len(ent) != 1:
         raise ValueError(f"ENTRY {'mancante' if not ent else 'presente più volte'}")
@@ -295,19 +301,25 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
             e_at, tp_at, sl_at = sig["entry"] + off, sig["tp1"] + off, sig["sl"] + off
             remaining = ((tp_at - tick.bid) if buy else (tick.bid - tp_at)) / pip
             INFO.update(offset=round(off, 3), src=src, remaining=round(remaining, 1))
-            dev = tick.bid - e_at                              # >0: il prezzo è sopra l'Entry atteso, <0: sotto
+            e_pend = e_at                                      # prezzo a cui mettere l'eventuale ordine pendente
+            if sig.get("zone"):                                # entry a ZONA (es. «Entry: 3610 - 3615»): dentro la zona lo scostamento è 0; fuori, si misura dal bordo più vicino e l'ordine pendente va su quel bordo
+                zlo, zhi = sig["zone"][0] + off, sig["zone"][1] + off
+                dev = 0.0 if zlo <= tick.bid <= zhi else (tick.bid - zhi if tick.bid > zhi else tick.bid - zlo)
+                e_pend = zhi if tick.bid > zhi else zlo
+            else:
+                dev = tick.bid - e_at                          # >0: il prezzo è sopra l'Entry atteso, <0: sotto
             if abs(dev) > ENTRY_DEV_MAX:                       # prezzo troppo lontano dall'Entry: niente mercato, ordine pendente sull'Entry (il prezzo può tornare nella zona)
                 tp1_real = (sig["tp_parz"] if sig.get("tp_parz") is not None else sig.get("_tp1_real", sig["tp1"])) + off          # TP1 vero del segnale, convertito
                 if (buy and tick.bid >= tp1_real) or (not buy and tick.bid <= tp1_real):
                     raise ValueError(f"il prezzo ({tick.bid:.2f}) ha già toccato il primo target del segnale ({tp1_real:.2f}): il setup è già andato, non metto ordini pendenti.")
                 cur = tick.ask if buy else tick.bid
-                above = e_at > cur                             # l'Entry sta sopra il prezzo di adesso?
+                above = e_pend > cur                           # l'Entry sta sopra il prezzo di adesso?
                 otype = (mt5.ORDER_TYPE_BUY_STOP if above else mt5.ORDER_TYPE_BUY_LIMIT) if buy else (mt5.ORDER_TYPE_SELL_LIMIT if above else mt5.ORDER_TYPE_SELL_STOP)
                 stops = (getattr(info, "trade_stops_level", 0) or 0) * (getattr(info, "point", 0.01) or 0.01)
-                if abs(e_at - cur) <= stops:
-                    raise ValueError(f"l'Entry {e_at:.2f} è troppo vicina al prezzo ({cur:.2f}) per un ordine pendente (distanza minima {stops:.2f}): non apro.")
+                if abs(e_pend - cur) <= stops:
+                    raise ValueError(f"l'Entry {e_pend:.2f} è troppo vicina al prezzo ({cur:.2f}) per un ordine pendente (distanza minima {stops:.2f}): non apro.")
                 pend = {"type": otype, "name": {mt5.ORDER_TYPE_BUY_STOP: "BUY STOP", mt5.ORDER_TYPE_BUY_LIMIT: "BUY LIMIT", mt5.ORDER_TYPE_SELL_LIMIT: "SELL LIMIT", mt5.ORDER_TYPE_SELL_STOP: "SELL STOP"}[otype],
-                        "price": e_at, "dev": dev, "off": off}
+                        "price": e_pend, "dev": dev, "off": off}
             if pend is None and remaining <= MIN_REMAINING_PIPS:
                 raise ValueError(f"al TP1 mancano solo {remaining:.0f} pips (minimo {MIN_REMAINING_PIPS:.0f}): non apro. Entry della sala {sig['entry']} = {e_at:.2f} sul tuo broker "
                                  f"(scarto {off:+.2f}, {src}), TP1 {tp_at:.2f}, prezzo ora {tick.bid:.2f}.")
