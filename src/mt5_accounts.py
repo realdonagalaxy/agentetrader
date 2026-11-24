@@ -470,9 +470,23 @@ def is_demo(mt5) -> bool:
     return mt5.account_info().trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO
 
 
+def entry_kind(comment: str) -> str:
+    """Come è stato aperto il trade, dal commento dell'ordine: «mercato», «limit» o «stop». Vuoto se non lo si sa (trade fatti a mano)."""
+    c = (comment or "").lower()
+    if c.startswith("tg-signal"):
+        if "-lim" in c:
+            return "limit"
+        if "-stp" in c or "-stop" in c:
+            return "stop"
+        return "mercato"
+    if c.startswith("split-"):
+        return "limit"                                              # ordine LIMIT dell'utente diviso con «Dividi»
+    return ""
+
+
 def _pos(p) -> dict:
     return {"ticket": int(p.ticket), "symbol": p.symbol, "side": "buy" if p.type == 0 else "sell", "volume": p.volume, "open": p.price_open, "price": p.price_current,
-            "sl": p.sl, "tp": p.tp, "profit": round(p.profit + getattr(p, "swap", 0.0), 2), "time": int(p.time), "magic": p.magic, "comment": p.comment}
+            "sl": p.sl, "tp": p.tp, "profit": round(p.profit + getattr(p, "swap", 0.0), 2), "time": int(p.time), "magic": p.magic, "comment": p.comment, "entry_kind": entry_kind(p.comment)}
 
 
 def equity_curve(acc: dict, days: int = 30) -> dict:
@@ -779,7 +793,7 @@ def _closed_trades(mt5, t0, t1) -> list[dict]:
                 info = mt5.symbol_info(d.symbol)
                 psize[d.symbol] = (info.point * 10) if info else 0.0001
         out.append({"day": when.strftime("%Y-%m-%d"), "position": int(d.position_id), "deal": int(d.ticket), "symbol": d.symbol, "side": "buy" if o.type == 0 else "sell",
-                    "volume": getattr(d, "volume", None), "open_time": int(o.time), "open_price": o.price, "close_time": int(d.time), "close_price": d.price,
+                    "entry_kind": entry_kind(getattr(o, "comment", "")), "volume": getattr(d, "volume", None), "open_time": int(o.time), "open_price": o.price, "close_time": int(d.time), "close_price": d.price,
                     "reason": "tp" if d.reason == mt5.DEAL_REASON_TP else "sl" if d.reason == mt5.DEAL_REASON_SL else "altra",
                     "pips": round(((d.price - o.price) if o.type == 0 else (o.price - d.price)) / psize[d.symbol], 1),
                     "net": round(d.profit + d.commission + d.swap + getattr(d, "fee", 0.0), 2)})

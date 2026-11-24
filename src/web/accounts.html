@@ -52,6 +52,8 @@ tr.opn,tr.opn:hover{background:rgba(56,189,248,.16)}                  /* posizio
 .panel.pendpanel .cal .gain{color:#7dff6e}
 .eqd.on{background:var(--lm)!important;color:var(--hdr)!important}
 .verbadge{display:inline-block;padding:1px 9px;border-radius:999px;border:1px solid #2cf9fe;color:#2cf9fe;background:rgba(44,249,254,.12);font:600 11px var(--mono);letter-spacing:.04em;vertical-align:1px}
+.entrykind{border:1px solid currentColor;background:transparent;font-weight:700;letter-spacing:.03em}
+.panel.pendpanel .ek-mercato,.ek-mercato{color:#ffd166;border-color:#ffd166}.panel.pendpanel .ek-limit,.ek-limit{color:#c9a7ff;border-color:#c9a7ff}.panel.pendpanel .ek-stop,.ek-stop{color:#ff9f6e;border-color:#ff9f6e}
 #eqchart svg{display:block;width:100%;height:auto;overflow:visible}
 #eqchart text{font:20px var(--mono);fill:var(--lm2)}
 #eqtip{position:absolute;pointer-events:none;background:#0a111b;border:1px solid #2f4768;border-radius:6px;padding:6px 10px;font:12px var(--mono);color:var(--lm);white-space:nowrap;z-index:5;box-shadow:0 6px 20px rgba(0,0,0,.5)}
@@ -392,6 +394,7 @@ function warn() {
   w.hidden = !msg.length; w.innerHTML = msg.map(esc).join("<br>");
 }
 let pendRows = [];
+const entryBadge = k => k ? ` <span class="badge entrykind ek-${k}" title="Come è stato aperto il trade">${k === "mercato" ? "a MERCATO" : k === "limit" ? "con LIMIT" : "con STOP"}</span>` : "";
 const atBE = p => p.sl && (p.side === "buy" ? p.sl >= p.open - Math.abs(p.open) * 1e-7 : p.sl <= p.open + Math.abs(p.open) * 1e-7);   // SL già a pareggio (o oltre, in profitto): il tasto BE non serve più
 function renderPending() {
   const rows = [], bad = [];
@@ -410,7 +413,7 @@ function renderPending() {
   pendRows = rows;
   $("pendrows").innerHTML = rows.length ? rows.map((o, i) => {
     const pos = o.kind === "pos", price = pos ? o.open : o.price, cur = pos ? o.price : o.current;
-    const stato = pos ? `<span class="badge ${o.side === "buy" ? "b-ok" : "b-err"}">${o.side.toUpperCase()}</span> <span class="badge b-sig">aperto</span>` : `<span class="badge ${o.side === "buy" ? "b-ok" : "b-err"}">${esc(o.tipo)}</span>`;
+    const stato = pos ? `<span class="badge ${o.side === "buy" ? "b-ok" : "b-err"}">${o.side.toUpperCase()}</span> <span class="badge b-sig">aperto</span>${entryBadge(o.entry_kind)}` : `<span class="badge ${o.side === "buy" ? "b-ok" : "b-err"}">${esc(o.tipo)}</span>`;
     const res = pos ? `<b class="${cls(o.profit)}">${money(o.profit, o.cur)}</b>` : `<span class="sub">in attesa</span>`;
     return `<tr${pos ? ` class="opn"` : ""}><td data-l="Conto"><b>${esc(o.login)}</b></td><td data-l="Stato">${stato}</td><td data-l="Asset"><b>${esc(o.symbol)}</b></td>
     <td class="r" data-l="Lotti">${o.volume ?? "—"}</td><td class="r" data-l="Entry"><b>${px(price)}</b></td><td class="r" data-l="SL">${px(o.sl)}</td><td class="r" data-l="TP">${px(o.tp)}</td>
@@ -736,7 +739,7 @@ async function openDay(day) {
   const pcs = v => v == null ? "—" : (v > 0 ? "+" : "") + Number(v).toFixed(2).replace(".", ",") + "%";
   $("daysum").innerHTML = `${j.trades.length} operazioni · <b class="${cls(j.pct)}">${pcs(j.pct)}</b> del saldo`;
   $("daybody").innerHTML = j.trades.map((t, i) => `<div class="tcard"><div class="thead">
-      <span class="badge ${t.side === "buy" ? "b-ok" : "b-err"}">${t.side.toUpperCase()}</span><b>${esc(t.symbol)}</b>${t.volume ? `<span class="num">${t.volume} lotti</span>` : ""}${reasonBadge(t.reason)}
+      <span class="badge ${t.side === "buy" ? "b-ok" : "b-err"}">${t.side.toUpperCase()}</span><b>${esc(t.symbol)}</b>${t.volume ? `<span class="num">${t.volume} lotti</span>` : ""}${reasonBadge(t.reason)}${entryBadge(t.entry_kind)}
       <span class="num ${cls(t.pct != null ? t.pct : t.net)}"><b>${pcs(t.pct)}</b></span><span class="num ${cls(t.net)}">${money(t.net, j.currency)}</span>
       <span class="sub num">${tm(t.open_time)} → ${tm(t.close_time)} · ${px(t.open_price)} → ${px(t.close_price)}</span></div>
       <div class="shot" id="shot${i}">Genero il grafico…</div></div>`).join("") || `<div class="sub">Nessuna operazione.</div>`;
