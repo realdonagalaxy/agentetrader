@@ -215,6 +215,10 @@ def provision_terminal(name: str, login: int) -> str:
         pass                                                      # la lista dei server è un aiuto: se manca, si aggiunge il server dal terminale
     with open(os.path.join(dst, "portable.flag"), "w") as f:
         f.write("portable")
+    try:
+        clean_terminal_credentials(os.path.join(dst, exe), apply=True)               # la copia parte senza accessi salvati (il demo preimpostato del broker)
+    except Exception:
+        pass
     if os.name == "nt":
         try:
             import subprocess
@@ -224,6 +228,67 @@ def provision_terminal(name: str, login: int) -> str:
         except Exception:
             pass                                                  # il collegamento è solo una comodità
     return os.path.join(dst, exe)
+
+
+def terminal_data_dirs(terminal_path: str) -> list[str]:
+    """Cartelle in cui un terminale MT5 tiene la configurazione (common.ini, accounts.dat): per un terminale portable la sua stessa cartella; per un'installazione normale la cartella dati in
+    %APPDATA%\\MetaQuotes\\Terminal\\<codice>, riconosciuta da origin.txt (contiene il percorso dell'installazione)."""
+    import glob
+    folder = _pm(terminal_path).dirname(terminal_path)
+    if is_portable(terminal_path):
+        return [folder]
+    out = []
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        want = os.path.normcase(os.path.normpath(folder)).lower()
+        for origin in glob.glob(os.path.join(appdata, "MetaQuotes", "Terminal", "*", "origin.txt")):
+            try:
+                raw = open(origin, "rb").read()
+                txt = raw.decode("utf-16") if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else raw.decode("utf-8", "ignore")
+            except OSError:
+                continue
+            if os.path.normcase(os.path.normpath(txt.strip())).lower() == want:
+                out.append(os.path.dirname(origin))
+    if os.path.isdir(os.path.join(folder, "config")) or os.path.isdir(os.path.join(folder, "Config")):
+        out.append(folder)
+    return out
+
+
+def clean_terminal_credentials(terminal_path: str, apply: bool = False) -> list[str]:
+    """Toglie da un terminale MT5 l'accesso salvato (di solito il demo del broker preimpostato nell'installazione): le righe Login, Password e Server di config\\common.ini e il file config\\accounts.dat
+    (conti memorizzati nel Navigatore). NON tocca la lista dei server (servers.dat). Con apply=False non scrive nulla e dice solo cosa farebbe; con apply=True fa una copia .bak di ogni file prima di modificarlo.
+    Chiudere MT5 prima. Restituisce l'elenco delle azioni."""
+    import re
+    import shutil
+    actions = []
+    for d in terminal_data_dirs(terminal_path):
+        for sub in ("config", "Config"):
+            cfg = os.path.join(d, sub)
+            if not os.path.isdir(cfg):
+                continue
+            acc_dat = os.path.join(cfg, "accounts.dat")
+            if os.path.isfile(acc_dat):
+                actions.append(f"elimino {acc_dat}")
+                if apply:
+                    shutil.copy2(acc_dat, acc_dat + ".bak")
+                    os.remove(acc_dat)
+            ini = os.path.join(cfg, "common.ini")
+            if os.path.isfile(ini):
+                raw = open(ini, "rb").read()
+                enc = "utf-16" if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8"
+                try:
+                    text = raw.decode(enc)
+                except UnicodeDecodeError:
+                    enc, text = "cp1252", raw.decode("cp1252", "ignore")
+                keys = [k for k in ("Login", "Password", "Server") if re.search(r"(?mi)^\s*" + k + r"\s*=", text)]
+                if keys:
+                    actions.append(f"tolgo {', '.join(keys)} da {ini}")
+                    if apply:
+                        shutil.copy2(ini, ini + ".bak")
+                        new = re.sub(r"(?mi)^\s*(?:Login|Password|Server)\s*=.*\r?\n?", "", text)
+                        out = new.encode(enc) if enc != "utf-16" else (b"\xff\xfe" + new.lstrip("\ufeff").encode("utf-16-le"))
+                        open(ini, "wb").write(out)
+    return actions
 
 
 def is_portable(terminal_path: str) -> bool:
@@ -451,8 +516,10 @@ def session(acc: dict):
             if is_portable(acc["terminal_path"]):
                 kw["portable"] = True                              # terminale dedicato al conto: stessa modalità con cui lo apri a mano (collegamento sul Desktop)
         pw = get_password(acc)
-        if pw or os.environ.get("MT5_SIMULATOR") == "1":
-            kw.update(login=int(acc["login"]), password=pw or "", server=acc["server"])
+        if not pw and os.environ.get("MT5_SIMULATOR") != "1":
+            # Senza password NON si avvia MT5: il terminale si aprirebbe sul conto che ha salvato (di solito il demo preimpostato dal broker) e il programma leggerebbe o opererebbe sul conto sbagliato.
+            raise RuntimeError(f"Password non salvata per il conto {acc['login']}: non avvio MT5 senza credenziali. Apri «Conti» → «Modifica» e scrivila (si salva nel Gestore credenziali di Windows).")
+        kw.update(login=int(acc["login"]), password=pw or "", server=acc["server"])
         mt5.shutdown()                                              # parte sempre da uno stato pulito: nessun collegamento rimasto da un altro conto
         kw["timeout"] = int(os.environ.get("MT5_TIMEOUT_MS") or 60000)   # un terminale appena copiato impiega di più al primo avvio
         ok = mt5.initialize(**kw)
