@@ -738,6 +738,24 @@ def log_chiusura(t: dict, d, reason: str, pips_signed: float) -> None:
 CURRENT_CHANNEL = ""                                          # canale del segnale che si sta applicando (vuoto = il primo di TELEGRAM_CANALE)
 
 
+def _norm_ch(x: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (x or "").lower())
+
+
+def primary_channel_label() -> str:
+    """Nome (titolo Telegram) del primo canale: lo scrive l'ascolto in journal/canali.json; altrimenti il primo nome di TELEGRAM_CANALE."""
+    try:
+        return str(json.loads((JOURNAL_DIR / "canali.json").read_text(encoding="utf-8")).get("0") or "")
+    except (OSError, ValueError):
+        return os.environ.get("TELEGRAM_CANALE", "").split(",")[0].strip()
+
+
+def channel_ok(acc: dict, channel: str) -> bool:
+    """Il conto riceve i segnali di questo canale? Nessun canale scelto nel conto = li riceve tutti."""
+    chans = acc.get("channels") or []
+    return not chans or _norm_ch(channel) in {_norm_ch(c) for c in chans}
+
+
 def _sala() -> str:
     """Identificativo della sala da cui arrivano i segnali: il canale del segnale in corso, altrimenti il primo di TELEGRAM_CANALE. Ogni sala ha il suo scarto di prezzo, perché ogni sala quota un broker diverso."""
     name = CURRENT_CHANNEL or os.environ.get("TELEGRAM_CANALE", "").split(",")[0]
@@ -1062,7 +1080,11 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
             else:
                 log_segnale(m.get("message_id") or m.get("chan_id"), m.get("date"), sig, text)
                 lines = [f"ℹ️ Manca la riga BUY/SELL: direzione dedotta dai livelli, {sig['side'].upper()} {sig['symbol']}."] if sig.get("inferred") else []
-                targets = active_accounts() or [None]
+                accs_all = active_accounts()
+                chan_label = CURRENT_CHANNEL or primary_channel_label()
+                targets = [a for a in accs_all if channel_ok(a, chan_label)] if accs_all else [None]       # ogni conto riceve solo i canali che gli hai associato (nessuno scelto = tutti)
+                if accs_all and not targets:
+                    lines.append(f"ℹ️ Nessun conto è associato al canale «{chan_label}»: segnale non applicato.")
                 sig_id = m.get("message_id") or m.get("chan_id")
                 for acc in targets:
                     tag = f"[{acc['name']}] " if acc else ""

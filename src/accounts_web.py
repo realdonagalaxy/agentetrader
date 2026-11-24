@@ -456,6 +456,14 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/accounts":
                 return self._json({"accounts": ma.list_accounts(), "simulator": os.environ.get("MT5_SIMULATOR") == "1", "signals": signals_enabled(), **version_info()})
+            if path == "/api/channels":                                            # canali di segnali conosciuti (titoli letti dall'ascolto; altrimenti i nomi in TELEGRAM_CANALE)
+                names = []
+                try:
+                    d_ = json.loads((ma.DATA_DIR / "canali.json").read_text(encoding="utf-8"))
+                    names = [d_[k] for k in sorted(d_, key=int)]
+                except (OSError, ValueError, KeyError):
+                    names = [x.strip() for x in os.environ.get("TELEGRAM_CANALE", "").split(",") if x.strip()]
+                return self._json({"channels": names})
             if path == "/api/telegram":
                 return self._json(telegram_status())
             if path == "/api/signals-day":
