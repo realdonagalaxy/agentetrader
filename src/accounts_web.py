@@ -195,6 +195,10 @@ def signals_day(date: str, tz_min: int, manual: bool = False) -> dict:
             if e.get("esito") == "aperto" and e.get("ticket"):
                 needed.setdefault(lg, []).extend(x.strip() for x in str(e["ticket"]).split(",") if x.strip())      # con la parzializzazione i ticket sono due
     real = _closures_from_mt5(needed) if needed else {}
+    try:                                                                        # canali di segnali (indice -> nome), scritti dall'ascolto
+        canali = {int(k): v for k, v in json.loads((ma.DATA_DIR / "canali.json").read_text(encoding="utf-8")).items()}
+    except (OSError, ValueError):
+        canali = {}
     rows = []
     for mid, g in sorted(sigs.items(), key=lambda kv: kv[1]["t"]):
         per = {}
@@ -245,10 +249,11 @@ def signals_day(date: str, tz_min: int, manual: bool = False) -> dict:
                             c[k] = rr[k]
             per[lg] = c
         n_open = sum(1 for c in per.values() if c["stato"] in ("aperto", "stop"))
-        rows.append({"id": mid, "t": g["t"], "side": g.get("side") or "", "symbol": g.get("symbol") or "", "entry": g.get("entry"), "sl": g.get("sl"),
+        cidx = int(mid) // 10 ** 9 if str(mid).isdigit() else 0                  # i messaggi dei canali aggiuntivi hanno l'id spostato di indice × 1 miliardo
+        rows.append({"canale": canali.get(cidx, ""), "canale_idx": cidx, "id": mid, "t": g["t"], "side": g.get("side") or "", "symbol": g.get("symbol") or "", "entry": g.get("entry"), "sl": g.get("sl"),
                      "tp1": g.get("tp1"), "tp2": g.get("tp2"), "tp3": g.get("tp3"), "errore": g.get("errore") or "", "conti": per, "aperti": n_open,
                      "cedric": sorted(res_by_sig.get(mid, []), key=lambda x: x["t"]), "tipo": g.get("tipo") or "", "rischio": g.get("rischio") or "", "parz": g.get("parz") or "", "nota": g.get("nota") or ""})
-    return {"date": date, "conti": [{"login": lg, "target": a.get("tp_target") or 1} for lg, a in accs.items()], "segnali": rows, "esiti_orfani": orfani}
+    return {"date": date, "conti": [{"login": lg, "target": a.get("tp_target") or 1} for lg, a in accs.items()], "segnali": rows, "esiti_orfani": orfani, "canali": [canali[k] for k in sorted(canali)]}
 
 
 def telegram_status() -> dict:

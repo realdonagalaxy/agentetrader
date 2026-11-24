@@ -54,6 +54,8 @@ tr.opn,tr.opn:hover{background:rgba(56,189,248,.16)}                  /* posizio
 .verbadge{display:inline-block;padding:1px 9px;border-radius:999px;border:1px solid #2cf9fe;color:#2cf9fe;background:rgba(44,249,254,.12);font:600 11px var(--mono);letter-spacing:.04em;vertical-align:1px}
 .entrykind{border:1px solid currentColor;background:transparent;font-weight:700;letter-spacing:.03em}
 .panel.pendpanel .ek-mercato,.ek-mercato{color:#ffd166;border-color:#ffd166}.panel.pendpanel .ek-limit,.ek-limit{color:#c9a7ff;border-color:#c9a7ff}.panel.pendpanel .ek-stop,.ek-stop{color:#ff9f6e;border-color:#ff9f6e}
+.chb{border:1px solid currentColor;background:transparent;font-weight:700}
+.panel.pendpanel .ch0,.ch0{color:#2cf9fe;border-color:#2cf9fe}.panel.pendpanel .ch1,.ch1{color:#ff7bd5;border-color:#ff7bd5}.panel.pendpanel .ch2,.ch2{color:#ffd166;border-color:#ffd166}.panel.pendpanel .ch3,.ch3{color:#c9a7ff;border-color:#c9a7ff}
 #eqchart svg{display:block;width:100%;height:auto;overflow:visible}
 #eqchart text{font:20px var(--mono);fill:var(--lm2)}
 #eqtip{position:absolute;pointer-events:none;background:#0a111b;border:1px solid #2f4768;border-radius:6px;padding:6px 10px;font:12px var(--mono);color:var(--lm);white-space:nowrap;z-index:5;box-shadow:0 6px 20px rgba(0,0,0,.5)}
@@ -241,7 +243,8 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
   </div>
 </div>
 <div id="tab-seg" hidden style="display:grid;gap:16px">
-  <div class="panel pendpanel"><h2>Segnali del canale <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
+  <div class="panel pendpanel"><h2>Segnali dei canali <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <select id="schan" aria-label="Canale" style="width:auto;padding:6px 8px" hidden></select>
       <input type="date" id="sdate" aria-label="Giorno" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit">
       <button class="btn sm sec" id="sload">Aggiorna</button><button class="btn sm" id="ssync" title="Chiede al programma dei segnali di leggere dal canale tutti i messaggi di quel giorno e di registrarli (senza aprire nulla)">Scarica dal canale</button></span></h2>
     <div class="kpis" id="skpis" style="padding:0 16px 8px"></div>
@@ -781,13 +784,24 @@ $("sdate").value = todayStr();
 async function loadSignals() {
   let r;
   try { r = await api(`/api/signals-day?date=${$("sdate").value}&tz=${new Date().getTimezoneOffset()}`); } catch (e) { toast(e.message, 6000); return; }
+  const names = r.canali || [], sel = $("schan");                          // più canali: filtro e etichette; con un solo canale non compaiono
+  chanNames = names;
+  if (names.length > 1) {
+    const prev = sel.value;
+    sel.innerHTML = `<option value="">Tutti i canali</option>` + names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+    sel.value = names.includes(prev) ? prev : ""; sel.hidden = false;
+    if (sel.value) r.segnali = r.segnali.filter(s => s.canale === sel.value);
+  } else sel.hidden = true;
   renderSig(r, {k: "skpis", g: "sgain", h: "shead", r: "srows", o: "sorf"}, false);
 }
+let chanNames = [];
+const chanBadge = s => chanNames.length > 1 && s.canale ? `<span class="badge chb ch${s.canale_idx % 4}" title="Canale di provenienza">${esc(s.canale)}</span> ` : "";
 function renderSig(r, ids, manual) {
   const accs = r.conti, S = r.segnali;
   const allOpen = S.filter(s => accs.length && accs.every(a => ["aperto", "stop"].includes((s.conti[a.login] || {}).stato))).length;
   const some = S.filter(s => s.aperti > 0).length;
-  $(ids.k).innerHTML = `<div class="kpi"><div class="l">${manual ? "Trade manuali" : "Segnali del canale"}</div><div class="v">${S.length}</div></div>
+  const perCh = chanNames.length > 1 ? chanNames.map(n => `${esc(n)} ${S.filter(s => s.canale === n).length}`).join(" · ") : "";
+  $(ids.k).innerHTML = `<div class="kpi"><div class="l">${manual ? "Trade manuali" : "Segnali ricevuti"}</div><div class="v">${S.length}</div>${perCh ? `<div class="s">${perCh}</div>` : ""}</div>
     <div class="kpi"><div class="l">Aperti su almeno un conto</div><div class="v">${some}</div></div>
     <div class="kpi"><div class="l">Aperti su tutti i conti</div><div class="v">${allOpen}</div><div class="s">${S.length ? Math.round(100 * allOpen / S.length) : 0}% dei ${manual ? "trade" : "segnali"}</div></div>
     <div class="kpi"><div class="l">Non aperti</div><div class="v">${S.length - some}</div></div>
@@ -833,10 +847,10 @@ function renderSig(r, ids, manual) {
     const t = new Date(s.t), hh = t.toLocaleTimeString("it-IT", {hour: "2-digit", minute: "2-digit"});
     const dir = s.side ? s.side.toUpperCase() + " " + esc(s.symbol) : `<span class="err">${esc(s.errore || "non letto")}</span>`;
     const nz = v => v === "" || v == null ? "—" : esc(String(Math.round(+v * 100) / 100));          // niente 4098.469999999999
-    return `<tr><td data-l="Ora">${hh}</td><td data-l="Segnale"><b>${dir}</b></td><td class="r" data-l="Entry">${nz(s.entry)}</td><td class="r" data-l="SL">${nz(s.sl)}</td><td class="r" data-l="TP1">${nz(s.tp1)}</td><td class="r" data-l="TP2">${nz(s.tp2)}</td><td class="r" data-l="TP3">${nz(s.tp3)}</td><td class="wide" data-l="${manual ? "Ingresso · rischio" : "Esito Cedric"}">${manual ? `<span class="badge b-off">${({market: "mercato", limit: "limit", stop: "stop"})[s.tipo] || esc(s.tipo)}</span> ${esc(s.rischio)}%${s.parz ? ` · parz. ${esc(s.parz)}% a TP1` : ""}${s.nota ? ` <span class="sub">${esc(s.nota)}</span>` : ""}` : cedric(s)}</td>${accs.map(a => `<td class="wide" data-l="Conto ${esc(a.login)} · TP${a.target}">${cell(s.conti[a.login])}</td>`).join("")}</tr>`;
+    return `<tr><td data-l="Ora">${hh}</td><td data-l="Segnale">${chanBadge(s)}<b>${dir}</b></td><td class="r" data-l="Entry">${nz(s.entry)}</td><td class="r" data-l="SL">${nz(s.sl)}</td><td class="r" data-l="TP1">${nz(s.tp1)}</td><td class="r" data-l="TP2">${nz(s.tp2)}</td><td class="r" data-l="TP3">${nz(s.tp3)}</td><td class="wide" data-l="${manual ? "Ingresso · rischio" : "Esito Cedric"}">${manual ? `<span class="badge b-off">${({market: "mercato", limit: "limit", stop: "stop"})[s.tipo] || esc(s.tipo)}</span> ${esc(s.rischio)}%${s.parz ? ` · parz. ${esc(s.parz)}% a TP1` : ""}${s.nota ? ` <span class="sub">${esc(s.nota)}</span>` : ""}` : cedric(s)}</td>${accs.map(a => `<td class="wide" data-l="Conto ${esc(a.login)} · TP${a.target}">${cell(s.conti[a.login])}</td>`).join("")}</tr>`;
   }).join("") : `<tr><td colspan="${8 + accs.length}" class="sub" style="padding:14px">${manual ? "Nessun trade manuale per questo giorno." : "Nessun segnale registrato per questo giorno. Se sai che ce ne sono stati, premi «Scarica dal canale»."}</td></tr>`;
 }
-$("sload").onclick = loadSignals; $("sdate").onchange = loadSignals;
+$("sload").onclick = loadSignals; $("sdate").onchange = loadSignals; $("schan").onchange = loadSignals;
 $("ssync").onclick = async () => {
   const b = $("ssync"); b.disabled = true;
   try {
