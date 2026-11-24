@@ -262,6 +262,7 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
 
 def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "", partial: float = 0.0, allow_real: bool = False) -> tuple[str, list]:
     """Valida e (se non dry) invia l'ordine. Restituisce (testo di risposta, elenco delle posizioni da seguire: una, oppure due se il segnale ha il TP2); solleva ValueError se rifiutato."""
+    MRP = min_remaining_pips()
     ti = mt5.terminal_info()
     if ti is not None and getattr(ti, "trade_allowed", True) is False:
         raise ValueError("Il trading automatico è spento in MT5 (pulsante «Algo Trading» rosso). Chiudi MT5 e lancia  .venv\\Scripts\\python -m src.prepara_mt5  per correggere l'impostazione che lo spegne al cambio di conto.")
@@ -320,8 +321,8 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
                     raise ValueError(f"l'Entry {e_pend:.2f} è troppo vicina al prezzo ({cur:.2f}) per un ordine pendente (distanza minima {stops:.2f}): non apro.")
                 pend = {"type": otype, "name": {mt5.ORDER_TYPE_BUY_STOP: "BUY STOP", mt5.ORDER_TYPE_BUY_LIMIT: "BUY LIMIT", mt5.ORDER_TYPE_SELL_LIMIT: "SELL LIMIT", mt5.ORDER_TYPE_SELL_STOP: "SELL STOP"}[otype],
                         "price": e_pend, "dev": dev, "off": off}
-            if pend is None and remaining <= MIN_REMAINING_PIPS:
-                raise ValueError(f"al TP1 mancano solo {remaining:.0f} pips (minimo {MIN_REMAINING_PIPS:.0f}): non apro. Entry della sala {sig['entry']} = {e_at:.2f} sul tuo broker "
+            if pend is None and remaining <= MRP:
+                raise ValueError(f"al TP1 mancano solo {remaining:.0f} pips (minimo {MRP:.0f}): non apro. Entry della sala {sig['entry']} = {e_at:.2f} sul tuo broker "
                                  f"(scarto {off:+.2f}, {src}), TP1 {tp_at:.2f}, prezzo ora {tick.bid:.2f}.")
             if (buy and sl_at >= tick.bid) or (not buy and sl_at <= tick.bid):
                 raise ValueError(f"il prezzo ({tick.bid:.2f}) ha già superato lo SL convertito ({sl_at:.2f}): non apro.")
@@ -335,7 +336,7 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
             note_off = f" · Entry sul tuo broker {e_at:.2f} (scarto {off:+.2f}, {src}) · al TP{sig.get('_target', 1)} mancano {remaining:.0f} pips" + zone_note
         else:                                              # nessuno scarto disponibile: distanze dall'Entry sul prezzo di adesso, filtro dei pips non applicabile
             sl, tp = (ref - sl_d, ref + tp_d) if buy else (ref + sl_d, ref - tp_d)
-            note_off = f" · filtro dei {MIN_REMAINING_PIPS:.0f} pips NON applicato: scarto non disponibile ({src})" + (f" · zona {sig['zone'][0]:g}-{sig['zone'][1]:g} NON verificata (scarto da misurare)" if sig.get("zone") else "")
+            note_off = f" · filtro dei {MRP:.0f} pips NON applicato: scarto non disponibile ({src})" + (f" · zona {sig['zone'][0]:g}-{sig['zone'][1]:g} NON verificata (scarto da misurare)" if sig.get("zone") else "")
         try:
             log_scarto(tag, sig, tick, scarto)
         except OSError:
@@ -734,9 +735,23 @@ def log_chiusura(t: dict, d, reason: str, pips_signed: float) -> None:
                 [now_iso(), t.get("sig_id") or t.get("msg_id", ""), t.get("account", ""), t["symbol"], t["side"], t.get("part") or "", reason, t["open"], d.price, round(pips_signed, 1), d.profit, int(d.time)])
 
 
+CURRENT_CHANNEL = ""                                          # canale del segnale che si sta applicando (vuoto = il primo di TELEGRAM_CANALE)
+
+
 def _sala() -> str:
-    """Identificativo della sala da cui arrivano i segnali (da TELEGRAM_CANALE): ogni sala ha il suo scarto di prezzo, perché ogni sala quota un broker diverso."""
-    return re.sub(r"[^a-z0-9]+", "-", os.environ.get("TELEGRAM_CANALE", "").lower()).strip("-")
+    """Identificativo della sala da cui arrivano i segnali: il canale del segnale in corso, altrimenti il primo di TELEGRAM_CANALE. Ogni sala ha il suo scarto di prezzo, perché ogni sala quota un broker diverso."""
+    name = CURRENT_CHANNEL or os.environ.get("TELEGRAM_CANALE", "").split(",")[0]
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def min_remaining_pips() -> float:
+    """Pips minimi che devono mancare al TP1 per aprire a mercato. Valore generale MIN_REMAINING_PIPS (45); ogni canale può avere il suo con MIN_PIPS_<CANALE> in config.env (es. MIN_PIPS_AURAKAGE=0)."""
+    s = _sala()
+    v = os.environ.get("MIN_PIPS_" + s.upper().replace("-", "_")) if s else None
+    try:
+        return float(v.replace(",", ".")) if v not in (None, "") else MIN_REMAINING_PIPS
+    except ValueError:
+        return MIN_REMAINING_PIPS
 
 
 def scarti_path() -> Path:
@@ -922,6 +937,7 @@ class NullBot:
 
 
 def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
+    global CURRENT_CHANNEL
     from dotenv import load_dotenv
     load_dotenv("config.env")
     from src import mt5_accounts as ma
@@ -1016,7 +1032,8 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
         while not feed.empty():                                      # messaggi del canale: stesso percorso dei messaggi al bot (cid = chat attesa)
             fitem = feed.get()
             ftext, fid, fdate = fitem[:3]
-            ups.append({"update_id": None, "message": {"text": ftext, "chat": {"id": allowed}, "date": fdate, "message_id": None, "chan_id": fid, "force": len(fitem) > 3}})
+            ups.append({"update_id": None, "message": {"text": ftext, "chat": {"id": allowed}, "date": fdate, "message_id": None, "chan_id": fid, "force": len(fitem) > 3 and bool(fitem[3]),
+                                                       "channel": fitem[4] if len(fitem) > 4 else ""}})
         for u in ups:
             if u["update_id"] is not None:
                 offset = u["update_id"] + 1
@@ -1033,8 +1050,9 @@ def main(dry: bool, channel: str = "", no_bot: bool = False) -> None:
                 print(f"Messaggio scartato: pubblicato {time.time() - m.get('date', 0):.0f} s fa (limite {MAX_AGE_S} s): {text[:60]!r}", flush=True)
                 say(bot, "⚠️ Messaggio troppo vecchio (> 2 minuti): ignorato.")
                 continue
+            CURRENT_CHANNEL = m.get("channel") or ""                   # canale di questo segnale: decide scarto di prezzo e filtro dei pips
             if m.get("chan_id"):                                       # dal canale: te lo inoltro subito sul tuo Telegram, poi lo applico
-                say(bot, "📨 Segnale dal canale:\n\n" + text)
+                say(bot, "📨 Segnale dal canale" + (f" {CURRENT_CHANNEL}" if CURRENT_CHANNEL else "") + ":\n\n" + text)
             say(bot, "📥 Segnale ricevuto, lo applico sui conti…", m.get("message_id"))        # conferma immediata: se questa non arriva, il messaggio non è giunto al programma
             try:
                 sig = parse_signal(text)

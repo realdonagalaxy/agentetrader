@@ -146,7 +146,24 @@ def is_signal_text(text: str) -> bool:
     return looks_like_signal(t) and bool(re.search(r"\b(?:Entry|EP)\s*[:=]?\s*\d", t, re.I))
 
 
-def handle_message(msg, edited: bool, seen: set, acted: set, q=None, max_age: float = 120.0, skew: float = 0.0) -> str:
+class MsgOffset:
+    """Messaggio di un canale AGGIUNTIVO: l'id è spostato di indice × 1 miliardo, così i numeri dei messaggi di canali diversi non si scontrano (registri, prenotazioni, risposte). Il primo canale resta invariato."""
+
+    def __init__(self, m, off: int):
+        self._m, self._off, self.id = m, off, m.id + off
+
+    def __getattr__(self, k):
+        return getattr(self._m, k)
+
+    @property
+    def reply_to(self):
+        from types import SimpleNamespace
+        r = getattr(self._m, "reply_to", None)
+        rid = getattr(r, "reply_to_msg_id", None)
+        return SimpleNamespace(reply_to_msg_id=(rid + self._off) if rid else None)
+
+
+def handle_message(msg, edited: bool, seen: set, acted: set, q=None, max_age: float = 120.0, skew: float = 0.0, channel: str = "") -> str:
     """Un messaggio nuovo o MODIFICATO del canale. Cedric pubblica il segnale come foto e ne scrive il testo pochi secondi dopo modificando il messaggio:
     alla creazione il testo è vuoto, quindi si agisce anche sulle modifiche. Ogni messaggio-segnale viene aperto una sola volta (acted).
     skew = secondi di anticipo (+) o ritardo (-) dell'orologio del PC rispetto a quello di Telegram: l'età del messaggio si calcola con l'ora di Telegram, così un PC con l'ora sbagliata non scarta i segnali."""
@@ -162,8 +179,8 @@ def handle_message(msg, edited: bool, seen: set, acted: set, q=None, max_age: fl
         age = time.time() - ts
         if q is not None:
             if age <= max_age:
-                q.put((text, msg.id, ts))
-                print(f"[canale] segnale #{msg.id} in coda ({age:.0f} s dalla pubblicazione)", flush=True)
+                q.put((text, msg.id, ts, False, channel) if channel else (text, msg.id, ts))
+                print(f"[canale] segnale #{msg.id}{(' [' + channel + ']') if channel else ''} in coda ({age:.0f} s dalla pubblicazione)", flush=True)
             else:
                 print(f"[canale] segnale #{msg.id} SCARTATO: pubblicato {age:.0f} s fa (limite {max_age:.0f} s)", flush=True)
         return "segnale"
@@ -268,8 +285,22 @@ def start_channel_feed(name: str, q, notify=None) -> None:
                 write_status(state="errore")
                 tell("Canale Telegram: sessione non autorizzata. Esegui prima: python -m src.telegram_reader --elenca")
                 return False
-            ent = await _find(client, name)
-            title = getattr(ent, "title", None) or name
+            names = [x.strip() for x in str(name).split(",") if x.strip()]         # più canali: «Cedric FX - Élite, AuraKage»; il primo è quello storico
+            ent = await _find(client, names[0])
+            title = getattr(ent, "title", None) or names[0]
+            extras = []                                                          # (indice, nome, entità) dei canali aggiuntivi
+            for i, nm in enumerate(names[1:], start=1):
+                try:
+                    extras.append((i, nm, await _find(client, nm)))
+                except SystemExit as e:                                          # un canale aggiuntivo non trovato non deve fermare il primo
+                    tell(f"Canale aggiuntivo «{nm}» non collegato: {e}")
+            try:                                                                 # elenco dei canali (indice -> nome) per Gestione Conti
+                import json as _j
+                (JOURNAL / "canali.json").write_text(_j.dumps({"0": title, **{str(i): getattr(e, "title", None) or nm for i, nm, e in extras}}, ensure_ascii=False), encoding="utf-8")
+            except OSError:
+                pass
+            if extras:
+                title = title + " + " + " + ".join(getattr(e, "title", None) or nm for _, nm, e in extras)
             write_status(state="collegato", title=title, detail="")
 
             from src.mt5_orders import MAX_AGE_S
@@ -292,6 +323,22 @@ def start_channel_feed(name: str, q, notify=None) -> None:
                 r = handle_message(ev.message, True, seen, acted, q, MAX_AGE_S, state.get("skew", 0.0))
                 if r == "segnale":
                     write_status(last_msg=ev.message.date.timestamp(), last_signal=True)
+
+            for i, nm, e in extras:                                           # canali aggiuntivi: stessa connessione, id spostati per non scontrarsi con quelli del primo canale
+                label = getattr(e, "title", None) or nm
+
+                def _mk(i=i, label=label, e=e):
+                    @client.on(events.NewMessage(chats=e))
+                    async def h_new(ev):
+                        r_ = handle_message(MsgOffset(ev.message, i * 10 ** 9), False, seen, acted, q, MAX_AGE_S, state.get("skew", 0.0), channel=label)
+                        write_status(last_msg=ev.message.date.timestamp(), last_signal=(r_ == "segnale") or None)
+
+                    @client.on(events.MessageEdited(chats=e))
+                    async def h_edit(ev):
+                        r_ = handle_message(MsgOffset(ev.message, i * 10 ** 9), True, seen, acted, q, MAX_AGE_S, state.get("skew", 0.0), channel=label)
+                        if r_ == "segnale":
+                            write_status(last_msg=ev.message.date.timestamp(), last_signal=True)
+                _mk()
 
             async def pulse():                                                # ogni 15 s: connessione viva? (serve a Gestione Conti per mostrare lo stato vero)
                 while True:
