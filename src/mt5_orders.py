@@ -369,7 +369,7 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
                 raise ValueError(f"ordine rifiutato dal broker: {why}")
             note = f" · ATTENZIONE: la seconda parte ({name}) non è stata aperta: {why}"
             break
-        trks.append({"position": int(res.order), "symbol": sym, "side": sig["side"], "open": float(res.price), "tp": req["tp"], "sl": req["sl"], "part": name, "group": group})
+        trks.append({"position": int(res.order), "symbol": sym, "side": sig["side"], "open": actual_open(mt5, res.order, res.price, px), "tp": req["tp"], "sl": req["sl"], "part": name, "group": group})
     return (f"✅ Aperto: {summary} · prezzo eseguito {trks[0]['open']} · ticket {', '.join(str(t['position']) for t in trks)}{note}", trks)
 
 
@@ -413,7 +413,7 @@ def _execute_stop(mt5, sig: dict, sym: str, info, tick, lots: float, dry: bool, 
     ok = (mt5.TRADE_RETCODE_DONE, getattr(mt5, "TRADE_RETCODE_PLACED", 10008))
     if res is None or res.retcode not in ok:
         raise ValueError(f"ordine rifiutato dal broker: {getattr(res, 'retcode', None)} {getattr(res, 'comment', mt5.last_error())}")
-    trk = {"position": int(res.order), "symbol": sym, "side": sig["side"], "open": float(entry if valid else res.price), "tp": req["tp"], "sl": req["sl"], "part": None,
+    trk = {"position": int(res.order), "symbol": sym, "side": sig["side"], "open": float(entry) if valid else actual_open(mt5, res.order, res.price, req["price"]), "tp": req["tp"], "sl": req["sl"], "part": None,
            "group": f"{time.time():.0f}-{tag}", "pending": valid, "kind": kind}
     return f"{summary} · ticket {res.order}", [trk]
 
@@ -452,14 +452,38 @@ def follow_orders(mt5, pending: dict, bot, only=None) -> None:
         save_pending(pending)
 
 
+def actual_open(mt5, ticket, res_price, fallback) -> float:
+    """Prezzo di apertura VERO della posizione. Alcuni broker restituiscono price = 0.0 nella risposta dell'ordine a mercato: usare quel valore portava lo SL «a pareggio» a 0, cioè lo toglieva.
+    Si legge dalla posizione aperta, poi dall'operazione di ingresso nella cronologia; solo in ultimo dalla risposta dell'ordine o dal prezzo atteso."""
+    try:
+        for p in (mt5.positions_get(ticket=int(ticket)) or ()):
+            if float(p.price_open) > 0:
+                return float(p.price_open)
+    except Exception:
+        pass
+    try:
+        for d in (mt5.history_deals_get(position=int(ticket)) or ()):
+            if d.entry == mt5.DEAL_ENTRY_IN and float(d.price) > 0:
+                return float(d.price)
+    except Exception:
+        pass
+    return float(res_price) if res_price and float(res_price) > 0 else float(fallback)
+
+
 def move_to_be(mt5, t: dict) -> bool:
     """Sposta lo SL della posizione al prezzo di apertura (pareggio). False se non si può (posizione chiusa, prezzo già tornato oltre il pareggio, rifiuto del broker)."""
     pos = [p for p in (mt5.positions_get() or []) if int(p.ticket) == int(t["position"])]
     if not pos:
         return False
     p = pos[0]
+    be = float(p.price_open)                                          # SEMPRE il prezzo di apertura letto dalla posizione, mai quello registrato: se fosse 0 lo SL verrebbe tolto
+    if be <= 0:
+        return False
     info = mt5.symbol_info(t["symbol"])
-    req = {"action": mt5.TRADE_ACTION_SLTP, "symbol": p.symbol, "position": p.ticket, "sl": round(t["open"], getattr(info, "digits", 2)), "tp": p.tp, "magic": MAGIC}
+    be = round(be, getattr(info, "digits", 2))
+    if p.sl and abs(float(p.sl) - be) < 1e-9:
+        return True
+    req = {"action": mt5.TRADE_ACTION_SLTP, "symbol": p.symbol, "position": p.ticket, "sl": be, "tp": p.tp, "magic": MAGIC}
     res = mt5.order_send(req)
     return res is not None and res.retcode == mt5.TRADE_RETCODE_DONE
 
@@ -523,6 +547,10 @@ def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
             continue
         d = out[-1]
         del pending[key]
+        if not t.get("open"):                                           # registrazioni fatte con prezzo di apertura 0.0: lo si ricava dall'operazione di ingresso
+            ins = [x for x in deals if x.entry == mt5.DEAL_ENTRY_IN and float(x.price) > 0]
+            if ins:
+                t["open"] = float(ins[0].price)
         n = pips(t["symbol"], d.price, t["open"])
         info = mt5.symbol_info(t["symbol"])
         price = f"{d.price:.{getattr(info, 'digits', 2)}f}"              # prezzo a cui la posizione si è chiusa
