@@ -531,15 +531,22 @@ def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
         part, sib = t.get("part"), [(k2, t2) for k2, t2 in pending.items() if t2.get("group") and t2.get("group") == t.get("group") and k2 != key]
         if d.reason == mt5.DEAL_REASON_TP:
             lab = f"TP{t.get('target', 2 if part == 'tp2' else 1)} {sgn:+.0f} pips · prezzo {price}"
-            announce(bot, mt5, t, deals, d, f"✅ {lab}", lab)
-            if part == "tp1":                                           # parte a TP1 incassata: lo stop del resto va a pareggio
+            if part == "tp1":                                           # parte a TP1 incassata: lo stop del resto va a pareggio. PRIMA dell'annuncio (grafico e Telegram possono tardare o fallire) e, se non riesce subito, si riprova (retry_be)
                 for k2, t2 in sib:
                     if t2.get("part") == "tp2":
+                        t2["be_due"] = True
                         try:
                             t2["be"] = move_to_be(mt5, t2)
-                            print(f"SL a pareggio sulla posizione {t2['position']}: {'fatto' if t2['be'] else 'non possibile (prezzo già tornato sotto il pareggio?)'}", flush=True)
+                            if t2["be"]:
+                                t2["be_due"] = False
+                            print(f"SL a pareggio sulla posizione {t2['position']}: {'fatto' if t2['be'] else 'non possibile ora (prezzo sotto il pareggio?): riprovo a ogni controllo'}", flush=True)
                         except Exception as e:
-                            print("SL a pareggio non riuscito:", str(e)[:120], flush=True)
+                            print("SL a pareggio non riuscito, riprovo:", str(e)[:120], flush=True)
+                save_pending(pending)
+            try:
+                announce(bot, mt5, t, deals, d, f"✅ {lab}", lab)
+            except Exception as e:                                      # un errore nell'annuncio non deve bloccare il resto
+                print("Annuncio non riuscito:", str(e)[:120], flush=True)
         elif d.reason == mt5.DEAL_REASON_SL:
             if part == "tp2" and t.get("be"):
                 lab = f"BE {sgn:+.0f} pips · prezzo {price}"
@@ -552,6 +559,25 @@ def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
         log([datetime.now(timezone.utc).isoformat(timespec="seconds"), f"chiusura posizione {t['position']}", f"motivo {d.reason} prezzo {d.price} profitto {d.profit}"])
         log_chiusura(t, d, "tp" if d.reason == mt5.DEAL_REASON_TP else "sl" if d.reason == mt5.DEAL_REASON_SL else "altra", sgn)
         save_pending(pending)
+
+
+def retry_be(mt5, pending: dict, only=None) -> None:
+    """Riprova a portare a pareggio le posizioni TP2 la cui parte TP1 è già stata incassata ma lo stop non si era potuto spostare (prezzo momentaneamente sotto il pareggio, rifiuto del broker, errore)."""
+    for key, t in list(pending.items()):
+        if not t.get("be_due") or t.get("be") or t.get("pending") or (only is not None and not only(t)):
+            continue
+        try:
+            alive = any(int(p.ticket) == int(t["position"]) for p in (mt5.positions_get() or []))
+            if not alive:                                               # chiusa nel frattempo: niente da spostare
+                t["be_due"] = False
+                save_pending(pending)
+                continue
+            if move_to_be(mt5, t):
+                t["be"], t["be_due"] = True, False
+                print(f"SL a pareggio sulla posizione {t['position']}: fatto (secondo tentativo)", flush=True)
+                save_pending(pending)
+        except Exception as e:
+            print("SL a pareggio (riprovo):", str(e)[:120], flush=True)
 
 
 def save_pending(pending: dict) -> None:
@@ -795,6 +821,7 @@ def follow_closures(pending: dict, bot, legacy) -> None:
             with ma.session(acc) as m:
                 follow_orders(m, pending, bot, only=lambda t, a=aid: t.get("account") == a)
                 check_closed(m, pending, bot, only=lambda t, a=aid: t.get("account") == a, prefix=f" · {acc['name']}")
+                retry_be(m, pending, only=lambda t, a=aid: t.get("account") == a)
         except Exception as e:
             print(f"Controllo chiusure {acc['name']}:", str(e)[:200], flush=True)
     if legacy is not None and any(not t.get("account") for t in pending.values()):
