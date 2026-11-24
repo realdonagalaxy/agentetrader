@@ -298,6 +298,22 @@ def code_version() -> str:
         return ""
 
 
+def version_info() -> dict:
+    """Versione del codice in esecuzione (hash breve e data dell'ultimo aggiornamento), letta da git una volta sola."""
+    global _VERSION
+    if _VERSION is None:
+        import subprocess
+        try:
+            o = subprocess.run(["git", "log", "-1", "--format=%h|%cs"], capture_output=True, text=True, cwd=str(ma.ROOT), timeout=5).stdout.strip().split("|")
+            _VERSION = {"version": o[0], "version_date": o[1] if len(o) > 1 else ""}
+        except Exception:
+            _VERSION = {"version": "", "version_date": ""}
+    return _VERSION
+
+
+_VERSION = None
+
+
 def kill_listeners() -> None:
     """Ferma ogni programma `src.mt5_orders` in esecuzione (anche avviato a mano o dal .bat) e toglie il battito, così quello nuovo può partire subito."""
     import subprocess
@@ -439,7 +455,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, (WEB / "accounts.html").read_bytes(), "text/html; charset=utf-8")
         try:
             if path == "/api/accounts":
-                return self._json({"accounts": ma.list_accounts(), "simulator": os.environ.get("MT5_SIMULATOR") == "1", "signals": signals_enabled()})
+                return self._json({"accounts": ma.list_accounts(), "simulator": os.environ.get("MT5_SIMULATOR") == "1", "signals": signals_enabled(), **version_info()})
             if path == "/api/telegram":
                 return self._json(telegram_status())
             if path == "/api/signals-day":

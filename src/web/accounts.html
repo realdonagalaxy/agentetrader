@@ -51,6 +51,7 @@ tr.opn,tr.opn:hover{background:rgba(56,189,248,.16)}                  /* posizio
 .panel.pendpanel h2 b,.panel.pendpanel #ctot{color:var(--lm)!important}
 .panel.pendpanel .cal .gain{color:#7dff6e}
 .eqd.on{background:var(--lm)!important;color:var(--hdr)!important}
+.verbadge{display:inline-block;margin-left:8px;padding:1px 9px;border-radius:999px;border:1px solid #2cf9fe;color:#2cf9fe;background:rgba(44,249,254,.12);font:600 11px var(--mono);letter-spacing:.04em;vertical-align:1px}
 #eqchart svg{display:block;width:100%;height:auto;overflow:visible}
 #eqchart text{font:20px var(--mono);fill:var(--lm2)}
 #eqtip{position:absolute;pointer-events:none;background:#0a111b;border:1px solid #2f4768;border-radius:6px;padding:6px 10px;font:12px var(--mono);color:var(--lm);white-space:nowrap;z-index:5;box-shadow:0 6px 20px rgba(0,0,0,.5)}
@@ -192,7 +193,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
 <body>
 <div class="wrap">
 <header class="top">
-  <div class="brand"><span class="logo"><img src="/logo.png" alt="donatrader"></span><div><h1>Gestione Conti</h1><div class="hsub" id="upd">Monitoraggio e gestione dei conti MetaTrader 5</div></div></div>
+  <div class="brand"><span class="logo"><img src="/logo.png" alt="donatrader"></span><div><h1>Gestione Conti</h1><div class="hsub"><span id="upd">Monitoraggio e gestione dei conti MetaTrader 5</span> <span id="ver" class="verbadge" hidden></span></div></div></div>
   <nav role="tablist"><button role="tab" aria-selected="true" data-tab="home">Trade</button><button role="tab" aria-selected="false" data-tab="cal">Calendario</button><button role="tab" aria-selected="false" data-tab="seg" class="sigonly">Automatico</button></nav>
   <button class="btn" id="conti" style="background:#fff;color:#14233a">Conti</button>
 </header>
@@ -465,7 +466,7 @@ $("spgo").onclick = async () => {
 async function refresh() {
   if (busy) return; busy = true;
   try {
-    const j = await api("/api/accounts"); accounts = j.accounts; document.documentElement.classList.toggle("nosig", !j.signals); $("sim").hidden = !j.simulator; render();
+    const j = await api("/api/accounts"); accounts = j.accounts; document.documentElement.classList.toggle("nosig", !j.signals); if (j.version) { $("ver").hidden = false; $("ver").textContent = "versione " + j.version + (j.version_date ? " · " + j.version_date.split("-").reverse().join("/") : ""); } $("sim").hidden = !j.simulator; render();
     for (const a of accounts.filter(x => x.enabled)) { status[a.id] = await api(`/api/accounts/${a.id}/status`); render(); renderPending(); }
     renderPending();
     $("upd").textContent = "Aggiornato " + new Date().toLocaleTimeString("it-IT");
