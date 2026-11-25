@@ -56,6 +56,8 @@ tr.opn,tr.opn:hover{background:rgba(56,189,248,.16)}                  /* posizio
 .panel.pendpanel .ek-mercato,.ek-mercato{color:#ffd166;border-color:#ffd166}.panel.pendpanel .ek-limit,.ek-limit{color:#c9a7ff;border-color:#c9a7ff}.panel.pendpanel .ek-stop,.ek-stop{color:#ff9f6e;border-color:#ff9f6e}
 .chb{border:1px solid currentColor;background:transparent;font-weight:700}
 .panel.pendpanel .ch0,.ch0{color:#2cf9fe;border-color:#2cf9fe}.panel.pendpanel .ch1,.ch1{color:#ff7bd5;border-color:#ff7bd5}.panel.pendpanel .ch2,.ch2{color:#ffd166;border-color:#ffd166}.panel.pendpanel .ch3,.ch3{color:#c9a7ff;border-color:#c9a7ff}
+.oc-cell .badge{border:0!important;background:transparent!important;padding:0!important;border-radius:0}
+.oc{white-space:nowrap;line-height:1.7;font-weight:700}.oc .sub{font-weight:400}
 #eqchart svg{display:block;width:100%;height:auto;overflow:visible}
 #eqchart text{font:20px var(--mono);fill:var(--lm2)}
 #eqtip{position:absolute;pointer-events:none;background:#0a111b;border:1px solid #2f4768;border-radius:6px;padding:6px 10px;font:12px var(--mono);color:var(--lm);white-space:nowrap;z-index:5;box-shadow:0 6px 20px rgba(0,0,0,.5)}
@@ -831,8 +833,8 @@ function renderSig(r, ids, manual) {
     return s.cedric.map(x => {
       const hm = new Date(x.t).toLocaleTimeString("it-IT", {hour: "2-digit", minute: "2-digit"});
       const sl = x.tipo === "sl", pv = x.pips !== "" && x.pips != null ? +x.pips : null;
-      return `<span class="badge ${sl ? "b-err" : "b-ok"}" title="${hm}${x.dedotto ? " · collegato al segnale precedente (non era una risposta)" : ""}">${oc(sl ? "sl" : "tp", pv, sl ? "" : x.tipo.toUpperCase())} <span class="sub">${hm}</span></span>`;
-    }).join(" ");
+      return `<div class="oc ${sl ? "loss" : "gain"}" title="${hm}${x.dedotto ? " · collegato al segnale precedente (non era una risposta)" : ""}">${oc(sl ? "sl" : "tp", pv, sl ? "" : x.tipo.toUpperCase())} <span class="sub">${hm}</span></div>`;
+    }).join("");
   };
   const cell = c => {
     if (!c || c.stato === "nessuno") return `<span class="badge b-off" title="Nessun esito registrato: il programma non ha applicato questo segnale a questo conto">non aperto</span>`;
@@ -840,13 +842,15 @@ function renderSig(r, ids, manual) {
       const ch = c.chiusura;
       const parti = c.parti && c.parti.length ? ` · ${c.parti.map(x => x.txt).join(" + ")}` : "";
       const kindOf = (ch0, pips) => ch0 === "tp" ? "tp" : ch0 === "sl" ? (Math.abs(pips || 0) <= 6 ? "be" : "sl") : "man";          // SL chiuso vicino all'apertura = pareggio (BE)
-      const closedTxt = c.parti && c.parti.length ? (c.parti.some(x => x.chiusa) ? c.parti.map(x => x.chiusa ? partOc(x.txt) : esc(x.txt)).join(" + ") : "") : (ch && !c.in_attesa ? oc(kindOf(ch, c.pips), c.pips) : "");
+      const lineCls = txt => /^SL\s*-?\d+p$/.test(txt) ? "loss" : /^TP/.test(txt) ? "gain" : "flat";
+      const closedTxt = c.parti && c.parti.length ? (c.parti.some(x => x.chiusa) ? c.parti.map(x => `<div class="oc ${x.chiusa ? lineCls(x.txt) : "flat"}">${x.chiusa ? partOc(x.txt) : esc(x.txt)}</div>`).join("") : "")
+        : (ch && !c.in_attesa ? `<div class="oc ${kindOf(ch, c.pips) === "tp" ? "gain" : kindOf(ch, c.pips) === "sl" ? "loss" : "flat"}">${oc(kindOf(ch, c.pips), c.pips)}</div>` : "");
       const res = parti ? parti : c.in_attesa ? " · ordine in attesa" : ch ? ` · ${kindOf(ch, c.pips) === "tp" ? "TP" : kindOf(ch, c.pips) === "sl" ? "SL" : kindOf(ch, c.pips) === "be" ? "BE" : "chiusa"} ${c.pips >= 0 ? "+" : ""}${Math.round(c.pips)}p` : c.non_verificata ? " · stato non verificabile (conto non collegato)" : " · in corso";
       const cls = c.in_attesa ? "b-off" : c.parti && c.parti.length ? (c.netto != null && c.netto < 0 ? "b-err" : "b-ok") : !ch ? "b-ok" : ch === "tp" ? "b-ok" : ch === "sl" ? (Math.abs(c.pips || 0) <= 6 ? "b-off" : "b-err") : (c.pips >= 0 ? "b-ok" : "b-err");       // SL rosso, TP verde, in corso neutro; chiusa a mano: dal segno dei pips
       const f = v => v == null ? "—" : esc(String(Math.round(+v * 100) / 100));
       const det = [`${c.in_attesa ? "Entry" : "Apertura"} <b>${f(c.p_open != null ? c.p_open : c.prezzo)}</b>`, c.p_close != null ? `Chiusura <b>${f(c.p_close)}</b>` : (c.p_now != null ? `Ora <b>${f(c.p_now)}</b>` : ""),
         `TP <b>${f(c.tp)}</b>`, `SL <b>${f(c.sl)}</b>`, c.profitto != null ? `P/L <b>${c.profitto} $</b>` : (c.pl != null ? `P/L <b>${c.pl} $</b>` : "")].filter(Boolean).join(" · ");
-      return `<span class="badge ${cls}" title="Aperto a ${esc(c.prezzo || "")}${c.profitto != null ? " · profitto " + c.profitto + " $" : ""}">${closedTxt ? closedTxt : (c.in_attesa ? "ordine" : "aperto") + res}</span><div class="sub" style="margin-top:4px;line-height:1.5">${det}</div>`;
+      return `${closedTxt ? `<span title="Aperto a ${esc(c.prezzo || "")}${c.profitto != null ? " · profitto " + c.profitto + " $" : ""}">${closedTxt}</span>` : `<span class="badge ${cls}" title="Aperto a ${esc(c.prezzo || "")}">${(c.in_attesa ? "ordine" : "aperto") + res}</span>`}<div class="sub" style="margin-top:4px;line-height:1.5">${det}</div>`;
     }
     return `<span class="badge b-err" title="${esc(c.dettaglio || "")}">${c.stato === "rifiutato" ? "rifiutato" : "errore"}</span> <span class="sub">${esc((c.dettaglio || "").slice(0, 60))}</span>`;
   };
@@ -854,7 +858,7 @@ function renderSig(r, ids, manual) {
     const t = new Date(s.t), hh = t.toLocaleTimeString("it-IT", {hour: "2-digit", minute: "2-digit"});
     const dir = s.side ? s.side.toUpperCase() + " " + esc(s.symbol) : `<span class="err">${esc(s.errore || "non letto")}</span>`;
     const nz = v => v === "" || v == null ? "—" : esc(String(Math.round(+v * 100) / 100));          // niente 4098.469999999999
-    return `<tr><td data-l="Ora">${hh}</td><td data-l="Segnale">${chanBadge(s)}<b>${dir}</b></td><td class="r" data-l="Entry">${nz(s.entry)}</td><td class="r" data-l="SL">${nz(s.sl)}</td><td class="r" data-l="TP1">${nz(s.tp1)}</td><td class="r" data-l="TP2">${nz(s.tp2)}</td><td class="r" data-l="TP3">${nz(s.tp3)}</td><td class="wide" data-l="${manual ? "Ingresso · rischio" : "Esito Cedric"}">${manual ? `<span class="badge b-off">${({market: "mercato", limit: "limit", stop: "stop"})[s.tipo] || esc(s.tipo)}</span> ${esc(s.rischio)}%${s.parz ? ` · parz. ${esc(s.parz)}% a TP1` : ""}${s.nota ? ` <span class="sub">${esc(s.nota)}</span>` : ""}` : cedric(s)}</td>${accs.map(a => `<td class="wide" data-l="Conto ${esc(a.login)} · TP${a.target}">${cell(s.conti[a.login])}</td>`).join("")}</tr>`;
+    return `<tr><td data-l="Ora">${hh}</td><td data-l="Segnale">${chanBadge(s)}<b>${dir}</b></td><td class="r" data-l="Entry">${nz(s.entry)}</td><td class="r" data-l="SL">${nz(s.sl)}</td><td class="r" data-l="TP1">${nz(s.tp1)}</td><td class="r" data-l="TP2">${nz(s.tp2)}</td><td class="r" data-l="TP3">${nz(s.tp3)}</td><td class="wide oc-cell" data-l="${manual ? "Ingresso · rischio" : "Esito Cedric"}">${manual ? `<span class="badge b-off">${({market: "mercato", limit: "limit", stop: "stop"})[s.tipo] || esc(s.tipo)}</span> ${esc(s.rischio)}%${s.parz ? ` · parz. ${esc(s.parz)}% a TP1` : ""}${s.nota ? ` <span class="sub">${esc(s.nota)}</span>` : ""}` : cedric(s)}</td>${accs.map(a => `<td class="wide oc-cell" data-l="Conto ${esc(a.login)} · TP${a.target}">${cell(s.conti[a.login])}</td>`).join("")}</tr>`;
   }).join("") : `<tr><td colspan="${8 + accs.length}" class="sub" style="padding:14px">${manual ? "Nessun trade manuale per questo giorno." : "Nessun segnale registrato per questo giorno. Se sai che ce ne sono stati, premi «Scarica dal canale»."}</td></tr>`;
 }
 $("sload").onclick = loadSignals; $("sdate").onchange = loadSignals; $("schan").onchange = loadSignals;
