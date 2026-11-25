@@ -821,12 +821,17 @@ function renderSig(r, ids, manual) {
   $(ids.g).innerHTML = `<div class="kpi"><div class="l">Guadagno del giorno</div><div class="v" style="color:var(${tot >= 0 ? "--gain" : "--loss"})">${sgn(tot)} $</div><div class="s">${totp >= 0 ? "+" : ""}${Math.round(totp)} pips chiusi · tutti i conti</div></div>` +
     gains.map(g => `<div class="kpi"><div class="l">${esc(g.login)} · TP${g.target}</div><div class="v" style="color:var(${g.usd >= 0 ? "--gain" : "--loss"})">${sgn(g.usd)} $</div><div class="s">${g.n} posizioni: ${g.tp} TP · ${g.sl} SL · ${g.op} aperte · ${g.pips >= 0 ? "+" : ""}${Math.round(g.pips)} pips</div></div>`).join("");
   $(ids.h).innerHTML = `<tr><th>Ora</th><th>${manual ? "Trade" : "Segnale"}</th><th class="r">Entry</th><th class="r">SL</th><th class="r">TP1</th><th class="r">TP2</th><th class="r">TP3</th><th>${manual ? "Ingresso · rischio" : "Esito Cedric"}</th>${accs.map(a => `<th>${esc(a.login)} · TP${a.target}</th>`).join("")}</tr>`;
+  const TPI = `<svg width="16" height="16" viewBox="0 0 16 16" style="vertical-align:-3px" aria-label="TP"><circle cx="8" cy="8" r="8" fill="#22c55e"/><path d="M4.2 8.3l2.6 2.6 5-5.2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const ICON = {tp: TPI, sl: "❌", be: "🟰", man: "✋"};
+  const sp = p => `${p >= 0 ? "+" : ""}${Math.round(p)}p`;
+  const oc = (k, p, label = "") => `${ICON[k]} <b>${label ? label + " " : ""}${p == null || p === "" || isNaN(p) ? "" : sp(+p)}</b>`;           // formato dell'esito: ❌ SL, 🟰 BE, cerchio verde con V bianca per TP, sempre con i pips
+  const partOc = txt => { const m = /^(TP|BE|SL|chiusa)\s*([+-]?\d+)p$/.exec(txt); return m ? oc({TP: "tp", BE: "be", SL: "sl", chiusa: "man"}[m[1]], +m[2]) : esc(txt); };
   const cedric = s => {
     if (!s.cedric.length) return `<span class="badge b-off" title="Nessun messaggio di TP o SL di Cedric registrato per questo segnale">—</span>`;
     return s.cedric.map(x => {
       const hm = new Date(x.t).toLocaleTimeString("it-IT", {hour: "2-digit", minute: "2-digit"});
-      const lab = x.tipo === "sl" ? "SL" : x.tipo.toUpperCase(), p = x.pips !== "" && x.pips != null ? ` ${+x.pips > 0 ? "+" : ""}${Math.round(+x.pips)}p` : "";
-      return `<span class="badge ${x.tipo === "sl" ? "b-err" : "b-ok"}" title="${hm}${x.dedotto ? " · collegato al segnale precedente (non era una risposta)" : ""}">${lab}${p} · ${hm}</span>`;
+      const sl = x.tipo === "sl", pv = x.pips !== "" && x.pips != null ? +x.pips : null;
+      return `<span class="badge ${sl ? "b-err" : "b-ok"}" title="${hm}${x.dedotto ? " · collegato al segnale precedente (non era una risposta)" : ""}">${oc(sl ? "sl" : "tp", pv, sl ? "" : x.tipo.toUpperCase())} <span class="sub">${hm}</span></span>`;
     }).join(" ");
   };
   const cell = c => {
@@ -834,12 +839,14 @@ function renderSig(r, ids, manual) {
     if (c.stato === "aperto" || c.stato === "stop") {
       const ch = c.chiusura;
       const parti = c.parti && c.parti.length ? ` · ${c.parti.map(x => x.txt).join(" + ")}` : "";
-      const res = parti ? parti : c.in_attesa ? " · ordine in attesa" : ch ? ` · ${ch === "tp" ? "TP" : ch === "sl" ? "SL" : "chiusa"} ${c.pips >= 0 ? "+" : ""}${Math.round(c.pips)}p` : c.non_verificata ? " · stato non verificabile (conto non collegato)" : " · in corso";
-      const cls = c.in_attesa ? "b-off" : c.parti && c.parti.length ? (c.netto != null && c.netto < 0 ? "b-err" : "b-ok") : !ch ? "b-ok" : ch === "tp" ? "b-ok" : ch === "sl" ? "b-err" : (c.pips >= 0 ? "b-ok" : "b-err");       // SL rosso, TP verde, in corso neutro; chiusa a mano: dal segno dei pips
+      const kindOf = (ch0, pips) => ch0 === "tp" ? "tp" : ch0 === "sl" ? (Math.abs(pips || 0) <= 6 ? "be" : "sl") : "man";          // SL chiuso vicino all'apertura = pareggio (BE)
+      const closedTxt = c.parti && c.parti.length ? (c.parti.some(x => x.chiusa) ? c.parti.map(x => x.chiusa ? partOc(x.txt) : esc(x.txt)).join(" + ") : "") : (ch && !c.in_attesa ? oc(kindOf(ch, c.pips), c.pips) : "");
+      const res = parti ? parti : c.in_attesa ? " · ordine in attesa" : ch ? ` · ${kindOf(ch, c.pips) === "tp" ? "TP" : kindOf(ch, c.pips) === "sl" ? "SL" : kindOf(ch, c.pips) === "be" ? "BE" : "chiusa"} ${c.pips >= 0 ? "+" : ""}${Math.round(c.pips)}p` : c.non_verificata ? " · stato non verificabile (conto non collegato)" : " · in corso";
+      const cls = c.in_attesa ? "b-off" : c.parti && c.parti.length ? (c.netto != null && c.netto < 0 ? "b-err" : "b-ok") : !ch ? "b-ok" : ch === "tp" ? "b-ok" : ch === "sl" ? (Math.abs(c.pips || 0) <= 6 ? "b-off" : "b-err") : (c.pips >= 0 ? "b-ok" : "b-err");       // SL rosso, TP verde, in corso neutro; chiusa a mano: dal segno dei pips
       const f = v => v == null ? "—" : esc(String(Math.round(+v * 100) / 100));
       const det = [`${c.in_attesa ? "Entry" : "Apertura"} <b>${f(c.p_open != null ? c.p_open : c.prezzo)}</b>`, c.p_close != null ? `Chiusura <b>${f(c.p_close)}</b>` : (c.p_now != null ? `Ora <b>${f(c.p_now)}</b>` : ""),
         `TP <b>${f(c.tp)}</b>`, `SL <b>${f(c.sl)}</b>`, c.profitto != null ? `P/L <b>${c.profitto} $</b>` : (c.pl != null ? `P/L <b>${c.pl} $</b>` : "")].filter(Boolean).join(" · ");
-      return `<span class="badge ${cls}" title="Aperto a ${esc(c.prezzo || "")}${c.profitto != null ? " · profitto " + c.profitto + " $" : ""}">${c.in_attesa ? "ordine" : "aperto"}${res}</span><div class="sub" style="margin-top:4px;line-height:1.5">${det}</div>`;
+      return `<span class="badge ${cls}" title="Aperto a ${esc(c.prezzo || "")}${c.profitto != null ? " · profitto " + c.profitto + " $" : ""}">${closedTxt ? closedTxt : (c.in_attesa ? "ordine" : "aperto") + res}</span><div class="sub" style="margin-top:4px;line-height:1.5">${det}</div>`;
     }
     return `<span class="badge b-err" title="${esc(c.dettaglio || "")}">${c.stato === "rifiutato" ? "rifiutato" : "errore"}</span> <span class="sub">${esc((c.dettaglio || "").slice(0, 60))}</span>`;
   };
