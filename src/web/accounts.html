@@ -51,7 +51,7 @@ tr.opn,tr.opn:hover{background:rgba(56,189,248,.16)}                  /* posizio
 .panel.pendpanel h2 b,.panel.pendpanel #ctot{color:var(--lm)!important}
 .panel.pendpanel .cal .gain{color:#7dff6e}
 .eqd.on{background:var(--lm)!important;color:var(--hdr)!important}
-.verbadge{display:inline-block;padding:1px 9px;border-radius:999px;border:1px solid #2cf9fe;color:#2cf9fe;background:rgba(44,249,254,.12);font:600 11px var(--mono);letter-spacing:.04em;vertical-align:1px}
+.verbadge{}
 .entrykind{border:1px solid currentColor;background:transparent;font-weight:700;letter-spacing:.03em}
 .panel.pendpanel .ek-mercato,.ek-mercato{color:#ffd166;border-color:#ffd166}.panel.pendpanel .ek-limit,.ek-limit{color:#c9a7ff;border-color:#c9a7ff}.panel.pendpanel .ek-stop,.ek-stop{color:#ff9f6e;border-color:#ff9f6e}
 .chb{border:1px solid currentColor;background:transparent;font-weight:700}
@@ -194,6 +194,7 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
 .foot{display:flex;gap:8px;justify-content:flex-end;padding:14px 20px;border-top:1px solid var(--line);flex-wrap:wrap;align-items:center}
 .foot .msg{margin-right:auto;font-size:12px;max-width:100%;overflow-wrap:anywhere}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:6px;font-size:13px;display:none;z-index:60;max-width:90vw}
+*,*::before,*::after{border-radius:0!important}                    /* angoli sempre vivi: nessun bordo tondo */
 </style>
 </head>
 <body>
