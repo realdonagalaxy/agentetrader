@@ -189,11 +189,14 @@ def signals_day(date: str, tz_min: int, manual: bool = False) -> dict:
             continue
         if d0 <= t < d1 and (r.get("reply_to") or "") not in sigs and not (not r.get("reply_to") and any(ts <= t and mid in sigs for ts, mid in all_sigs)):
             orfani.append({"tipo": r["tipo"], "pips": r.get("pips"), "t": t.isoformat(), "reply_to": r.get("reply_to") or ""})
+    seconde = {}                                                                # seconde posizioni aperte a TP1 (parzializzazione a catena): (segnale, conto) -> ticket
+    for r_ in ([] if manual else _read_csv("segnali_seconde.csv")):
+        seconde.setdefault((str(r_.get("msg_id")), str(r_.get("conto"))), []).append(str(r_.get("ticket")))
     needed = {}                                                                 # posizioni aperte dall'app per i segnali del giorno: se ne legge lo stato vero da MT5
     for mid in sigs:
         for lg, e in esiti.get(mid, {}).items():
             if e.get("esito") == "aperto" and e.get("ticket"):
-                needed.setdefault(lg, []).extend(x.strip() for x in str(e["ticket"]).split(",") if x.strip())      # con la parzializzazione i ticket sono due
+                needed.setdefault(lg, []).extend([x.strip() for x in str(e["ticket"]).split(",") if x.strip()] + seconde.get((str(mid), str(lg)), []))      # più ticket: prima e seconda posizione
     real = _closures_from_mt5(needed) if needed else {}
     try:                                                                        # canali di segnali (indice -> nome), scritti dall'ascolto
         canali = {int(k): v for k, v in json.loads((ma.DATA_DIR / "canali.json").read_text(encoding="utf-8")).items()}
@@ -212,7 +215,7 @@ def signals_day(date: str, tz_min: int, manual: bool = False) -> dict:
                 c["dettaglio"] = (e.get("dettaglio") or "").split("Non apro:")[-1].strip()[:140]
                 if e["esito"] == "aperto":
                     c["prezzo"] = e.get("prezzo_apertura")
-                    tks = [x.strip() for x in str(e.get("ticket") or "").split(",") if x.strip()]
+                    tks = [x.strip() for x in str(e.get("ticket") or "").split(",") if x.strip()] + seconde.get((str(mid), str(lg)), [])
                     rrs = [real.get((lg, t)) or {} for t in tks]
                     rr = rrs[0] if rrs else {}
                     if len(rrs) > 1 and any(r_.get("errore") for r_ in rrs):

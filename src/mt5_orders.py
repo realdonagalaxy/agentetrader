@@ -256,7 +256,7 @@ def execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = ""
     except ValueError as e:
         raise ValueError(str(e).replace("TP1", f"TP{target}")) from None
     for t in trks:
-        t["target"] = 1 if t.get("part") == "tp1" else target
+        t["target"] = 1 if (t.get("part") == "tp1" or t.get("followup")) else target
     return text, trks
 
 
@@ -344,28 +344,28 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
     else:
         check_levels(sig, tick.bid, tick.ask)
         sl, tp, scarto = sig["sl"], sig["tp1"], 0.0
-    # parzializzazione (per conto): con hedging e lotti divisibili si aprono DUE posizioni: una chiude a TP1 (quota «partial»), il resto corre fino al TP scelto e a TP1 va a pareggio
+    # parzializzazione «a catena» (decisione 25/11/2026): si apre UNA posizione con TUTTI i lotti e TP1; se TP1 va a target, il programma apre a mercato una SECONDA posizione con i lotti rimanenti,
+    # SL al prezzo d'ingresso della prima e TP al target scelto. Se la prima va a SL si perde una volta sola (prima: due posizioni aperte insieme raddoppiavano la perdita).
     step = getattr(info, "volume_step", 0.01) or 0.01
     vmin = getattr(info, "volume_min", step)
-    hedging = getattr(acc, "margin_mode", None) == getattr(mt5, "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING", 2)
-    split, why, v1, v2 = False, "", 0.0, 0.0
+    chain, why, v1, v2 = False, "", 0.0, 0.0
+    followup = None
     if partial and sig.get("tp_parz") is not None:
-        v1 = round(int(lots * partial / step + 0.5 + 1e-9) * step, 2)                  # arrotonda per eccesso a metà (come l'anteprima della pagina)
-        v2 = round(lots - v1, 2)
-        if not hedging:
-            why = "conto non in modalità hedging"
-        elif v1 < vmin - 1e-9 or v2 < vmin - 1e-9:
+        v1 = round(int(lots * partial / step + 0.5 + 1e-9) * step, 2)                  # quota «incassata» a TP1 (arrotondata come l'anteprima della pagina)
+        v2 = round(lots - v1, 2)                                                        # lotti della seconda posizione
+        if v1 < vmin - 1e-9 or v2 < vmin - 1e-9:
             why = f"lotti non divisibili ({lots} con passo {step:g})"
         elif not relative_levels():
             why = "livelli assoluti"
         else:
-            split = True
+            chain = True
+            followup = {"lots": v2, "tp": round(tp, d), "target": sig.get("_target", 2), "max_dev": ENTRY_DEV_MAX}
     parts = [(lots, tp, None)]
-    if split:
+    if chain:
         tpz_d = abs(sig["tp_parz"] - sig["entry"])
         off2 = current_offset()[0]
         tpz_lv = (sig["tp_parz"] + off2 + (0 if buy else tick.ask - tick.bid)) if off2 is not None else (ref + tpz_d if buy else ref - tpz_d)
-        parts = [(v1, tpz_lv, "tp1"), (v2, tp, "tp2")]
+        parts = [(lots, tpz_lv, None)]                                    # una sola posizione, con il TP1 del segnale
     if pend is None:
         reqs = [{"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": v, "type": mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL,
                  "price": px, "sl": round(sl, d), "tp": round(t, d), "deviation": DEVIATION, "magic": MAGIC,
@@ -378,17 +378,18 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
     FT = f"TP{sig.get('_target', 1)}"
     pxr = round(pend["price"], d) if pend else px                    # prezzo di riferimento per le distanze: l'Entry dell'ordine pendente oppure il prezzo di mercato
     if pend:
-        head = (f"⏳ Ordine {pend['name']} piazzato: {sig['side'].upper()} {sym} " + (f"{v1}+{v2} lotti" if split else f"{lots} lotti") +
+        head = (f"⏳ Ordine {pend['name']} piazzato: {sig['side'].upper()} {sym} " + f"{lots} lotti" +
                 f" @ {pxr} (il prezzo {tick.bid:.2f} è {abs(pend['dev']):.2f} $ {'sopra' if pend['dev'] > 0 else 'sotto'} l'Entry atteso: non inseguo, aspetto che torni; valido fino a fine giornata o fino al TP1)")
         base = head + f" · SL {reqs[0]['sl']} ({abs(pxr - reqs[0]['sl']):.2f} $)"
     else:
-        base = f"{sig['side'].upper()} {sym} " + (f"{v1}+{v2} lotti" if split else f"{lots} lotti") + f" a mercato ~{px} · SL {reqs[0]['sl']} ({abs(px - reqs[0]['sl']):.2f} $)"
-    if split:
-        base += f" · TP1 {reqs[0]['tp']} ({abs(reqs[0]['tp'] - pxr):.2f} $) con {v1} lotti, poi {FT} {reqs[1]['tp']} ({abs(reqs[1]['tp'] - pxr):.2f} $) con {v2}: a TP1 il resto va a pareggio"
+        base = f"{sig['side'].upper()} {sym} {lots} lotti a mercato ~{px} · SL {reqs[0]['sl']} ({abs(px - reqs[0]['sl']):.2f} $)"
+    if chain:
+        base += (f" · TP1 {reqs[0]['tp']} ({abs(reqs[0]['tp'] - pxr):.2f} $): quando TP1 va a target apro {v2} lotti a mercato con SL all'entry della prima e "
+                 f"{FT} {followup['tp']} ({abs(followup['tp'] - pxr):.2f} $)")
     else:
         base += f" · {FT} {reqs[0]['tp']} ({abs(reqs[0]['tp'] - pxr):.2f} $)"
     summary = base
-    if partial and sig.get("tp_parz") is not None and not split:
+    if partial and sig.get("tp_parz") is not None and not chain:
         summary += f" · parzializzazione NON applicata: {why}"
     if relative_levels():
         summary += note_off + f" · scarto misurato {scarto:+.2f} · spread {tick.ask - tick.bid:.2f}"
@@ -403,7 +404,7 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
     trks, group, note = [], f"{time.time():.0f}-{tag}", ""
     okc = (mt5.TRADE_RETCODE_DONE, getattr(mt5, "TRADE_RETCODE_PLACED", 10008)) if pend else (mt5.TRADE_RETCODE_DONE,)
     cancel_tp = parts[0][1]                                          # livello del TP1 vero: se il prezzo lo tocca prima dell'Entry l'ordine pendente si annulla
-    if pend and not split and sig.get("_tp1_real") is not None:      # obiettivo TP2/TP3 senza parzializzazione: l'annullamento resta al TP1 del segnale
+    if pend and not chain and sig.get("_tp1_real") is not None:      # obiettivo TP2/TP3 senza parzializzazione: l'annullamento resta al TP1 del segnale
         cancel_tp = sig["_tp1_real"] + pend["off"] + (0 if buy else tick.ask - tick.bid)
     for req, (_, _, name) in zip(reqs, parts):
         res = mt5.order_send(req)
@@ -415,9 +416,9 @@ def _execute(mt5, sig: dict, dry: bool = False, lots: float = LOTS, tag: str = "
             break
         if pend:
             trks.append({"position": int(res.order), "symbol": sym, "side": sig["side"], "open": float(pend["price"]), "tp": req["tp"], "sl": req["sl"], "part": name, "group": group,
-                         "pending": True, "kind": "limit" if "LIMIT" in pend["name"] else "stop", "cancel_tp": float(cancel_tp)})
+                         "pending": True, "kind": "limit" if "LIMIT" in pend["name"] else "stop", "cancel_tp": float(cancel_tp), "followup": followup, "allow_real": allow_real})
         else:
-            trks.append({"position": int(res.order), "symbol": sym, "side": sig["side"], "open": actual_open(mt5, res.order, res.price, px), "tp": req["tp"], "sl": req["sl"], "part": name, "group": group})
+            trks.append({"position": int(res.order), "symbol": sym, "side": sig["side"], "open": actual_open(mt5, res.order, res.price, px), "tp": req["tp"], "sl": req["sl"], "part": name, "group": group, "followup": followup, "allow_real": allow_real})
     if pend:
         return (f"{summary} · ticket {', '.join(str(t['position']) for t in trks)}{note}", trks)
     return (f"✅ Aperto: {summary} · prezzo eseguito {trks[0]['open']} · ticket {', '.join(str(t['position']) for t in trks)}{note}", trks)
@@ -587,6 +588,56 @@ def announce(bot, mt5, t: dict, deals, d, text: str, label: str) -> None:
         say(bot, text, t["msg_id"])
 
 
+SECONDE = JOURNAL_DIR / "segnali_seconde.csv"                    # seconde posizioni aperte a TP1: serve a Gestione Conti per mostrarne l'esito accanto alla prima
+
+
+def open_followup(mt5, pending: dict, t: dict, bot) -> None:
+    """La prima posizione ha chiuso a TP1: apre a mercato la SECONDA (lotti rimanenti) con SL al prezzo d'ingresso della prima e TP al target scelto.
+    Non la apre se: c'è già un altro trade in corso sul conto, il conto è reale senza consenso, il prezzo si è spostato oltre ENTRY_DEV_MAX dal TP1, o i livelli non sono più validi."""
+    f = t["followup"]
+    sym, buy = t["symbol"], t["side"] == "buy"
+    why = ""
+    acc = mt5.account_info()
+    info, tick = mt5.symbol_info(sym), mt5.symbol_info_tick(sym)
+    if acc is None or info is None or tick is None:
+        why = "MT5 non risponde"
+    elif acc.trade_mode != mt5.ACCOUNT_TRADE_MODE_DEMO and not t.get("allow_real"):
+        why = "conto reale senza consenso"
+    elif [p for p in (mt5.positions_get() or []) if p.magic == MAGIC] + [o for o in (mt5.orders_get() or []) if o.magic == MAGIC]:
+        why = "c'è già un altro trade in corso sul conto"
+    if not why:
+        ref = tick.bid if buy else tick.ask                              # prezzo su cui scattano SL e TP
+        px = tick.ask if buy else tick.bid
+        sl, tp, d = float(t["open"]), float(f["tp"]), info.digits
+        stops = (getattr(info, "trade_stops_level", 0) or 0) * (getattr(info, "point", 0.01) or 0.01)
+        if abs(ref - float(t["tp"])) > f.get("max_dev", ENTRY_DEV_MAX):
+            why = f"il prezzo ({ref:.2f}) si è già spostato di {abs(ref - float(t['tp'])):.2f} $ dal TP1 ({float(t['tp']):.2f})"
+        elif (buy and not (sl + stops < ref < tp - stops)) or (not buy and not (tp + stops < ref < sl - stops)):
+            why = f"i livelli non sono più validi con il prezzo di adesso ({ref:.2f}): SL {sl:.2f}, TP {tp:.2f}"
+    if why:
+        msg = f"↩️ Seconda posizione NON aperta: {why}."
+        print(msg, flush=True)
+        say(bot, msg, t.get("msg_id"))
+        return
+    req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": f["lots"], "type": mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL, "price": px, "sl": round(sl, d), "tp": round(tp, d),
+           "deviation": DEVIATION, "magic": MAGIC, "comment": "tg-signal-2a", "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling(mt5, info)}
+    res = mt5.order_send(req)
+    if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
+        msg = f"↩️ Seconda posizione NON aperta: ordine rifiutato dal broker ({getattr(res, 'retcode', None)} {getattr(res, 'comment', '')})."
+        print(msg, flush=True)
+        say(bot, msg, t.get("msg_id"))
+        return
+    trk = {**{k: v for k, v in t.items() if k not in ("followup", "be", "be_due", "pending", "kind", "cancel_tp")}, "position": int(res.order), "open": actual_open(mt5, res.order, res.price, px),
+           "tp": round(tp, d), "sl": round(sl, d), "part": None, "target": f.get("target", 2), "second": True}
+    pending[f"{t.get('account', 0)}:{trk['position']}"] = trk
+    save_pending(pending)
+    login = getattr(acc, "login", "")
+    _csv_append(SECONDE, ["quando_utc", "msg_id", "conto", "ticket", "lotti", "prezzo"], [now_iso(), t.get("sig_id") or t.get("msg_id", ""), login, trk["position"], f["lots"], trk["open"]])
+    msg = (f"▶️ TP1 incassato: seconda posizione {t['side'].upper()} {sym} {f['lots']} lotti a {trk['open']} · SL {round(sl, d)} (entry della prima) · TP{trk['target']} {round(tp, d)} · ticket {trk['position']}")
+    print(msg, flush=True)
+    say(bot, msg, t.get("msg_id"))
+
+
 def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
     """Per ogni posizione seguita già chiusa: se è chiusa a TP risponde al messaggio del segnale, pulito: '✅ TP1 +N pips · prezzo P' o '❌ SL HIT -N pips · prezzo P'; poi la toglie dall'elenco."""
     for key, t in list(pending.items()):
@@ -610,6 +661,11 @@ def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
         part, sib = t.get("part"), [(k2, t2) for k2, t2 in pending.items() if t2.get("group") and t2.get("group") == t.get("group") and k2 != key]
         if d.reason == mt5.DEAL_REASON_TP:
             lab = f"TP{t.get('target', 2 if part == 'tp2' else 1)} {sgn:+.0f} pips · prezzo {price}"
+            if t.get("followup") and part != "tp2":                       # prima posizione a TP1: si apre subito la seconda (prima dell'annuncio, che può tardare)
+                try:
+                    open_followup(mt5, pending, t, bot)
+                except Exception as e:
+                    print("Seconda posizione non aperta (errore):", str(e)[:150], flush=True)
             if part == "tp1":                                           # parte a TP1 incassata: lo stop del resto va a pareggio. PRIMA dell'annuncio (grafico e Telegram possono tardare o fallire) e, se non riesce subito, si riprova (retry_be)
                 for k2, t2 in sib:
                     if t2.get("part") == "tp2":
@@ -630,6 +686,9 @@ def check_closed(mt5, pending: dict, bot, only=None, prefix: str = "") -> None:
             if part == "tp2" and t.get("be"):
                 lab = f"BE {sgn:+.0f} pips · prezzo {price}"
                 announce(bot, mt5, t, deals, d, f"🟰 {lab}", lab)
+            elif t.get("second"):
+                lab = f"SL seconda posizione {sgn:+.0f} pips · prezzo {price} (chiusa all'entry della prima)"
+                announce(bot, mt5, t, deals, d, f"↩️ {lab}", lab)
             elif not t.get("sl_reported"):
                 lab = f"SL HIT {sgn:+.0f} pips · prezzo {price}"
                 announce(bot, mt5, t, deals, d, f"❌ {lab}", lab)
@@ -674,7 +733,7 @@ def load_pending() -> dict:
 SENT: "deque[str]" = deque(maxlen=100)                         # testi inviati da questo programma: nel canale il bot rivede i propri post e non deve leggerli come segnali
 
 
-OWN_PREFIXES = ("🟢 Pronto", "📡", "📨", "📥", "ℹ️", "⚠️", "⛔", "✅ Aperto", "✅ TP1 ", "❌ SL HIT", "⏳", "📌", "🚫", "⌛", "🟰 BE", "✅ TP2 ", "✅ Gestione Conti", "[")    # inizio dei messaggi scritti dal programma
+OWN_PREFIXES = ("▶️", "↩️", "🟢 Pronto", "📡", "📨", "📥", "ℹ️", "⚠️", "⛔", "✅ Aperto", "✅ TP1 ", "❌ SL HIT", "⏳", "📌", "🚫", "⌛", "🟰 BE", "✅ TP2 ", "✅ Gestione Conti", "[")    # inizio dei messaggi scritti dal programma
 
 
 def telegram_on() -> bool:

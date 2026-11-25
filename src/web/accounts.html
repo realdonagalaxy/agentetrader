@@ -295,9 +295,9 @@ input[type=text],input[type=number],input[type=password],textarea{width:100%;bor
     </div>
     <label class="sigonly">Obiettivo del segnale <span class="hint">(quale TP del canale usa questo conto)</span><select id="tp_target"><option value="1">TP1</option><option value="2">TP2</option><option value="3">TP3</option></select></label>
     <div class="sigonly" id="chbox"><div style="font-size:13px;margin-bottom:4px">Canali di segnali <span class="hint">(da quali canali questo conto riceve i segnali; nessuno spuntato = tutti)</span></div><div id="chlist" class="sub" style="display:grid;gap:4px"></div></div>
-    <label class="chk sigonly"><input type="checkbox" id="partial_on"><span>A TP1 parzializza e porta il resto a pareggio (BE)</span></label>
+    <label class="chk sigonly"><input type="checkbox" id="partial_on"><span>A TP1 apri una seconda posizione (parzializzazione a catena)</span></label>
     <div id="partbox" class="row2 sigonly" hidden>
-      <label>Quota chiusa a TP1 (%) <span class="hint">(da 10 a 90)</span><input type="number" id="partial_pct" min="10" max="90" step="5" value="60"></label>
+      <label>Quota «incassata» a TP1 (%) <span class="hint">(da 10 a 90: il resto dei lotti va nella seconda posizione)</span><input type="number" id="partial_pct" min="10" max="90" step="5" value="60"></label>
       <div class="sub" id="partnote" style="align-self:end;padding-bottom:8px"></div>
     </div>
     <label class="chk"><input type="checkbox" id="enabled" checked><span>Conto attivo (viene monitorato)</span></label>
@@ -541,7 +541,7 @@ function partUi() {                                                    // la par
   $("partial_on").disabled = !ok; if (!ok) $("partial_on").checked = false;
   $("partbox").hidden = !$("partial_on").checked;
   const lots = +$("lots").value || 0, pct = +$("partial_pct").value || 0, a = Math.round(lots * pct) / 100;
-  $("partnote").textContent = ok && $("partial_on").checked ? `${a.toFixed(2)} lotti a TP1, ${(Math.round((lots - a) * 100) / 100).toFixed(2)} fino al TP${$("tp_target").value} (con SL a BE dopo TP1). Serve un conto hedging e lotti divisibili.` : (ok ? "" : "Disponibile con obiettivo TP2 o TP3.");
+  $("partnote").textContent = ok && $("partial_on").checked ? `La prima posizione usa tutti i ${lots.toFixed(2)} lotti con TP1. Quando TP1 va a target se ne apre una seconda da ${(Math.round((lots - a) * 100) / 100).toFixed(2)} lotti a mercato, con SL all'entry della prima e TP${$("tp_target").value}. Se la prima va a SL perdi una volta sola.` : (ok ? "" : "Disponibile con obiettivo TP2 o TP3.");
 }
 ["tp_target", "partial_on", "partial_pct", "lots"].forEach(id => $(id).addEventListener("input", partUi));
 const form = () => ({name: editing ? (accounts.find(x => x.id === editing) || {}).name || "" : "", login: $("login").value, server: $("server").value, password: $("password").value, terminal_path: editing ? (accounts.find(x => x.id === editing) || {}).terminal_path || "" : "",
