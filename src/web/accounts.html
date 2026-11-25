@@ -797,7 +797,6 @@ async function loadSignals() {
   renderSig(r, {k: "skpis", g: "sgain", h: "shead", r: "srows", o: "sorf"}, false);
 }
 let chanNames = [];
-const chanBadge = s => chanNames.length > 1 && s.canale ? `<span class="badge chb ch${s.canale_idx % 4}" title="Canale di provenienza">${esc(s.canale)}</span> ` : "";
 function renderSig(r, ids, manual) {
   const accs = r.conti, S = r.segnali;
   const allOpen = S.filter(s => accs.length && accs.every(a => ["aperto", "stop"].includes((s.conti[a.login] || {}).stato))).length;
@@ -822,7 +821,7 @@ function renderSig(r, ids, manual) {
   const tot = gains.reduce((x, g) => x + g.usd, 0), totp = gains.reduce((x, g) => x + g.pips, 0), sgn = v => (v > 0 ? "+" : "") + v.toFixed(2);
   $(ids.g).innerHTML = `<div class="kpi"><div class="l">Guadagno del giorno</div><div class="v" style="color:var(${tot >= 0 ? "--gain" : "--loss"})">${sgn(tot)} $</div><div class="s">${totp >= 0 ? "+" : ""}${Math.round(totp)} pips chiusi · tutti i conti</div></div>` +
     gains.map(g => `<div class="kpi"><div class="l">${esc(g.login)} · TP${g.target}</div><div class="v" style="color:var(${g.usd >= 0 ? "--gain" : "--loss"})">${sgn(g.usd)} $</div><div class="s">${g.n} posizioni: ${g.tp} TP · ${g.sl} SL · ${g.op} aperte · ${g.pips >= 0 ? "+" : ""}${Math.round(g.pips)} pips</div></div>`).join("");
-  $(ids.h).innerHTML = `<tr><th>Ora</th><th>${manual ? "Trade" : "Segnale"}</th><th class="r">Entry</th><th class="r">SL</th><th class="r">TP1</th><th class="r">TP2</th><th class="r">TP3</th><th>${manual ? "Ingresso · rischio" : "Esito Cedric"}</th>${accs.map(a => `<th>${esc(a.login)} · TP${a.target}</th>`).join("")}</tr>`;
+  $(ids.h).innerHTML = `<tr><th>Ora</th><th>${manual ? "Trade" : "Segnale"}</th><th>Tipo</th><th>${manual ? "Ingresso · rischio" : "Esito Cedric"}</th>${accs.map(a => `<th>${esc(a.login)} · TP${a.target}</th>`).join("")}</tr>`;
   const TPI = `<svg width="16" height="16" viewBox="0 0 16 16" style="vertical-align:-3px" aria-label="TP"><circle cx="8" cy="8" r="8" fill="#22c55e"/><path d="M4.2 8.3l2.6 2.6 5-5.2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   const ICON = {tp: TPI, sl: "❌", be: "🟰", man: "✋"};
   const sp = p => `${p >= 0 ? "+" : ""}${Math.round(p)}p`;
@@ -848,9 +847,7 @@ function renderSig(r, ids, manual) {
       const res = parti ? parti : c.in_attesa ? " · ordine in attesa" : ch ? ` · ${kindOf(ch, c.pips) === "tp" ? "TP" : kindOf(ch, c.pips) === "sl" ? "SL" : kindOf(ch, c.pips) === "be" ? "BE" : "chiusa"} ${c.pips >= 0 ? "+" : ""}${Math.round(c.pips)}p` : c.non_verificata ? " · stato non verificabile (conto non collegato)" : " · in corso";
       const cls = c.in_attesa ? "b-off" : c.parti && c.parti.length ? (c.netto != null && c.netto < 0 ? "b-err" : "b-ok") : !ch ? "b-ok" : ch === "tp" ? "b-ok" : ch === "sl" ? (Math.abs(c.pips || 0) <= 6 ? "b-off" : "b-err") : (c.pips >= 0 ? "b-ok" : "b-err");       // SL rosso, TP verde, in corso neutro; chiusa a mano: dal segno dei pips
       const f = v => v == null ? "—" : esc(String(Math.round(+v * 100) / 100));
-      const det = [`${c.in_attesa ? "Entry" : "Apertura"} <b>${f(c.p_open != null ? c.p_open : c.prezzo)}</b>`, c.p_close != null ? `Chiusura <b>${f(c.p_close)}</b>` : (c.p_now != null ? `Ora <b>${f(c.p_now)}</b>` : ""),
-        `TP <b>${f(c.tp)}</b>`, `SL <b>${f(c.sl)}</b>`, c.profitto != null ? `P/L <b>${c.profitto} $</b>` : (c.pl != null ? `P/L <b>${c.pl} $</b>` : "")].filter(Boolean).join(" · ");
-      return `${closedTxt ? `<span title="Aperto a ${esc(c.prezzo || "")}${c.profitto != null ? " · profitto " + c.profitto + " $" : ""}">${closedTxt}</span>` : `<span class="badge ${cls}" title="Aperto a ${esc(c.prezzo || "")}">${(c.in_attesa ? "ordine" : "aperto") + res}</span>`}<div class="sub" style="margin-top:4px;line-height:1.5">${det}</div>`;
+      return `${closedTxt ? `<span title="Aperto a ${esc(c.prezzo || "")}${c.profitto != null ? " · profitto " + c.profitto + " $" : ""}">${closedTxt}</span>` : `<span class="badge ${cls}" title="Aperto a ${esc(c.prezzo || "")}">${(c.in_attesa ? "ordine" : "aperto") + res}</span>`}`;
     }
     return `<span class="badge b-err" title="${esc(c.dettaglio || "")}">${c.stato === "rifiutato" ? "rifiutato" : "errore"}</span> <span class="sub">${esc((c.dettaglio || "").slice(0, 60))}</span>`;
   };
@@ -858,8 +855,8 @@ function renderSig(r, ids, manual) {
     const t = new Date(s.t), hh = t.toLocaleTimeString("it-IT", {hour: "2-digit", minute: "2-digit"});
     const dir = s.side ? s.side.toUpperCase() + " " + esc(s.symbol) : `<span class="err">${esc(s.errore || "non letto")}</span>`;
     const nz = v => v === "" || v == null ? "—" : esc(String(Math.round(+v * 100) / 100));          // niente 4098.469999999999
-    return `<tr><td data-l="Ora">${hh}</td><td data-l="Segnale">${chanBadge(s)}<b>${dir}</b></td><td class="r" data-l="Entry">${nz(s.entry)}</td><td class="r" data-l="SL">${nz(s.sl)}</td><td class="r" data-l="TP1">${nz(s.tp1)}</td><td class="r" data-l="TP2">${nz(s.tp2)}</td><td class="r" data-l="TP3">${nz(s.tp3)}</td><td class="wide oc-cell" data-l="${manual ? "Ingresso · rischio" : "Esito Cedric"}">${manual ? `<span class="badge b-off">${({market: "mercato", limit: "limit", stop: "stop"})[s.tipo] || esc(s.tipo)}</span> ${esc(s.rischio)}%${s.parz ? ` · parz. ${esc(s.parz)}% a TP1` : ""}${s.nota ? ` <span class="sub">${esc(s.nota)}</span>` : ""}` : cedric(s)}</td>${accs.map(a => `<td class="wide oc-cell" data-l="Conto ${esc(a.login)} · TP${a.target}">${cell(s.conti[a.login])}</td>`).join("")}</tr>`;
-  }).join("") : `<tr><td colspan="${8 + accs.length}" class="sub" style="padding:14px">${manual ? "Nessun trade manuale per questo giorno." : "Nessun segnale registrato per questo giorno. Se sai che ce ne sono stati, premi «Scarica dal canale»."}</td></tr>`;
+    return `<tr><td data-l="Ora">${hh}</td><td data-l="Segnale"><b class="chname ch${(s.canale_idx || 0) % 4}">${esc(s.canale || (chanNames[0] || "—"))}</b></td><td data-l="Tipo">${s.side ? `<b class="${s.side === "buy" ? "gain" : "loss"}">${s.side.toUpperCase()}</b>` : `<span class="err">${esc(s.errore || "non letto")}</span>`}</td><td class="wide oc-cell" data-l="${manual ? "Ingresso · rischio" : "Esito Cedric"}">${manual ? `<span class="badge b-off">${({market: "mercato", limit: "limit", stop: "stop"})[s.tipo] || esc(s.tipo)}</span> ${esc(s.rischio)}%${s.parz ? ` · parz. ${esc(s.parz)}% a TP1` : ""}${s.nota ? ` <span class="sub">${esc(s.nota)}</span>` : ""}` : cedric(s)}</td>${accs.map(a => `<td class="wide oc-cell" data-l="Conto ${esc(a.login)} · TP${a.target}">${cell(s.conti[a.login])}</td>`).join("")}</tr>`;
+  }).join("") : `<tr><td colspan="${4 + accs.length}" class="sub" style="padding:14px">${manual ? "Nessun trade manuale per questo giorno." : "Nessun segnale registrato per questo giorno. Se sai che ce ne sono stati, premi «Scarica dal canale»."}</td></tr>`;
 }
 $("sload").onclick = loadSignals; $("sdate").onchange = loadSignals; $("schan").onchange = loadSignals;
 $("ssync").onclick = async () => {
