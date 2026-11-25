@@ -28,6 +28,11 @@ Sei l'agente quantitativo di sviluppo e monitoraggio trading. Il tuo compito è:
 - Valida le strategie con `src/backtest_engine.py` prima di usarle per segnali reali.
 - Delega l'analisi quantitativa al sub-agente `quant-analyst`.
 
+## Versioni
+- Numero nel file `VERSION` (MAJOR.MINOR.PATCH), mostrato in alto in Gestione Conti accanto all'ora, con il codice breve di git. Storia in `CHANGELOG.md`.
+- PATCH = correzioni; MINOR = funzioni nuove compatibili (ogni modifica a come si aprono/chiudono gli ordini conta come MINOR); MAJOR = architettura o incompatibilità con dati/impostazioni. MINOR azzera PATCH, MAJOR azzera MINOR e PATCH.
+- Ad ogni rilascio: aggiornare `VERSION` e aggiungere la voce in `CHANGELOG.md` (una correzione che cambia il comportamento degli ordini va annotata comunque).
+
 ## Struttura
 `src/` (ctrader_client, telegram_bot, backtest_engine, journal_manager, desktop_app = finestra desktop di Gestione Conti con pywebview; versione solo-web nel ramo `backup-webapp-2026-11-20`) · `data/` · `knowledge/` · `journal/`
 

@@ -307,15 +307,19 @@ def code_version() -> str:
 
 
 def version_info() -> dict:
-    """Versione del codice in esecuzione (hash breve e data dell'ultimo aggiornamento), letta da git una volta sola."""
+    """Numero di versione (file VERSION, formato MAJOR.MINOR.PATCH) e codice breve dell'ultimo aggiornamento (git), letti una volta sola."""
     global _VERSION
     if _VERSION is None:
         import subprocess
         try:
+            num = (ma.ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        except OSError:
+            num = ""
+        try:
             o = subprocess.run(["git", "log", "-1", "--format=%h|%cs"], capture_output=True, text=True, cwd=str(ma.ROOT), timeout=5).stdout.strip().split("|")
-            _VERSION = {"version": o[0], "version_date": o[1] if len(o) > 1 else ""}
+            _VERSION = {"version": o[0], "version_date": o[1] if len(o) > 1 else "", "version_number": num}
         except Exception:
-            _VERSION = {"version": "", "version_date": ""}
+            _VERSION = {"version": "", "version_date": "", "version_number": num}
     return _VERSION
 
 

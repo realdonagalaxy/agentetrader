@@ -475,7 +475,7 @@ $("spgo").onclick = async () => {
 async function refresh() {
   if (busy) return; busy = true;
   try {
-    const j = await api("/api/accounts"); accounts = j.accounts; document.documentElement.classList.toggle("nosig", !j.signals); if (j.version) { $("ver").hidden = $("versep").hidden = false; $("ver").textContent = "versione " + j.version; } $("sim").hidden = !j.simulator; render();
+    const j = await api("/api/accounts"); accounts = j.accounts; document.documentElement.classList.toggle("nosig", !j.signals); if (j.version_number || j.version) { $("ver").hidden = $("versep").hidden = false; $("ver").textContent = "versione " + (j.version_number || "") + (j.version ? (j.version_number ? " (" + j.version + ")" : j.version) : ""); } $("sim").hidden = !j.simulator; render();
     for (const a of accounts.filter(x => x.enabled)) { status[a.id] = await api(`/api/accounts/${a.id}/status`); render(); renderPending(); }
     renderPending();
     $("upd").textContent = "Aggiornato " + new Date().toLocaleTimeString("it-IT");
